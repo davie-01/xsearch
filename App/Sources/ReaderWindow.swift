@@ -195,7 +195,8 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             pdfView.document = nil
             pdfView.isHidden = true
             textPane.isHidden = false
-            textPane.show(PreviewData(document: doc, highlights: stale ? [] : data.highlights), path: path)
+            textPane.show(PreviewData(document: doc, highlights: stale ? [] : data.highlights), path: path,
+                          location: shownHit.flatMap { $0.isMember ? $0.displayLocation : nil })
             externalButton.isHidden = true
         }
         table.reloadData()

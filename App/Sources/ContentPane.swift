@@ -303,9 +303,11 @@ final class PreviewPane: NSView {
 
     /// Shows a stored document. When the file changed after indexing, no highlights are drawn
     /// (offsets would point at the wrong text) and a notice explains it (UI-SPEC §6.3, §7).
-    func show(_ data: PreviewData, path: String) {
+    /// `location` replaces the folder line (an archive member's "包.zip › 目录").
+    func show(_ data: PreviewData, path: String, location: String? = nil) {
         let doc = data.document
         currentPath = path
+        locationOverride = location
         placeholder.isHidden = true
         for v in [prev, next, locate] { v.isHidden = false }
         title.stringValue = doc.name
@@ -330,7 +332,7 @@ final class PreviewPane: NSView {
         currentHit = -1
         if hits.isEmpty {
             position.stringValue = stale ? "" : "没有可定位的命中"
-            subtitle.stringValue = PathUtil.abbreviate((path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
+            subtitle.stringValue = locationOverride ?? PathUtil.abbreviate((path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
             textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
         } else {
             go(to: 0)
@@ -361,12 +363,13 @@ final class PreviewPane: NSView {
         marks.current = currentHit
         position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处"
         let loc = anchors.last { $0.utf16 <= r.location }?.info.location
-        subtitle.stringValue = [PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
+        subtitle.stringValue = [locationOverride ?? PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
         ruler.needsDisplay = true
     }
 
     private var currentPath = ""
     private var subtitlePath: String { (currentPath as NSString).deletingLastPathComponent }
+    private var locationOverride: String?
 
     /// 1-based line of the current hit in the stored text (editor "open at line").
     var currentLine: Int? {
@@ -527,7 +530,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let path = h.dir + "/" + h.name
         let show: @MainActor @Sendable (PreviewData?) -> Void = { [weak self] data in
             guard let self, token == self.previewToken else { return }
-            if let data { self.preview.show(data, path: path) } else { self.preview.clear() }
+            if let data { self.preview.show(data, path: path, location: h.isMember ? h.displayLocation : nil) } else { self.preview.clear() }
         }
         if liveIds.contains(h.fileId) {
             searcher.livePreview(path: path, expression: expression, deliver: show)

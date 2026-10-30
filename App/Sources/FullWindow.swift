@@ -476,7 +476,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
             let token = previewToken
             content.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
                 guard let self, token == self.previewToken else { return }
-                if let data { self.textPreview.show(data, path: row.path) } else { self.textPreview.clear() }
+                if let data { self.textPreview.show(data, path: row.path, location: hit.isMember ? hit.displayLocation : nil) } else { self.textPreview.clear() }
             }
         } else {
             textPreview.isHidden = true

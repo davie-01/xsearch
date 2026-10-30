@@ -653,6 +653,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             setContentNotice(out)
         }
         contentPane.show(out)
+        // Dev: XS_OPEN_FIRST=1 opens the first content result once, as ↵ would.
+        if ProcessInfo.processInfo.environment["XS_OPEN_FIRST"] == "1", !autoOpened, let h = contentPane.selected {
+            autoOpened = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.openContent(h, reveal: false) }
+        }
         updateStatus()
         resize()
     }
@@ -694,6 +699,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     private var autoScanned = false
+    private var autoOpened = false
 
     private func uncoveredDirs(_ q: ContentQuery) -> [String] {
         let roots = Preferences.shared.contentScope.roots(home: NSHomeDirectory())
