@@ -27,6 +27,15 @@ final class Preferences {
         set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "contentScope") }
     }
 
+    /// Settings → 搜索语法 (ARCHITECTURE §12).
+    var querySyntax: QuerySyntax {
+        get {
+            guard let data = defaults.data(forKey: "querySyntax"), let s = try? JSONDecoder().decode(QuerySyntax.self, from: data) else { return .default }
+            return s
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "querySyntax") }
+    }
+
     var hotKey: HotKey.Combo {
         get {
             guard let data = defaults.data(forKey: "hotKey"), let c = try? JSONDecoder().decode(HotKey.Combo.self, from: data) else { return .optionSpace }

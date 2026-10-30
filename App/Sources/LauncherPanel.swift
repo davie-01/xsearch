@@ -560,7 +560,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let text = field.stringValue
         contentChip.isHidden = mode != .content
         if mode == .content {
-            session.content.search(text, home: NSHomeDirectory()) { [weak self] out in self?.applyContent(out) }
+            session.content.search(text, home: NSHomeDirectory(), syntax: Preferences.shared.querySyntax) { [weak self] out in self?.applyContent(out) }
             return
         }
         session.content.cancel()
@@ -861,19 +861,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func showSyntaxHelp() {
         let pop = NSPopover()
         pop.behavior = .transient
-        let label = NSTextField(wrappingLabelWithString: """
-            名称模式语法
-            空格：同时包含多个词（如 报告 2024）
-            "a b"：把空格当作文字
-            dir:路径  限定目录，可写多个，支持 ~/
-            dir:合同/2024  按目录名片段限定
-            ext:pdf;docx  按扩展名过滤
-            kind:文件夹 / 应用 / pdf / doc / 图片 …
-
-            运算符（| -）、通配符、正则在后续版本提供，目前按普通字符搜索。
-            """)
-        label.font = .systemFont(ofSize: 12.5)
-        label.preferredMaxLayoutWidth = 320
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.attributedStringValue = Self.syntaxHelp(mode: mode, syntax: Preferences.shared.querySyntax)
+        label.preferredMaxLayoutWidth = 380
         let vc = NSViewController()
         let box = NSView()
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -887,6 +877,46 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         vc.view = box
         pop.contentViewController = vc
         pop.show(relativeTo: field.bounds, of: field, preferredEdge: .maxY)
+    }
+
+    /// ⌘/ cheat sheet; switched-off syntax is marked (ARCHITECTURE §12).
+    static func syntaxHelp(mode: Preferences.Mode, syntax: QuerySyntax) -> NSAttributedString {
+        let s = NSMutableAttributedString()
+        let body: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.labelColor]
+        let code: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor]
+        let off: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.systemOrange]
+        func title(_ t: String) {
+            if s.length > 0 { s.append(NSAttributedString(string: "\n")) }
+            s.append(NSAttributedString(string: t + "\n", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.labelColor]))
+        }
+        func row(_ example: String, _ text: String, enabled: Bool = true) {
+            s.append(NSAttributedString(string: example, attributes: code))
+            s.append(NSAttributedString(string: "  " + text, attributes: body))
+            if !enabled { s.append(NSAttributedString(string: "（已关闭，按普通字符搜索）", attributes: off)) }
+            s.append(NSAttributedString(string: "\n"))
+        }
+        title(mode == .name ? "名称模式语法" : "内容模式语法")
+        row("报告 2024", "同时包含多个词")
+        row("\"a b\"", "引号里的空格当作文字")
+        row("甲 | 乙", "任一即可", enabled: syntax.operators)
+        row("-草稿", "排除", enabled: syntax.operators)
+        row("(甲 | 乙) 丙", "分组", enabled: syntax.operators)
+        if mode == .name {
+            row("*.pdf  报告?.docx", "通配符：* 不跨目录，? 匹配一个字符", enabled: syntax.wildcards)
+            row("**/合同/*.pdf", "含 / 时匹配完整路径，** 可跨目录", enabled: syntax.wildcards)
+            row("regex:^\\d+\\.txt$", "正则匹配文件名（含 / 时匹配路径）", enabled: syntax.regex)
+        } else {
+            row("\"合同 金额\"~10", "邻近：几个词相距不超过 10 个字，顺序不限", enabled: syntax.proximity)
+            row("regex:HT-\\d{4}", "正则扫描已提取的正文；需含 3 字节以上的固定文字，或搭配 dir:/ext:", enabled: syntax.regex)
+        }
+        title("过滤条件")
+        row("dir:~/文稿", mode == .name ? "限定目录，可写多个；也可写目录名片段 dir:合同/2024" : "限定目录（完整路径），可写多个")
+        row("ext:pdf;docx", "扩展名")
+        if mode == .name { row("kind:文件夹", "类型：文件夹 / 应用 / pdf / doc / 图片 …") }
+        row("size:>10mb", "大小：> >= < <=、1m..10m、empty")
+        row("dm:today", "修改时间：today / 本周 / 7d / 2024-05 / >=2025 / 2024..2025-06")
+        s.append(NSAttributedString(string: "\n可在 设置 → 通用 → 搜索语法 中开关各项语法。", attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        return s
     }
 
     // MARK: Quick Look

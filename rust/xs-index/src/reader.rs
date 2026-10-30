@@ -17,7 +17,7 @@ use tantivy::{
 };
 use xs_core::{
     normalize::{Mode, Normalized, normalize, normalize_prefix, normalize_text},
-    query::{Expr, name_key},
+    query::{Expr, name_key, near_match, regex_for, required_literal},
 };
 
 /// How candidates were found, so the UI can explain cost and completeness (UI-SPEC §7).
@@ -202,12 +202,21 @@ fn bytes_of(d: &TantivyDocument, f: tantivy::schema::Field) -> &[u8] {
     d.get_first(f).and_then(|v| v.as_bytes()).unwrap_or(b"[]")
 }
 
-/// Query with literals normalized once for the verification mode.
+/// Query with literals normalized (and regexes compiled) once for the verification mode.
 enum Compiled {
     Literal(String),
     And(Vec<Compiled>),
     Or(Vec<Compiled>),
     Not(Box<Compiled>),
+    Near(Vec<String>, u32),
+    Regex(regex::Regex),
+}
+
+/// What a hit can point at: a normalized literal or a regex match.
+#[derive(Clone)]
+enum Pat {
+    Lit(String),
+    Re(regex::Regex),
 }
 
 impl Compiled {
@@ -217,6 +226,9 @@ impl Compiled {
             Expr::And(xs) => Self::And(xs.iter().map(|x| Self::new(x, mode)).collect()),
             Expr::Or(xs) => Self::Or(xs.iter().map(|x| Self::new(x, mode)).collect()),
             Expr::Not(x) => Self::Not(Box::new(Self::new(x, mode))),
+            Expr::Near { terms, slop } => Self::Near(terms.iter().map(|t| normalize_text(t, mode)).collect(), *slop),
+            // Patterns were validated by the parser; an impossible one matches nothing.
+            Expr::Regex(p) => Self::Regex(regex_for(p, mode).unwrap_or_else(|_| regex::Regex::new(r"[^\s\S]").unwrap())),
         }
     }
 
@@ -226,23 +238,28 @@ impl Compiled {
             Self::And(xs) => xs.iter().all(|x| x.matches(text)),
             Self::Or(xs) => xs.iter().any(|x| x.matches(text)),
             Self::Not(x) => !x.matches(text),
+            Self::Near(terms, slop) => near_match(text, terms, *slop),
+            Self::Regex(r) => r.is_match(text),
         }
     }
 
-    /// Literals not under a NOT: the ones a hit can point at.
-    fn positives(&self) -> Vec<String> {
-        fn walk(c: &Compiled, out: &mut Vec<String>) {
+    /// Literals and patterns not under a NOT: the ones a hit can point at.
+    fn positives(&self) -> Vec<Pat> {
+        fn walk(c: &Compiled, lits: &mut Vec<String>, res: &mut Vec<Pat>) {
             match c {
-                Compiled::Literal(s) => out.push(s.clone()),
-                Compiled::And(xs) | Compiled::Or(xs) => xs.iter().for_each(|x| walk(x, out)),
+                Compiled::Literal(s) => lits.push(s.clone()),
+                Compiled::Near(terms, _) => lits.extend(terms.iter().cloned()),
+                Compiled::Regex(r) => res.push(Pat::Re(r.clone())),
+                Compiled::And(xs) | Compiled::Or(xs) => xs.iter().for_each(|x| walk(x, lits, res)),
                 Compiled::Not(_) => {}
             }
         }
-        let mut out = vec![];
-        walk(self, &mut out);
-        out.retain(|s| !s.is_empty());
-        out.sort();
-        out.dedup();
+        let (mut lits, mut out) = (vec![], vec![]);
+        walk(self, &mut lits, &mut out);
+        lits.retain(|s| !s.is_empty());
+        lits.sort();
+        lits.dedup();
+        out.extend(lits.into_iter().map(Pat::Lit));
         out
     }
 }
@@ -321,6 +338,9 @@ impl Planner {
                     parts.into_iter().flatten().collect(),
                 )))
             }
+            Expr::Near { terms, .. } => self.plan(&Expr::And(terms.iter().cloned().map(Expr::Literal).collect())),
+            // A regex narrows recall only through a literal every match must contain.
+            Expr::Regex(p) => required_literal(p).and_then(|l| self.plan(&Expr::Literal(l))),
             // NOT cannot narrow recall; it is applied during verification.
             Expr::Not(_) => None,
         }
@@ -336,7 +356,7 @@ pub struct SearchSession {
     f: Fields,
     mode: Mode,
     compiled: Compiled,
-    positives: Vec<String>,
+    positives: Vec<Pat>,
     candidates: Vec<DocAddress>,
     next: usize,
     pub recall: Recall,
@@ -496,9 +516,16 @@ impl SearchSession {
 
 /// Normalized-byte ranges of every occurrence of `literals` (normalized for the mode), sorted,
 /// overlaps merged.
-fn occurrences(norm: &str, literals: &[String]) -> Vec<Range<usize>> {
+fn occurrences(norm: &str, literals: &[Pat]) -> Vec<Range<usize>> {
     let mut out: Vec<Range<usize>> = vec![];
-    for lit in literals {
+    for pat in literals {
+        let lit = match pat {
+            Pat::Lit(l) => l,
+            Pat::Re(r) => {
+                out.extend(r.find_iter(norm).filter(|m| !m.is_empty()).map(|m| m.range()));
+                continue;
+            }
+        };
         let mut from = 0;
         while let Some(pos) = norm[from..].find(lit.as_str()) {
             let b = from + pos;
@@ -519,14 +546,14 @@ fn occurrences(norm: &str, literals: &[String]) -> Vec<Range<usize>> {
 }
 
 /// Hit count and the normalized byte offset where the first hit ends.
-fn count_hits(norm: &str, literals: &[String]) -> (u32, Option<usize>) {
+fn count_hits(norm: &str, literals: &[Pat]) -> (u32, Option<usize>) {
     let occ = occurrences(norm, literals);
     (occ.len() as u32, occ.first().map(|r| r.end))
 }
 
 /// Source scalar ranges of every hit in an already normalized text (merged after mapping:
 /// expansions such as "ﬁ" → "fi" can map neighbouring hits onto one source scalar).
-fn hit_ranges(n: &Normalized, literals: &[String]) -> Vec<Range<usize>> {
+fn hit_ranges(n: &Normalized, literals: &[Pat]) -> Vec<Range<usize>> {
     let mut scalar_at = vec![0usize; n.text.len() + 1];
     let mut count = 0;
     for (b, _) in n.text.char_indices() {
@@ -570,7 +597,7 @@ const AFTER: usize = 32;
 fn snippet(
     text: &str,
     mode: Mode,
-    literals: &[String],
+    literals: &[Pat],
     first_end: Option<usize>,
 ) -> (String, Vec<Range<u32>>) {
     let Some(first_end) = first_end else {

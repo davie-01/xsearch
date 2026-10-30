@@ -240,3 +240,32 @@ func check(_ view: NameView, _ o: Oracle, _ label: String) {
     let view = NameView(base: NameSnapshot.build(Array(o.records.values), seq: 1, fingerprint: "t"))
     #expect(view.search(NameQuery.parse("sj", home: "/")).hits.map(\.fileId) == [lit])
 }
+
+@Test func complexQueriesFilterAndRank() {
+    var o = Oracle()
+    let root = o.add(parent: 0, name: "/", dir: true, root: "/")
+    let work = o.add(parent: root, name: "合同", dir: true)
+    let old = o.add(parent: root, name: "旧合同", dir: true)
+    let a = o.add(parent: work, name: "采购合同.pdf", dir: false)
+    let b = o.add(parent: work, name: "采购合同-草稿.docx", dir: false)
+    let c = o.add(parent: old, name: "租赁合同.pdf", dir: false)
+    let d = o.add(parent: root, name: "report-2024.txt", dir: false)
+    let view = NameView(base: NameSnapshot.build(Array(o.records.values), seq: 1, fingerprint: "t"))
+    func ids(_ s: String, _ syntax: QuerySyntax = .default) -> Set<Int64> {
+        Set(view.search(NameQuery.parse(s, home: "/", syntax: syntax), limit: 100).hits.map(\.fileId))
+    }
+    #expect(ids("合同 -草稿") == [work, old, a, c])
+    #expect(ids("租赁 | 采购 -docx") == [a, c])
+    #expect(ids("*.pdf") == [a, c])
+    #expect(ids("合同/*.pdf") == [a])
+    #expect(ids("**/合同/**") == [a, b])
+    #expect(ids(#"regex:^report-\d{4}"#) == [d])
+    #expect(ids(#"regex:合同/.*\.pdf$"#) == [a, c])
+    #expect(ids("合同 -草稿", QuerySyntax(operators: false)) == [b])
+    // Oracle sizes are id * 7, mtimes id % 97; size: skips folders.
+    #expect(ids("合同 size:>=\(a * 7)") == [a, b, c])
+    #expect(ids("合同 size:<\(a * 7)").isEmpty)
+    #expect(ids("合同 dm:<=1970-01-01").count == 5)
+    // Ranking still follows the first positive literal.
+    #expect(view.search(NameQuery.parse("采购合同 | 租赁", home: "/"), limit: 10).hits.first?.fileId == a)
+}

@@ -71,9 +71,10 @@ final class SearchSession {
         latest += 1
         let id = latest
         let names = self.names, usage = self.usage, apps = self.apps, home = self.home
+        let syntax = Preferences.shared.querySyntax
         queue.async {
             let start = DispatchTime.now()
-            let q = NameQuery.parse(text, home: home)
+            let q = NameQuery.parse(text, home: home, syntax: syntax)
             var items: [ResultItem] = []
             var total = 0
             var unresolved: [String] = []

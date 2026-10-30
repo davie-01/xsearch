@@ -61,9 +61,9 @@ final class ContentSearcher: @unchecked Sendable {
         lock.unlock()
     }
 
-    func search(_ text: String, home: String, deliver: @escaping @MainActor @Sendable (ContentOutput) -> Void) {
+    func search(_ text: String, home: String, syntax: QuerySyntax, deliver: @escaping @MainActor @Sendable (ContentOutput) -> Void) {
         cancel()
-        let q = ContentQuery.parse(text, home: home)
+        let q = ContentQuery.parse(text, home: home, syntax: syntax)
         lock.lock()
         let gen = generation
         lock.unlock()
@@ -98,7 +98,8 @@ final class ContentSearcher: @unchecked Sendable {
         do {
             search = try index.search(query: q.expression, mode: mode, filters: SearchFilters(dirs: q.dirs, exts: q.exts, scopes: []))
         } catch EngineError.Query(let message) {
-            out.error = "查询无法解析：\(message)"
+            // Engine messages in Chinese are already user-facing (regex needs a scope…).
+            out.error = message.unicodeScalars.contains { $0.value >= 0x4E00 } ? message : "查询无法解析：\(message)"
             DispatchQueue.main.async { deliver(out) }
             return
         } catch {
@@ -116,8 +117,10 @@ final class ContentSearcher: @unchecked Sendable {
         while isCurrent(gen) {
             // First screen within ~60 ms; later batches are larger.
             guard let b = try? search.next(budgetMs: first ? 60 : 120, maxHits: first ? 40 : 200) else { break }
-            shown += b.hits.count
-            out.hits = b.hits
+            // size: / dm: are checked here, after verification.
+            let hits = q.size == nil && q.modified == nil ? b.hits : b.hits.filter { q.allows(size: $0.size, mtime: $0.mtime) }
+            shown += hits.count
+            out.hits = hits
             out.append = !first
             out.verified = b.verified
             out.candidates = b.candidates

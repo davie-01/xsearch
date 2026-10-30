@@ -1940,6 +1940,8 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "encoding_rs",
+ "regex",
+ "regex-syntax",
  "roxmltree",
  "rusqlite",
  "serde",
@@ -1967,6 +1969,7 @@ name = "xs-index"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "regex",
  "serde",
  "serde_json",
  "tantivy",

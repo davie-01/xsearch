@@ -104,7 +104,8 @@ pub fn bloom_pass(filter: &[u8], e: &Expr) -> bool {
             }),
         Expr::And(xs) => xs.iter().all(|x| bloom_pass(filter, x)),
         Expr::Or(xs) => xs.iter().any(|x| bloom_pass(filter, x)),
-        Expr::Not(_) => true,
+        Expr::Near { terms, .. } => terms.iter().all(|t| bloom_pass(filter, &Expr::Literal(t.clone()))),
+        Expr::Not(_) | Expr::Regex(_) => true,
     }
 }
 impl Engine {
@@ -306,7 +307,10 @@ impl Engine {
             Expr::Or(xs) => Box::new(BooleanQuery::union(
                 xs.iter().map(|x| self.plan(x, pair_scan)).collect(),
             )),
-            Expr::Not(_) => Box::new(AllQuery),
+            Expr::Near { terms, .. } => Box::new(BooleanQuery::intersection(
+                terms.iter().map(|t| self.plan(&Expr::Literal(t.clone()), pair_scan)).collect(),
+            )),
+            Expr::Not(_) | Expr::Regex(_) => Box::new(AllQuery),
         }
     }
     pub fn search(&self, e: &Expr, mode: Mode, pair_scan: bool) -> Result<SearchResult> {

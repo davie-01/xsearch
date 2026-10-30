@@ -340,3 +340,42 @@ fn refuses_foreign_or_missing_index() {
     let err = ContentReader::open(tmp.path()).err().unwrap().to_string();
     assert!(err.contains("rebuild"), "{err}");
 }
+
+#[test]
+fn proximity_and_regex() {
+    use xs_core::query::{near_match, required_literal};
+    assert_eq!(
+        parse(r#""合同 金额"~5 -草稿"#).unwrap(),
+        Expr::And(vec![
+            Expr::Near { terms: vec!["合同".into(), "金额".into()], slop: 5 },
+            Expr::Not(Box::new(Expr::Literal("草稿".into()))),
+        ])
+    );
+    // A single word or a missing number stays a plain quoted literal.
+    assert_eq!(parse(r#""合同"~5"#).unwrap(), Expr::And(vec![Expr::Literal("合同".into()), Expr::Literal("~5".into())]));
+    assert_eq!(parse(r"regex:(a|b)\d+ x").unwrap(), Expr::And(vec![Expr::Regex(r"(a|b)\d+".into()), Expr::Literal("x".into())]));
+    assert!(parse("regex:(").is_err() && parse("regex:").is_err());
+    assert_eq!(required_literal(r"合同编号\d{4}"), Some("合同编号".into()));
+    assert_eq!(required_literal(r"(foo|bar)\d"), None);
+    assert!(near_match("合同的总金额", &["金额".into(), "合同".into()], 2));
+    assert!(!near_match("合同的总金额", &["金额".into(), "合同".into()], 1));
+    assert!(near_match("金额 xx 合同", &["合同".into(), "金额".into()], 4));
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    let texts = ["合同金额为 100 万元", "合同正文……很长的一段话……最后写金额", "编号 HT-2024-0031 的合同", "编号 HT-24 草稿"];
+    for (i, t) in texts.iter().enumerate() {
+        w.put(&doc(i as u64 + 1, t)).unwrap();
+    }
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    let req = |q: &str| SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] };
+    assert_eq!(run_all(&reader, req(r#""合同 金额"~3"#)).0, BTreeSet::from([1]));
+    assert_eq!(run_all(&reader, req(r#""合同 金额"~30"#)).0, BTreeSet::from([1, 2]));
+    let (ids, recall, _) = run_all(&reader, req(r"regex:ht-\d{4}-\d+"));
+    assert_eq!((ids, recall), (BTreeSet::from([3]), Recall::Trigram));
+    let (ids, recall, _) = run_all(&reader, req(r"regex:\d{2}"));
+    assert_eq!((ids, recall), (BTreeSet::from([1, 3, 4]), Recall::Scan));
+    let hl = reader.highlights(3, &parse(r"regex:HT-\d+").unwrap(), Mode::Loose).unwrap();
+    assert_eq!(hl, vec![3..10]);
+}

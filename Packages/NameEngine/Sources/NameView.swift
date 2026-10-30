@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 import XSearchCore
 
 /// Base snapshot + incremental overlay (ARCHITECTURE §7). Immutable: queries hold one view while
@@ -281,7 +282,8 @@ public struct NameView: Sendable {
         }
 
         let scanned = ranges.reduce(0) { $0 + $1.count }
-        let levels = scanned >= base.keys.count / 2 ? matcher.levels(base.keys) : nil
+        // Path patterns depend on the entry, not only its name key: no per-key cache then.
+        let levels = !matcher.needsPath && scanned >= base.keys.count / 2 ? matcher.levels(base.keys) : nil
         var top = TopK(limit: limit)
         var total = 0
         let overlayEmpty = overlay.isEmpty
@@ -291,11 +293,18 @@ public struct NameView: Sendable {
                 for i in range {
                     let k = base.keyId(of: i)
                     let level: UInt8
-                    if let levels { level = levels[k] } else { level = matcher.level(keyBytes, base.keys.range(k)) }
+                    let id = base.fileIds[i]
+                    if let levels {
+                        level = levels[k]
+                    } else if matcher.needsPath {
+                        level = matcher.level(keyBytes, base.keys.range(k)) { self.path(id).map(NameKey.bytes) }
+                    } else {
+                        level = matcher.level(keyBytes, base.keys.range(k))
+                    }
                     if level == 0 { continue }
                     let f = EntryFlags(rawValue: base.flags[i])
                     if !matcher.kindAllowed(f, extAllowed: level & 0x80 != 0) { continue }
-                    let id = base.fileIds[i]
+                    if !matcher.metaAllowed(f, size: base.sizes[i], mtime: base.mtimes[i]) { continue }
                     if !overlayEmpty && overlay[id] != nil { continue }
                     if isRootFlag(i) { continue }
                     if needWalk && !inTargets(id) { continue }
@@ -306,8 +315,9 @@ public struct NameView: Sendable {
         }
         for (id, node) in overlay {
             guard let r = node.record else { continue }
-            let level = node.key.withUnsafeBufferPointer { matcher.level($0, 0..<$0.count) }
+            let level = node.key.withUnsafeBufferPointer { matcher.level($0, 0..<$0.count) { self.path(id).map(NameKey.bytes) } }
             if level == 0 || !matcher.kindAllowed(r.flags, extAllowed: level & 0x80 != 0) { continue }
+            if !matcher.metaAllowed(r.flags, size: r.size, mtime: r.mtime) { continue }
             if r.parentId == 0 && r.rootPath == "/" { continue }
             if targets != nil && !inTargets(id) { continue }
             total += 1
@@ -343,18 +353,62 @@ func mergeRanges(_ sorted: [Range<Int>]) -> [Range<Int>] {
 }
 
 /// Term matching on folded keys. A level byte carries the match level in the low 7 bits and
-/// "extension allowed" in the high bit.
+/// "extension allowed" in the high bit. Plain AND-ed literals take the memmem fast path; other
+/// queries evaluate the expression tree, ranked by their first positive literal.
 struct Matcher {
+    indirect enum Node {
+        case literal([UInt8])
+        case glob(Glob)
+        case regex(NSRegularExpression, path: Bool)
+        case and([Node])
+        case or([Node])
+        case not(Node)
+    }
+
     let terms: [[UInt8]]
+    let tree: Node?
+    let rankTerm: [UInt8]?
+    let needsPath: Bool
     let extensions: Set<[UInt8]>
     let kinds: Set<FileKind>
     let kindExtensions: Set<[UInt8]>
+    let size: ClosedRange<Int64>?
+    let modified: ClosedRange<Int64>?
 
     init(_ q: NameQuery) {
-        terms = q.termKeys
         extensions = Set(q.extensions.map { Array($0.utf8) })
         kinds = q.kinds
         kindExtensions = Set(q.kinds.flatMap(\.extensions).map { Array($0.utf8) })
+        size = q.size
+        modified = q.modified
+        if q.isSimple {
+            terms = q.termKeys
+            tree = nil
+            rankTerm = nil
+            needsPath = false
+            return
+        }
+        terms = []
+        var path = false
+        func compile(_ e: NameExpr) -> Node {
+            switch e {
+            case .literal(_, let key): return .literal(key)
+            case .wildcard(let g):
+                path = path || g.fullPath
+                return .glob(g)
+            case .regex(let p):
+                let full = p.contains("/")
+                path = path || full
+                // Validated by the parser; keys are case-folded already.
+                return .regex(try! NSRegularExpression(pattern: p, options: [.caseInsensitive]), path: full)
+            case .and(let xs): return .and(xs.map(compile))
+            case .or(let xs): return .or(xs.map(compile))
+            case .not(let x): return .not(compile(x))
+            }
+        }
+        tree = q.expr.map(compile)
+        needsPath = path
+        rankTerm = q.terms.first.map(NameKey.bytes)
     }
 
     func levels(_ pool: StringPool) -> [UInt8] {
@@ -363,36 +417,80 @@ struct Matcher {
         }
     }
 
-    func level(_ bytes: UnsafeBufferPointer<UInt8>, _ r: Range<Int>) -> UInt8 {
+    /// `path` gives the entry's folded full path; only path patterns call it.
+    func level(_ bytes: UnsafeBufferPointer<UInt8>, _ r: Range<Int>, path: (() -> [UInt8]?)? = nil) -> UInt8 {
         let base = bytes.baseAddress! + r.lowerBound
         let n = r.count
         var best: UInt8 = 1
-        for (t, term) in terms.enumerated() {
-            let found: UInt8 = term.withUnsafeBufferPointer { tb in
-                guard tb.count <= n else { return 0 }
-                guard let first = memmem(base, n, tb.baseAddress!, tb.count) else { return 0 }
-                if t > 0 { return 1 }
-                // Ranking uses the first term only.
-                let pos = UnsafeRawPointer(first) - UnsafeRawPointer(base)
-                if tb.count == n { return 4 }
-                // Stem equality: `report` vs `report.pdf`, `Safari` vs `Safari.app`.
-                if pos == 0 && base[tb.count] == 0x2E && memchr(base + tb.count + 1, 0x2E, n - tb.count - 1) == nil { return 4 }
-                if pos == 0 { return 3 }
-                var p = pos
-                while true {
-                    if isSeparator(base[p - 1]) { return 2 }
-                    let start = p + 1
-                    guard start + tb.count <= n, let next = memmem(base + start, n - start, tb.baseAddress!, tb.count) else { return 1 }
-                    p = UnsafeRawPointer(next) - UnsafeRawPointer(base)
-                }
+        if let tree {
+            let key = UnsafeBufferPointer(start: base, count: n)
+            var cached: [UInt8]??
+            let lazyPath: () -> [UInt8]? = {
+                if cached == nil { cached = .some(path?()) }
+                return cached!
             }
-            if found == 0 { return 0 }
-            if t == 0 { best = found }
+            guard eval(tree, key, lazyPath) else { return 0 }
+            if let rankTerm { best = max(1, rank(base, n, rankTerm)) }
+        } else {
+            for (t, term) in terms.enumerated() {
+                let found = t == 0 ? rank(base, n, term) : (contains(base, n, term) ? 1 : 0)
+                if found == 0 { return 0 }
+                if t == 0 { best = found }
+            }
         }
         guard !extensions.isEmpty || !kindExtensions.isEmpty else { return best | 0x80 }
         let ext = keyExtension(UnsafeBufferPointer(start: base, count: n)).map(Array.init) ?? []
         if !extensions.isEmpty && !extensions.contains(ext) { return 0 }
         return kindExtensions.contains(ext) ? best | 0x80 : best
+    }
+
+    func eval(_ node: Node, _ key: UnsafeBufferPointer<UInt8>, _ path: () -> [UInt8]?) -> Bool {
+        switch node {
+        case .literal(let term): return contains(key.baseAddress!, key.count, term)
+        case .glob(let g):
+            guard g.fullPath else { return g.matches(key) }
+            guard g.nameMayMatch(key), let p = path() else { return false }
+            return g.matches(p)
+        case .regex(let re, let full):
+            let subject: String
+            if full { guard let p = path() else { return false }; subject = String(decoding: p, as: UTF8.self) } else { subject = String(decoding: key, as: UTF8.self) }
+            return re.firstMatch(in: subject, range: NSRange(subject.startIndex..., in: subject)) != nil
+        case .and(let xs): return xs.allSatisfy { eval($0, key, path) }
+        case .or(let xs): return xs.contains { eval($0, key, path) }
+        case .not(let x): return !eval(x, key, path)
+        }
+    }
+
+    func contains(_ base: UnsafePointer<UInt8>, _ n: Int, _ term: [UInt8]) -> Bool {
+        term.withUnsafeBufferPointer { tb in tb.count == 0 || (tb.count <= n && memmem(base, n, tb.baseAddress!, tb.count) != nil) }
+    }
+
+    /// 4 exact (or stem), 3 prefix, 2 word boundary, 1 substring, 0 absent.
+    func rank(_ base: UnsafePointer<UInt8>, _ n: Int, _ term: [UInt8]) -> UInt8 {
+        term.withUnsafeBufferPointer { tb in
+            guard tb.count > 0 else { return 1 }
+            guard tb.count <= n else { return 0 }
+            guard let first = memmem(base, n, tb.baseAddress!, tb.count) else { return 0 }
+            let pos = UnsafeRawPointer(first) - UnsafeRawPointer(base)
+            if tb.count == n { return 4 }
+            // Stem equality: `report` vs `report.pdf`, `Safari` vs `Safari.app`.
+            if pos == 0 && base[tb.count] == 0x2E && memchr(base + tb.count + 1, 0x2E, n - tb.count - 1) == nil { return 4 }
+            if pos == 0 { return 3 }
+            var p = pos
+            while true {
+                if isSeparator(base[p - 1]) { return 2 }
+                let start = p + 1
+                guard start + tb.count <= n, let next = memmem(base + start, n - start, tb.baseAddress!, tb.count) else { return 1 }
+                p = UnsafeRawPointer(next) - UnsafeRawPointer(base)
+            }
+        }
+    }
+
+    /// `size:` applies to files only; `dm:` to everything.
+    func metaAllowed(_ f: EntryFlags, size s: Int64, mtime: Int64) -> Bool {
+        if let size, f.contains(.directory) || !size.contains(s) { return false }
+        if let modified, !modified.contains(mtime) { return false }
+        return true
     }
 
     func kindAllowed(_ f: EntryFlags, extAllowed: Bool) -> Bool {

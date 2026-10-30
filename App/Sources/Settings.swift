@@ -27,6 +27,7 @@ final class SettingsModel: ObservableObject {
     @Published var recording = false
     @Published var summonMode: Preferences.SummonMode
     @Published var launchAtLogin: Bool
+    @Published var syntax: QuerySyntax { didSet { Preferences.shared.querySyntax = syntax } }
     @Published var newRule = ""
     @Published var content: ContentScope
     @Published var contentStatus: ContentIndexer.Status?
@@ -43,6 +44,7 @@ final class SettingsModel: ObservableObject {
         hotKey = Preferences.shared.hotKey
         summonMode = Preferences.shared.summonMode
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        syntax = Preferences.shared.querySyntax
         content = delegate.currentContentScope
         contentStatus = delegate.contentStatus
     }
@@ -244,6 +246,12 @@ struct GeneralPane: View {
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
+        }
+        Card(title: "搜索语法", subtitle: "关闭后对应符号按普通字符搜索；按 ⌘/ 查看速查") {
+            Toggle("运算符：| 任一、- 排除、括号分组（两种模式）", isOn: $model.syntax.operators)
+            Toggle("通配符：* ? **（名称模式）", isOn: $model.syntax.wildcards)
+            Toggle("正则：regex:…", isOn: $model.syntax.regex)
+            Toggle("邻近查询：\"甲 乙\"~N（内容模式）", isOn: $model.syntax.proximity)
         }
     }
 }

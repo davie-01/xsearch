@@ -19,4 +19,6 @@ tempfile.workspace = true
 zip.workspace = true
 roxmltree.workspace = true
 encoding_rs.workspace = true
+regex.workspace = true
+regex-syntax.workspace = true
 

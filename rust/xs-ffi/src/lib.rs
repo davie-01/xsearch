@@ -214,7 +214,14 @@ impl ContentIndex {
             exts: filters.exts,
             scopes: filters.scopes,
         };
+        let scoped = !req.dirs.is_empty() || !req.exts.is_empty();
+        let has_regex = req.expr.has_regex();
         let session = self.reader.session(req)?;
+        if has_regex && !scoped && session.recall == idx::Recall::Scan {
+            return Err(EngineError::Query {
+                message: "正则需要包含至少 3 个字节的固定文字，或搭配 dir: / ext: 缩小范围".into(),
+            });
+        }
         let recall = match session.recall {
             idx::Recall::Trigram => RecallKind::Trigram,
             idx::Recall::Pair => RecallKind::Pair,
