@@ -315,7 +315,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let fromIcons = modeButtons.map(\.iconAlpha)
         let fromBodyAlpha = body.alphaValue
         let revealing = buttonsShown && !buttonsVisible
-        let hiding = !buttonsShown && buttonsVisible
+        // A hide interrupted by another layout (results arriving right after typing) must keep
+        // fading the buttons out, not leave them half-visible over the widening bar.
+        let hiding = !buttonsShown && (buttonsVisible || modeButtons.contains { !$0.isHidden })
+        let fromAlpha = modeButtons.map(\.alphaValue)
         let collapsing = targetH < from.height - 0.5
         let expanding = targetH > from.height + 0.5
         buttonsVisible = buttonsShown
@@ -372,7 +375,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                     let f = fromButtons[i]
                     let d = f.width * (1 - 0.45 * k)
                     self.place(b, NSRect(x: f.midX - d / 2, y: f.midY - d / 2, width: d, height: d))
-                    b.alphaValue = 1 - k
+                    b.alphaValue = fromAlpha[i] * (1 - k)
                     b.iconAlpha = fromIcons[i] * CGFloat(max(0, 1 - t / 0.03))
                 } else if self.buttonsShown {
                     self.place(b, circleLerp(fromButtons[i], shownFrames[i], widthCurve.value(t)))
