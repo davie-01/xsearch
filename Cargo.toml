@@ -1,5 +1,5 @@
 [workspace]
-members = ["rust/xs-core", "rust/xs-index", "cli/xs"]
+members = ["rust/xs-core", "rust/xs-index", "rust/xs-ffi", "cli/xs"]
 resolver = "2"
 
 [workspace.package]

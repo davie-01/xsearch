@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
-cargo build --release --locked -p xs-core
+cargo build --release --locked -p xs-ffi
 swift build -c release --scratch-path target/swift --product XSearch
 app="$PWD/target/XSearch.app"
 rm -rf "$app"

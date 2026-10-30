@@ -12,16 +12,23 @@ let package = Package(
         .target(
             name: "CXSearchCore",
             path: "Packages/XSearchCore/CXSearchCore",
-            linkerSettings: [.unsafeFlags(["-L\(rustLib)"]), .linkedLibrary("xs_core"), .linkedLibrary("c++"), .linkedLibrary("z")]
+            // libxs_ffi.a is the app's only Rust library (content engine + M1 name-key C ABI);
+            // linking two Rust static libraries would duplicate the Rust runtime.
+            linkerSettings: [.unsafeFlags(["-L\(rustLib)"]), .linkedLibrary("xs_ffi"), .linkedLibrary("c++"), .linkedLibrary("z")]
         ),
+        .target(name: "xs_ffiFFI", dependencies: ["CXSearchCore"], path: "Packages/ContentEngine/xs_ffiFFI"),
+        // Generated UniFFI bindings (scripts/gen-bindings.sh) plus a thin Swift layer.
+        .target(name: "ContentEngine", dependencies: ["xs_ffiFFI"], path: "Packages/ContentEngine/Sources",
+                swiftSettings: [.swiftLanguageMode(.v5)]),
         .target(name: "XSearchCore", dependencies: ["CXSearchCore"], path: "Packages/XSearchCore/Sources"),
         .target(name: "CScan", path: "Packages/NameEngine/CScan", linkerSettings: [.linkedLibrary("z")]),
         .target(name: "NameEngine", dependencies: ["XSearchCore", "CScan"], path: "Packages/NameEngine/Sources"),
         .target(name: "Catalog", dependencies: ["XSearchCore", "NameEngine", "CScan"], path: "Packages/Catalog/Sources", linkerSettings: [.linkedLibrary("sqlite3")]),
-        .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog"], path: "App/Sources"),
+        .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog", "ContentEngine"], path: "App/Sources"),
         .testTarget(name: "XSearchCoreTests", dependencies: ["XSearchCore"], path: "Packages/XSearchCore/Tests"),
         .testTarget(name: "NameEngineTests", dependencies: ["NameEngine"], path: "Packages/NameEngine/Tests"),
         .testTarget(name: "CatalogTests", dependencies: ["Catalog"], path: "Packages/Catalog/Tests"),
+        .testTarget(name: "ContentEngineTests", dependencies: ["ContentEngine"], path: "Packages/ContentEngine/Tests"),
     ],
     swiftLanguageModes: [.v6]
 )

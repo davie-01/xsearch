@@ -1,0 +1,4 @@
+module xs_ffiFFI {
+    header "xs_ffiFFI.h"
+    export *
+}

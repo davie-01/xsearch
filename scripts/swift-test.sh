@@ -3,5 +3,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
-cargo build --release --locked -p xs-core
+cargo build --release --locked -p xs-ffi
 swift test --scratch-path target/swift "$@"
