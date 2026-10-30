@@ -5,7 +5,7 @@ import XSearchCore
 
 /// One result row in the launcher list.
 struct ResultItem: Equatable {
-    enum Group: String { case apps = "应用", files = "文件与文件夹", recents = "最近打开" }
+    enum Group: String { case apps = "应用", files = "文件与文件夹", favorites = "收藏", recents = "最近打开" }
     var group: Group
     var name: String
     var path: String
@@ -13,6 +13,8 @@ struct ResultItem: Equatable {
     var kind: FileKind
     var ext: String
     var meta: String
+    var size: Int64 = 0
+    var mtime: Int64 = 0
 }
 
 struct ContentStats {
@@ -67,7 +69,7 @@ final class SearchSession {
         }
     }
 
-    func search(_ text: String, deliver: @escaping @MainActor (SearchOutput) -> Void) {
+    func search(_ text: String, limit: Int = 200, deliver: @escaping @MainActor (SearchOutput) -> Void) {
         latest += 1
         let id = latest
         let names = self.names, usage = self.usage, apps = self.apps, home = self.home
@@ -79,7 +81,20 @@ final class SearchSession {
             var total = 0
             var unresolved: [String] = []
             if q.isEmpty {
-                for r in usage?.recents() ?? [] where FileManager.default.fileExists(atPath: r.path) {
+                // Favorites follow their file id when the file moved (§13); missing ones stay
+                // listed so they can be removed.
+                var shown = Set<String>()
+                for f in usage?.favorites() ?? [] {
+                    var path = f.path
+                    if !FileManager.default.fileExists(atPath: path), let id = f.fileId, let moved = names.view.path(id), moved != path,
+                       FileManager.default.fileExists(atPath: moved) {
+                        usage?.relocateFavorite(from: path, to: moved)
+                        path = moved
+                    }
+                    shown.insert(path)
+                    items.append(Self.item(path: path, fileId: f.fileId, group: .favorites))
+                }
+                for r in usage?.recents() ?? [] where !shown.contains(r.path) && FileManager.default.fileExists(atPath: r.path) {
                     items.append(Self.item(path: r.path, fileId: r.fileId, group: .recents))
                 }
             } else {
@@ -89,7 +104,7 @@ final class SearchSession {
                     items.append(ResultItem(group: .apps, name: a.displayName, path: a.path, fileId: nil, kind: .app, ext: "app", meta: "应用"))
                 }
                 let appPaths = Set(appHits.map(\.path))
-                let result = names.search(q, limit: 200, usage: counts.byId)
+                let result = names.search(q, limit: limit, usage: counts.byId)
                 total = result.total + appHits.count
                 unresolved = result.unresolvedDirs
                 for h in result.hits where !appPaths.contains(h.path) {
@@ -98,7 +113,8 @@ final class SearchSession {
                     let isFolder = h.flags.contains(.directory) && !h.flags.contains(.package)
                     let kind = FileKind.of(extension: NameKey.key(ext), isDirectory: isFolder, isApp: h.flags.isApp && ext == "app")
                     let meta = kind == .folder ? "文件夹" : kind == .app ? "应用" : Theme.shortDate(h.mtime)
-                    items.append(ResultItem(group: .files, name: h.name, path: h.path, fileId: h.fileId, kind: kind, ext: ext, meta: meta))
+                    items.append(ResultItem(group: .files, name: h.name, path: h.path, fileId: h.fileId, kind: kind, ext: ext, meta: meta,
+                                            size: h.size, mtime: h.mtime))
                 }
             }
             let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
@@ -117,8 +133,11 @@ final class SearchSession {
         let ext = (name as NSString).pathExtension.lowercased()
         let isApp = ext == "app" && isDir.boolValue
         let kind = FileKind.of(extension: ext, isDirectory: isDir.boolValue, isApp: isApp)
-        let mtime = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let meta = kind == .folder ? "文件夹" : kind == .app ? "应用" : Theme.shortDate(Int64(mtime))
-        return ResultItem(group: group, name: isApp ? (name as NSString).deletingPathExtension : name, path: path, fileId: fileId, kind: kind, ext: ext, meta: meta)
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let missing = attrs == nil
+        let meta = missing ? "文件已不存在" : kind == .folder ? "文件夹" : kind == .app ? "应用" : Theme.shortDate(Int64(mtime))
+        return ResultItem(group: group, name: isApp ? (name as NSString).deletingPathExtension : name, path: path, fileId: fileId, kind: kind, ext: ext, meta: meta,
+                          size: (attrs?[.size] as? Int64) ?? 0, mtime: Int64(mtime))
     }
 }

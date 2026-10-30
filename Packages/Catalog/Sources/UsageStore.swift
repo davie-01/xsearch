@@ -2,7 +2,9 @@ import Foundation
 import os
 
 /// Personal data kept apart from rebuildable indexes (ARCHITECTURE §15–16): `user.sqlite`.
-/// Records opens for ranking and the "最近打开" list shown when the input is empty.
+/// Records opens for ranking and the "最近打开" list shown when the input is empty, and the
+/// favorites (⌘D), bound to the file id with the path kept for relocating (§13). Neither depends
+/// on the indexes: rebuilding them keeps both.
 public final class UsageStore: @unchecked Sendable {
     public struct Recent: Sendable, Equatable {
         public var path: String
@@ -20,7 +22,47 @@ public final class UsageStore: @unchecked Sendable {
         try db.exec("""
             CREATE TABLE IF NOT EXISTS opens(path TEXT PRIMARY KEY, file_id INTEGER, count INTEGER NOT NULL, last_opened REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS opens_recent ON opens(last_opened);
+            CREATE TABLE IF NOT EXISTS favorites(path TEXT PRIMARY KEY, file_id INTEGER, added REAL NOT NULL);
             """)
+    }
+
+    public struct Favorite: Sendable, Equatable {
+        public var path: String
+        public var fileId: Int64?
+    }
+
+    /// Newest first.
+    public func favorites() -> [Favorite] {
+        lock.withLock {
+            guard let s = try? db.prepare("SELECT path, file_id FROM favorites ORDER BY added DESC") else { return [] }
+            var out: [Favorite] = []
+            while (try? s.step()) == true { out.append(Favorite(path: s.text(0), fileId: s.isNull(1) ? nil : s.int(1))) }
+            return out
+        }
+    }
+
+    public func isFavorite(path: String) -> Bool {
+        lock.withLock { ((try? db.prepare("SELECT 1 FROM favorites WHERE path = ?").bind(path).first { _ in true }) ?? nil) != nil }
+    }
+
+    /// Adds or removes; returns whether the item is a favorite afterwards.
+    @discardableResult
+    public func toggleFavorite(path: String, fileId: Int64?) -> Bool {
+        let was = isFavorite(path: path)
+        lock.withLock {
+            if was {
+                _ = try? db.prepare("DELETE FROM favorites WHERE path = ?").bind(path).run()
+            } else {
+                _ = try? db.prepare("INSERT OR REPLACE INTO favorites(path, file_id, added) VALUES(?, ?, ?)")
+                    .bind(path, fileId, Date().timeIntervalSince1970).run()
+            }
+        }
+        return !was
+    }
+
+    /// The file moved or was renamed: keep the favorite under its new path.
+    public func relocateFavorite(from old: String, to new: String) {
+        lock.withLock { _ = try? db.prepare("UPDATE OR REPLACE favorites SET path = ? WHERE path = ?").bind(new, old).run() }
     }
 
     public func recordOpen(path: String, fileId: Int64?) {

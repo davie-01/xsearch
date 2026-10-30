@@ -245,6 +245,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
         contentPane = ContentPane(searcher: session.content)
         contentPane.onOpen = { [weak self] hit, reveal in self?.openContent(hit, reveal: reveal) }
+        contentPane.onRead = { [weak self] hit, n in self?.openReader(hit, at: n) }
         contentPane.isHidden = true
         let stack = rootStack
         for v in [ruleRow, chips, scroll, contentPane!, notice, footer] { stack.addArrangedSubview(v) }
@@ -544,6 +545,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     // MARK: Search
 
     func controlTextDidChange(_ obj: Notification) {
+        pendingTrash = nil
         // Typing (including IME composition) folds the mode buttons back into the bar.
         if buttonsShown && (!field.stringValue.isEmpty || field.isComposing) { setButtonsShown(false, animated: true) }
         // While the input method composes, results stay as they were (§5.3).
@@ -704,8 +706,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func updateHints() {
         hints.attributedStringValue = Self.hintString(mode == .name
-            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⇧⌘C", "复制路径")]
-            : [("↵", "打开"), ("⌘↵", "定位到原文件"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘1", "名称模式")])
+            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⇧⌘C", "复制路径"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
+            : [("↵", "打开"), ("⌘↵", "阅读窗口"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘E", "完整窗口")])
     }
 
     static func hintString(_ pairs: [(String, String)]) -> NSAttributedString {
@@ -740,6 +742,82 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             parts.append(String(format: "%.1f ms", out.elapsedMs))
         }
         status.stringValue = parts.joined(separator: " · ")
+    }
+
+    // MARK: Favorites, trash, full window
+
+    /// Opens the full window with this query (set by the app delegate).
+    var onExpand: ((String, Preferences.Mode) -> Void)?
+    private var pendingTrash: String?
+
+    /// Reader window at the current occurrence (set by the app delegate).
+    var onRead: ((ContentHit, String, Int) -> Void)?
+
+    private func openReader(_ hit: ContentHit, at n: Int) {
+        let expression = contentPane.expressionForReader
+        hide()
+        onRead?(hit, expression, n)
+    }
+
+    private func expandToFullWindow() {
+        let text = field.stringValue, mode = self.mode
+        hide()
+        onExpand?(text, mode)
+    }
+
+    /// Path and file id of the selected result in either mode.
+    private func currentTarget() -> (path: String, fileId: Int64?)? {
+        if mode == .content {
+            guard let h = contentPane.selected else { return nil }
+            return (h.dir + "/" + h.name, Int64(h.fileId))
+        }
+        guard let item = selectedItem else { return nil }
+        return (item.path, item.fileId)
+    }
+
+    private func toggleFavorite() {
+        guard let t = currentTarget(), let usage else { return }
+        let on = usage.toggleFavorite(path: t.path, fileId: t.fileId)
+        toast(on ? "已加入收藏" : "已取消收藏")
+        if field.stringValue.isEmpty { runSearch() }
+    }
+
+    /// Asks first (UI-SPEC §5.2): the confirmation sits in the notice area, so the panel keeps
+    /// focus; ⌘⌫ again or the button confirms, anything else cancels.
+    private func trashSelected() {
+        guard let t = currentTarget() else { return }
+        if pendingTrash == t.path {
+            confirmTrash()
+            return
+        }
+        pendingTrash = t.path
+        clearNotice()
+        addNotice("将“\((t.path as NSString).lastPathComponent)”移到废纸篓？再按一次 ⌘⌫ 确认。", color: Theme.warnText, size: 12.5)
+        addLink("移到废纸篓", action: #selector(confirmTrash))
+        resize()
+    }
+
+    @objc private func confirmTrash() {
+        guard let path = pendingTrash else { return }
+        pendingTrash = nil
+        clearNotice()
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+            usage?.remove(path: path)
+            toast("已移到废纸篓")
+            if mode == .content {
+                contentPane.remove(path: path)
+            } else {
+                rows.removeAll { if case .item(let i) = $0 { return i.path == path }; return false }
+                table.reloadData()
+                if let first = rows.firstIndex(where: { if case .item = $0 { return true }; return false }) {
+                    table.selectRowIndexes([first], byExtendingSelection: false)
+                }
+            }
+        } catch {
+            toast("无法移到废纸篓：\(error.localizedDescription)")
+        }
+        resize()
     }
 
     private func toast(_ text: String) {
@@ -787,7 +865,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         case (.command, "2", _): switchMode(.content); return true
         case (.command, _, 36), (.command, _, 76):
             if mode == .content {
-                if let h = contentPane.selected { openContent(h, reveal: false) }
+                if let h = contentPane.selected { openReader(h, at: max(0, contentPane.preview.currentHit)) }
             } else {
                 activate(.reveal)
             }
@@ -806,6 +884,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             return true
         case (.command, ",", _): hide(); openSettings?(); return true
         case (.command, "/", _): showSyntaxHelp(); return true
+        case (.command, "d", _), (.command, "D", _): toggleFavorite(); return true
+        case (.command, _, 51):
+            // ⌘⌫ trashes the selected result; with nothing selected it edits the input as usual.
+            guard currentTarget() != nil else { return false }
+            trashSelected()
+            return true
+        case (.command, "e", _), (.command, "E", _): expandToFullWindow(); return true
         default: return false
         }
     }

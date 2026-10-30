@@ -42,6 +42,8 @@ enum Theme {
     }
 
     static let warnBackground = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua]) == .darkAqua ? hex(0xFFF4DB).withAlphaComponent(0.2) : hex(0xFFF4DB) }
+    /// `surface.sidebar` (UI-SPEC §2): settings, full window and reader sidebars.
+    static let sidebar = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0x232326) : hex(0xF4F4F6) }
     static let warnText = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua]) == .darkAqua ? hex(0xFFD98A) : hex(0x6B4A00) }
     /// Spotlight-style translucent fills that read on top of glass in both appearances.
     static var selectionFill: NSColor { NSColor.labelColor.withAlphaComponent(0.11) }

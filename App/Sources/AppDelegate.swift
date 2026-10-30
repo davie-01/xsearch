@@ -12,6 +12,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var usage: UsageStore?
     private var session: SearchSession!
     private var launcher: LauncherController!
+    private var readerWindow: ReaderWindowController?
+    /// Recreated with the launcher: it reads through the current session's content searcher.
+    private var reader: ReaderWindowController {
+        if let readerWindow { return readerWindow }
+        let r = ReaderWindowController(searcher: session.content)
+        r.onOpenFile = { [weak self] path, id in self?.usage?.recordOpen(path: path, fileId: id) }
+        readerWindow = r
+        return r
+    }
+
+    private var fullWindow: FullWindowController?
+    private var full: FullWindowController {
+        if let fullWindow { return fullWindow }
+        let f = FullWindowController(session: session, usage: usage)
+        f.onRead = { [weak self] hit, expression, n in self?.reader.show(hit, expression: expression, startAt: n) }
+        f.nameScope = { Preferences.shared.nameScope }
+        f.contentScope = { [weak self] in self?.currentContentScope ?? .default }
+        fullWindow = f
+        return f
+    }
+
+    /// Callbacks shared by every launcher instance (startup and index rebuild).
+    private func wireLauncher() {
+        launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
+        launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
+        launcher.onRead = { [weak self] hit, expression, n in self?.reader.show(hit, expression: expression, startAt: n) }
+        launcher.onExpand = { [weak self] text, mode in self?.full.show(text: text, mode: mode) }
+        readerWindow?.close()
+        readerWindow = nil
+        fullWindow?.close()
+        fullWindow = nil
+    }
     private var hotKey: HotKey!
     private var statusItem: NSStatusItem!
     private var settings: SettingsWindowController?
@@ -62,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         usage = try? UsageStore(directory: data)
         session = SearchSession(names: names, usage: usage)
         launcher = LauncherController(session: session, usage: usage)
-        launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
+        wireLauncher()
         session.onAppsLoaded = { [weak self] in self?.launcher.appsDidLoad() }
         session.refreshApps()
 
@@ -71,7 +103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         names.start(scope: nameScope, content: contentScope)
         startIndexer()
-        launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
         statusTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.statusChanged() }
         }
@@ -83,6 +114,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let text = env["XS_LAUNCHER_TEXT"] {
             let delay = env["XS_LAUNCHER_DELAY"].flatMap(Double.init) ?? 1.5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.launcher.show(text: text) }
+        }
+        // Dev: open the full window directly (XS_FULL_MODE=content for content mode).
+        if let text = env["XS_FULL_TEXT"] {
+            let mode: Preferences.Mode = env["XS_FULL_MODE"] == "content" ? .content : .name
+            let reader = env["XS_READER"] != nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.full.openFirstInReader = reader
+                self?.full.show(text: text, mode: mode)
+            }
         }
     }
 
@@ -220,13 +260,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         names.onStatus = { [weak self] _ in Task { @MainActor in self?.statusChanged() } }
         session = SearchSession(names: names, usage: usage)
         launcher = LauncherController(session: session, usage: usage)
-        launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
+        wireLauncher()
         session.onAppsLoaded = { [weak self] in self?.launcher.appsDidLoad() }
         session.refreshApps()
         settings?.names = names
         names.start(scope: nameScope, content: contentScope)
         startIndexer()
-        launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
     }
 
     var currentHotKey: HotKey.Combo { Preferences.shared.hotKey }

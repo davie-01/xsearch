@@ -16,6 +16,6 @@ cp "$bin/XSearch" "$app/Contents/MacOS/XSearch"
 cp "$bin/xs-extract" "$app/Contents/MacOS/xs-extract"
 # Inside-out signing: the worker first, then the app bundle.
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none "$app/Contents/MacOS/xs-extract"
-codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none "$app"
+codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none --entitlements App/Resources/XSearch.entitlements "$app"
 codesign --verify --strict "$app"
 echo "Built $app"

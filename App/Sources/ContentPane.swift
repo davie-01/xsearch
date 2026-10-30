@@ -182,7 +182,7 @@ final class PreviewPane: NSView {
     let position = NSTextField(labelWithString: "")
     let prev = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "上一处")!, target: nil, action: nil)
     let next = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "下一处")!, target: nil, action: nil)
-    let locate = NSButton(title: "定位到原文件 ⌘↵", target: nil, action: nil)
+    let locate = NSButton(title: "阅读窗口 ⌘↵", target: nil, action: nil)
     let banner = NSTextField(labelWithString: "")
     let placeholder = NSTextField(labelWithString: "选中左侧结果后在这里预览")
     let textView = NSTextView()
@@ -399,6 +399,9 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var expression = ""
     private var previewToken = 0
     var onOpen: ((ContentHit, Bool) -> Void)?
+    /// Open in the reader window at this occurrence.
+    var onRead: ((ContentHit, Int) -> Void)?
+    var expressionForReader: String { expression }
 
     init(searcher: ContentSearcher) {
         self.searcher = searcher
@@ -421,7 +424,10 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         listScroll.autohidesScrollers = true
         listScroll.scrollerStyle = .overlay
         let divider = RuleView()
-        preview.onLocate = { [weak self] in self?.openSelected(reveal: false) }
+        preview.onLocate = { [weak self] in
+            guard let self, let h = self.selected else { return }
+            self.onRead?(h, max(0, self.preview.currentHit))
+        }
         for v in [listScroll, divider, preview] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
@@ -463,6 +469,14 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 table.scrollRowToVisible(0)
             }
         }
+    }
+
+    /// Drops a trashed file from the list and selects its neighbour.
+    func remove(path: String) {
+        guard let i = hits.firstIndex(where: { $0.dir + "/" + $0.name == path }) else { return }
+        hits.remove(at: i)
+        table.reloadData()
+        if hits.isEmpty { preview.clear() } else { table.selectRowIndexes([min(i, hits.count - 1)], byExtendingSelection: false) }
     }
 
     func moveSelection(_ delta: Int) {

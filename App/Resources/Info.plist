@@ -20,5 +20,7 @@
 	<key>NSDownloadsFolderUsageDescription</key><string>XSearch 需要读取“下载”中的文件名来建立本机搜索索引。文件名不会离开这台 Mac。</string>
 	<key>NSRemovableVolumesUsageDescription</key><string>XSearch 需要读取可移除卷上的文件名来建立本机搜索索引。</string>
 	<key>NSNetworkVolumesUsageDescription</key><string>XSearch 需要读取网络卷上的文件名来建立本机搜索索引。</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>XSearch 用它让 Skim 或“预览”打开 PDF 并跳到命中所在的页。</string>
 </dict>
 </plist>

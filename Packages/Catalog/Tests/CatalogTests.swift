@@ -359,3 +359,17 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     let seqs = s.contentTasks().map(\.task.opSeq)
     #expect(Set(seqs).count == seqs.count)
 }
+
+@Test func favoritesToggleRelocateAndSurviveReopen() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xs-fav-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try UsageStore(directory: dir)
+    #expect(store.toggleFavorite(path: "/a/x.pdf", fileId: 7))
+    #expect(store.toggleFavorite(path: "/a/y.pdf", fileId: nil))
+    #expect(store.isFavorite(path: "/a/x.pdf"))
+    #expect(store.favorites().map(\.path) == ["/a/y.pdf", "/a/x.pdf"])
+    #expect(!store.toggleFavorite(path: "/a/y.pdf", fileId: nil))
+    store.relocateFavorite(from: "/a/x.pdf", to: "/b/x.pdf")
+    let reopened = try UsageStore(directory: dir)
+    #expect(reopened.favorites() == [UsageStore.Favorite(path: "/b/x.pdf", fileId: 7)])
+}
