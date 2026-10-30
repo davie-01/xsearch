@@ -422,11 +422,16 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         mouseMonitors.removeAll()
     }
 
+    /// Mode buttons appear only while the input is empty: moving the mouse over an empty bar
+    /// offers the modes; once there is text, the bar stays a plain search field.
     private func mouseMoved() {
-        guard panel.isVisible, !buttonsShown else { return }
         let now = NSEvent.mouseLocation
+        defer { lastMouse = now }
+        guard panel.isVisible, !buttonsShown, field.stringValue.isEmpty, !field.isComposing else {
+            mouseTravel = 0
+            return
+        }
         if let last = lastMouse { mouseTravel += hypot(now.x - last.x, now.y - last.y) }
-        lastMouse = now
         // Ignore sub-pixel jitter right after the panel appears.
         if mouseTravel > 6 { setButtonsShown(true, animated: true) }
     }
@@ -527,6 +532,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     // MARK: Search
 
     func controlTextDidChange(_ obj: Notification) {
+        // Typing (including IME composition) folds the mode buttons back into the bar.
+        if buttonsShown && (!field.stringValue.isEmpty || field.isComposing) { setButtonsShown(false, animated: true) }
         // While the input method composes, results stay as they were (§5.3).
         guard !field.isComposing else { return }
         runSearch()

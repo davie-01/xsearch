@@ -128,6 +128,12 @@ final class ContentHitCell: NSTableCellView {
 final class AnchorRuler: NSRulerView {
     var anchors: [(utf16: Int, label: String)] = []
 
+    // Transparent on glass: draw only the labels, no ruler background or baseline.
+    override func draw(_ dirtyRect: NSRect) {
+        drawHashMarksAndLabels(in: dirtyRect)
+    }
+    override var isOpaque: Bool { false }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let tv = clientView as? NSTextView, let lm = tv.layoutManager, let tc = tv.textContainer, !anchors.isEmpty else { return }
         let visible = tv.visibleRect
