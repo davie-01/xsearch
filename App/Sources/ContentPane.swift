@@ -101,7 +101,7 @@ final class ContentHitCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(_ h: ContentHit) {
+    func configure(_ h: ContentHit, live: Bool = false) {
         let path = h.dir + "/" + h.name
         icon.image = NSWorkspace.shared.icon(forFile: path)
         name.stringValue = h.name
@@ -113,12 +113,14 @@ final class ContentHitCell: NSTableCellView {
         snippet.attributedStringValue = s
         meta.stringValue = PathUtil.abbreviate(h.dir, home: NSHomeDirectory()) + " · " + Theme.shortDate(h.mtime)
         // UI-SPEC §4.5 status badges.
-        let (text, bg, fg): (String, NSColor, NSColor) = switch h.state {
+        let stateBadge: (String, NSColor, NSColor) = switch h.state {
         case .waitingOcr: ("等待 OCR", Theme.warnBackground, Theme.warnText)
         case .partial: ("部分索引", Theme.warnBackground, Theme.warnText)
         case .failed: ("提取失败", Theme.warnBackground, Theme.warnText)
         case .complete: ("", .clear, .clear)
         }
+        // Live-scan hits are read from the file, not the index.
+        let (text, bg, fg) = live ? ("实时", Theme.hex(0xE6F0FF), Theme.hex(0x1F4FA8)) : stateBadge
         badge.stringValue = text.isEmpty ? "" : " \(text) "
         badge.isHidden = text.isEmpty
         badge.textColor = fg
@@ -469,11 +471,19 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         return r >= 0 && r < hits.count ? hits[r] : nil
     }
 
+    /// Hits found by the live scan (preview reads the file, not the index).
+    private(set) var liveIds = Set<UInt64>()
+
     func show(_ out: ContentOutput) {
         expression = out.query.expression
+        if !out.append { liveIds = [] }
         if out.append {
             let start = hits.count
-            hits += out.hits
+            // A live hit for a file the index already returned is dropped.
+            let known = Set(hits.map(\.fileId))
+            let new = out.live ? out.hits.filter { !known.contains($0.fileId) } : out.hits
+            if out.live { liveIds.formUnion(new.map(\.fileId)) }
+            hits += new
             table.insertRows(at: IndexSet(start..<hits.count), withAnimation: [])
         } else {
             hits = out.hits
@@ -505,9 +515,14 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         previewToken += 1
         let token = previewToken
         let path = h.dir + "/" + h.name
-        searcher.preview(fileId: h.fileId, expression: expression) { [weak self] data in
+        let show: @MainActor @Sendable (PreviewData?) -> Void = { [weak self] data in
             guard let self, token == self.previewToken else { return }
             if let data { self.preview.show(data, path: path) } else { self.preview.clear() }
+        }
+        if liveIds.contains(h.fileId) {
+            searcher.livePreview(path: path, expression: expression, deliver: show)
+        } else {
+            searcher.preview(fileId: h.fileId, expression: expression, deliver: show)
         }
     }
 
@@ -527,7 +542,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let v = tableView.makeView(withIdentifier: .init("hit"), owner: nil) as? ContentHitCell ?? ContentHitCell()
         v.identifier = .init("hit")
-        v.configure(hits[row])
+        v.configure(hits[row], live: liveIds.contains(hits[row].fileId))
         return v
     }
 

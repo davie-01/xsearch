@@ -381,6 +381,31 @@ RustBuffer uniffi_xs_ffi_fn_method_contentsearch_next(void*_Nonnull ptr, uint32_
 RustBuffer uniffi_xs_ffi_fn_method_contentsearch_recall(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_CLONE_LIVESCAN
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_CLONE_LIVESCAN
+void*_Nonnull uniffi_xs_ffi_fn_clone_livescan(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FREE_LIVESCAN
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FREE_LIVESCAN
+void uniffi_xs_ffi_fn_free_livescan(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_CONSTRUCTOR_LIVESCAN_NEW
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_CONSTRUCTOR_LIVESCAN_NEW
+void*_Nonnull uniffi_xs_ffi_fn_constructor_livescan_new(RustBuffer query, RustBuffer mode, uint64_t max_file_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_LIVESCAN_CHECK
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_LIVESCAN_CHECK
+RustBuffer uniffi_xs_ffi_fn_method_livescan_check(void*_Nonnull ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_LIVESCAN_PREVIEW
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_LIVESCAN_PREVIEW
+RustBuffer uniffi_xs_ffi_fn_method_livescan_preview(void*_Nonnull ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_ENGINE_VERSIONS
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_ENGINE_VERSIONS
 RustBuffer uniffi_xs_ffi_fn_func_engine_versions(RustCallStatus *_Nonnull out_status
@@ -869,6 +894,18 @@ uint16_t uniffi_xs_ffi_checksum_method_contentsearch_recall(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_LIVESCAN_CHECK
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_LIVESCAN_CHECK
+uint16_t uniffi_xs_ffi_checksum_method_livescan_check(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_LIVESCAN_PREVIEW
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_LIVESCAN_PREVIEW
+uint16_t uniffi_xs_ffi_checksum_method_livescan_preview(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_CONSTRUCTOR_CONTENTINDEX_OPEN
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_CONSTRUCTOR_CONTENTINDEX_OPEN
 uint16_t uniffi_xs_ffi_checksum_constructor_contentindex_open(void
@@ -878,6 +915,12 @@ uint16_t uniffi_xs_ffi_checksum_constructor_contentindex_open(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_CONSTRUCTOR_CONTENTINDEXWRITER_OPEN
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_CONSTRUCTOR_CONTENTINDEXWRITER_OPEN
 uint16_t uniffi_xs_ffi_checksum_constructor_contentindexwriter_open(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_CONSTRUCTOR_LIVESCAN_NEW
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_CONSTRUCTOR_LIVESCAN_NEW
+uint16_t uniffi_xs_ffi_checksum_constructor_livescan_new(void
     
 );
 #endif

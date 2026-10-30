@@ -379,3 +379,24 @@ fn proximity_and_regex() {
     let hl = reader.highlights(3, &parse(r"regex:HT-\d+").unwrap(), Mode::Loose).unwrap();
     assert_eq!(hl, vec![3..10]);
 }
+
+#[test]
+fn text_matcher_agrees_with_indexed_search() {
+    use xs_index::TextMatcher;
+    let tmp = tempfile::tempdir().unwrap();
+    let text = "第一行 合同金额\n第二行 Ｈｔ-2024 合同";
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    w.put(&doc(1, text)).unwrap();
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    for q in ["合同", "ht-2024 -草稿", r"regex:HT-\d+", r#""合同 金额"~2"#] {
+        let expr = parse(q).unwrap();
+        let m = TextMatcher::new(&expr, Mode::Loose);
+        let mut s = reader.session(SearchRequest { expr: expr.clone(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] }).unwrap();
+        let indexed = s.next(Duration::from_secs(5), 10, &AtomicBool::new(false)).unwrap().hits.pop().unwrap();
+        let live = m.check(text).unwrap();
+        assert_eq!((live.hit_count, &live.snippet, &live.snippet_highlights), (indexed.hit_count, &indexed.snippet, &indexed.snippet_highlights), "{q}");
+        assert_eq!(m.highlights(text), reader.highlights(1, &expr, Mode::Loose).unwrap(), "{q}");
+    }
+    assert!(TextMatcher::new(&parse("不存在").unwrap(), Mode::Loose).check(text).is_none());
+}

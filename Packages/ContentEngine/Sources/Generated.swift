@@ -1082,6 +1082,161 @@ public func FfiConverterTypeContentSearch_lower(_ value: ContentSearch) -> Unsaf
 
 
 
+
+
+/**
+ * Live scan (§8.7): one parsed query checked against files that have no content index.
+ */
+public protocol LiveScanProtocol: AnyObject, Sendable {
+    
+    /**
+     * None when the file does not match (or cannot be read as text).
+     */
+    func check(path: String)  -> LiveHit?
+    
+    func preview(path: String)  -> LiveText?
+    
+}
+/**
+ * Live scan (§8.7): one parsed query checked against files that have no content index.
+ */
+open class LiveScan: LiveScanProtocol, @unchecked Sendable {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_xs_ffi_fn_clone_livescan(self.pointer, $0) }
+    }
+public convenience init(query: String, mode: MatchMode, maxFileBytes: UInt64)throws  {
+    let pointer =
+        try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_constructor_livescan_new(
+        FfiConverterString.lower(query),
+        FfiConverterTypeMatchMode_lower(mode),
+        FfiConverterUInt64.lower(maxFileBytes),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_xs_ffi_fn_free_livescan(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * None when the file does not match (or cannot be read as text).
+     */
+open func check(path: String) -> LiveHit?  {
+    return try!  FfiConverterOptionTypeLiveHit.lift(try! rustCall() {
+    uniffi_xs_ffi_fn_method_livescan_check(self.uniffiClonePointer(),
+        FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+open func preview(path: String) -> LiveText?  {
+    return try!  FfiConverterOptionTypeLiveText.lift(try! rustCall() {
+    uniffi_xs_ffi_fn_method_livescan_preview(self.uniffiClonePointer(),
+        FfiConverterString.lower(path),$0
+    )
+})
+}
+    
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLiveScan: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = LiveScan
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> LiveScan {
+        return LiveScan(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: LiveScan) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LiveScan {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: LiveScan, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLiveScan_lift(_ pointer: UnsafeMutableRawPointer) throws -> LiveScan {
+    return try FfiConverterTypeLiveScan.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLiveScan_lower(_ value: LiveScan) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeLiveScan.lower(value)
+}
+
+
+
+
 public struct ArchiveListing {
     public var members: [ArchiveMember]
     public var skippedByType: UInt32
@@ -1975,6 +2130,157 @@ public func FfiConverterTypeExtractionOutput_lower(_ value: ExtractionOutput) ->
 }
 
 
+public struct LiveHit {
+    public var hitCount: UInt32
+    public var snippet: String
+    public var snippetHighlights: [Utf16Range]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(hitCount: UInt32, snippet: String, snippetHighlights: [Utf16Range]) {
+        self.hitCount = hitCount
+        self.snippet = snippet
+        self.snippetHighlights = snippetHighlights
+    }
+}
+
+#if compiler(>=6)
+extension LiveHit: Sendable {}
+#endif
+
+
+extension LiveHit: Equatable, Hashable {
+    public static func ==(lhs: LiveHit, rhs: LiveHit) -> Bool {
+        if lhs.hitCount != rhs.hitCount {
+            return false
+        }
+        if lhs.snippet != rhs.snippet {
+            return false
+        }
+        if lhs.snippetHighlights != rhs.snippetHighlights {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(hitCount)
+        hasher.combine(snippet)
+        hasher.combine(snippetHighlights)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLiveHit: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LiveHit {
+        return
+            try LiveHit(
+                hitCount: FfiConverterUInt32.read(from: &buf), 
+                snippet: FfiConverterString.read(from: &buf), 
+                snippetHighlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LiveHit, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.hitCount, into: &buf)
+        FfiConverterString.write(value.snippet, into: &buf)
+        FfiConverterSequenceTypeUtf16Range.write(value.snippetHighlights, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLiveHit_lift(_ buf: RustBuffer) throws -> LiveHit {
+    return try FfiConverterTypeLiveHit.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLiveHit_lower(_ value: LiveHit) -> RustBuffer {
+    return FfiConverterTypeLiveHit.lower(value)
+}
+
+
+/**
+ * A text file read for preview: decoded text and every hit in it.
+ */
+public struct LiveText {
+    public var text: String
+    public var highlights: [Utf16Range]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(text: String, highlights: [Utf16Range]) {
+        self.text = text
+        self.highlights = highlights
+    }
+}
+
+#if compiler(>=6)
+extension LiveText: Sendable {}
+#endif
+
+
+extension LiveText: Equatable, Hashable {
+    public static func ==(lhs: LiveText, rhs: LiveText) -> Bool {
+        if lhs.text != rhs.text {
+            return false
+        }
+        if lhs.highlights != rhs.highlights {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(text)
+        hasher.combine(highlights)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLiveText: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LiveText {
+        return
+            try LiveText(
+                text: FfiConverterString.read(from: &buf), 
+                highlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LiveText, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.text, into: &buf)
+        FfiConverterSequenceTypeUtf16Range.write(value.highlights, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLiveText_lift(_ buf: RustBuffer) throws -> LiveText {
+    return try FfiConverterTypeLiveText.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLiveText_lower(_ value: LiveText) -> RustBuffer {
+    return FfiConverterTypeLiveText.lower(value)
+}
+
+
 public struct SearchFilters {
     public var dirs: [String]
     public var exts: [String]
@@ -2523,6 +2829,54 @@ fileprivate struct FfiConverterOptionTypeContentDocument: FfiConverterRustBuffer
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeLiveHit: FfiConverterRustBuffer {
+    typealias SwiftType = LiveHit?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLiveHit.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLiveHit.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeLiveText: FfiConverterRustBuffer {
+    typealias SwiftType = LiveText?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLiveText.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLiveText.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceUInt64: FfiConverterRustBuffer {
     typealias SwiftType = [UInt64]
 
@@ -2876,10 +3230,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_xs_ffi_checksum_method_contentsearch_recall() != 36138) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xs_ffi_checksum_method_livescan_check() != 56851) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_method_livescan_preview() != 15288) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xs_ffi_checksum_constructor_contentindex_open() != 21774) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_constructor_contentindexwriter_open() != 27549) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_constructor_livescan_new() != 7389) {
         return InitializationResult.apiChecksumMismatch
     }
 

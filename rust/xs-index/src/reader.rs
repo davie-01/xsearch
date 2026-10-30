@@ -514,6 +514,48 @@ impl SearchSession {
     }
 }
 
+/// Query verification on text that is not in the index (live scan, M4-3 / §8.7): the same
+/// matching, hit counting, snippet and highlight rules as indexed search, so live hits look
+/// and behave like indexed ones.
+pub struct TextMatcher {
+    mode: Mode,
+    compiled: Compiled,
+    positives: Vec<Pat>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextHit {
+    pub hit_count: u32,
+    pub snippet: String,
+    pub snippet_highlights: Vec<Range<u32>>,
+}
+
+impl TextMatcher {
+    pub fn new(expr: &Expr, mode: Mode) -> Self {
+        let compiled = Compiled::new(expr, mode);
+        let positives = compiled.positives();
+        Self { mode, compiled, positives }
+    }
+
+    /// None when `text` does not match.
+    pub fn check(&self, text: &str) -> Option<TextHit> {
+        let norm = normalize_text(text, self.mode);
+        if !self.compiled.matches(&norm) {
+            return None;
+        }
+        let (hit_count, first_end) = count_hits(&norm, &self.positives);
+        let (snippet, snippet_highlights) = snippet(text, self.mode, &self.positives, first_end);
+        Some(TextHit { hit_count, snippet, snippet_highlights })
+    }
+
+    /// Every hit as a UTF-16 range of `text` (preview).
+    pub fn highlights(&self, text: &str) -> Vec<Range<u32>> {
+        let ranges = hit_ranges(&normalize(text, self.mode), &self.positives);
+        let utf16 = utf16_offsets(text);
+        ranges.into_iter().map(|r| utf16[r.start] as u32..utf16[r.end] as u32).collect()
+    }
+}
+
 /// Normalized-byte ranges of every occurrence of `literals` (normalized for the mode), sorted,
 /// overlaps merged.
 fn occurrences(norm: &str, literals: &[Pat]) -> Vec<Range<usize>> {

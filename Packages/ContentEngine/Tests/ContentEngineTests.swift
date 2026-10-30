@@ -74,3 +74,24 @@ func input(_ id: UInt64, _ text: String, dir: String = "/Users/t/下载", name: 
     let after = try s.next(budgetMs: 1000, maxHits: 100_000)
     #expect(after.verified == first.verified && !after.done)
 }
+
+@Test func liveScanReadsTextFilesLikeTheIndex() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xs-live-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let utf8 = dir.appendingPathComponent("a.md").path
+    try "会议纪要\n合同 金额 100 万元".write(toFile: utf8, atomically: true, encoding: .utf8)
+    let gbk = dir.appendingPathComponent("b.txt").path
+    let gb = CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
+    try "旧文件 合同 编号".data(using: String.Encoding(rawValue: gb))!.write(to: URL(fileURLWithPath: gbk))
+    let binary = dir.appendingPathComponent("c.log").path
+    try Data([0x63, 0, 0xE5, 0x90, 0x88]).write(to: URL(fileURLWithPath: binary))
+    let scan = try LiveScan(query: "合同 -草稿", mode: .loose, maxFileBytes: 1 << 20)
+    let a = try #require(scan.check(path: utf8))
+    #expect(a.hitCount == 1 && a.snippet.contains("合同"))
+    #expect(scan.check(path: gbk) != nil)
+    #expect(scan.check(path: binary) == nil)
+    #expect(try LiveScan(query: "合同", mode: .loose, maxFileBytes: 4).check(path: utf8) == nil)
+    let p = try #require(scan.preview(path: utf8))
+    #expect(p.highlights.count == 1 && (p.text as NSString).substring(with: NSRange(location: Int(p.highlights[0].start), length: 2)) == "合同")
+}

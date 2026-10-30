@@ -671,7 +671,19 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         case .longTermsThenVerify?: addNotice("先用长词找候选，再核验短词。", color: .tertiaryLabelColor, size: 12.5)
         default: break
         }
-        guard out.done && contentShown == 0 else { return }
+        // §8.7: a dir: outside the content scope can be scanned live, on request only.
+        let uncovered = uncoveredDirs(out.query)
+        if !uncovered.isEmpty && !out.live {
+            let names = uncovered.map { PathUtil.abbreviate($0, home: NSHomeDirectory()) }.joined(separator: "、")
+            addNotice("\(names) 没有建立内容索引，结果只包含已索引的文件。", color: Theme.warnText, size: 12.5)
+            addLink("实时扫描其中的文本文件", action: #selector(startLiveScan))
+            // Dev: XS_LIVE_SCAN=1 starts the scan without the click.
+            if ProcessInfo.processInfo.environment["XS_LIVE_SCAN"] == "1" && out.done && !autoScanned {
+                autoScanned = true
+                DispatchQueue.main.async { [weak self] in self?.startLiveScan() }
+            }
+        }
+        guard out.done && contentShown == 0 && uncovered.isEmpty else { return }
         addNotice("已索引的内容中没有找到“\(out.query.expression)”。")
         let stats = session.contentStats?() ?? ContentStats()
         var parts = ["内容索引 \(Theme.count(stats.indexed)) 个文件"]
@@ -679,6 +691,25 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if stats.failed > 0 { parts.append("\(stats.failed) 个文件提取失败") }
         addNotice(parts.joined(separator: " · "), color: .tertiaryLabelColor, size: 12.5)
         addLink("为什么可能搜不到？", action: #selector(showDiagnostics))
+    }
+
+    private var autoScanned = false
+
+    private func uncoveredDirs(_ q: ContentQuery) -> [String] {
+        let roots = Preferences.shared.contentScope.roots(home: NSHomeDirectory())
+        return q.dirs.filter { d in !roots.contains { PathUtil.isWithin(d, $0) } }
+    }
+
+    @objc private func startLiveScan() {
+        guard let out = contentOutput, !out.query.isEmpty else { return }
+        let (files, unresolved) = session.liveFiles(dirs: uncoveredDirs(out.query))
+        clearNotice()
+        for d in unresolved {
+            addNotice("\(PathUtil.abbreviate(d, home: NSHomeDirectory())) 不在文件名索引中，无法扫描。", color: Theme.warnText, size: 12.5)
+        }
+        addNotice("实时扫描只读取文本类文件（\(Theme.count(files.count)) 个），不会写入索引。", color: .tertiaryLabelColor, size: 12.5)
+        resize()
+        session.content.liveScan(out.query, text: out.text, files: files) { [weak self] batch in self?.applyContent(batch) }
     }
 
     @objc private func showDiagnostics() {
@@ -751,7 +782,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             parts = ["内容索引 \(Theme.count(stats.indexed)) 个文件"]
             if stats.pending > 0 { parts.append("待处理 \(Theme.count(stats.pending))") }
             if let out = contentOutput, !out.query.isEmpty, out.error == nil {
-                parts.append(out.done ? "\(Theme.count(contentShown)) 个结果" : "仍在搜索… 已核验 \(Theme.count(Int(out.verified))) / \(Theme.count(Int(out.candidates)))")
+                if out.live {
+                    parts.append(out.done ? "实时扫描完成 · \(Theme.count(contentShown)) 个结果"
+                                          : "实时扫描… \(Theme.count(out.scanned)) / \(Theme.count(out.scanTotal)) 个文件")
+                } else {
+                    parts.append(out.done ? "\(Theme.count(contentShown)) 个结果" : "仍在搜索… 已核验 \(Theme.count(Int(out.verified))) / \(Theme.count(Int(out.candidates)))")
+                }
             }
         } else if let out = output, !out.query.isEmpty {
             parts.append("\(Theme.count(out.total)) 个结果")

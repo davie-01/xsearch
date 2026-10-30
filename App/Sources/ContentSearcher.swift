@@ -14,6 +14,18 @@ struct ContentOutput: @unchecked Sendable {
     var candidates: UInt64
     var done: Bool
     var error: String?
+    /// Live scan batch (§8.7): files without a content index, read directly.
+    var live = false
+    var scanned = 0
+    var scanTotal = 0
+}
+
+/// A file for the live scan, taken from the name index.
+struct LiveFile: Sendable {
+    var fileId: Int64
+    var path: String
+    var size: Int64
+    var mtime: Int64
 }
 
 struct PreviewData: @unchecked Sendable {
@@ -132,6 +144,77 @@ final class ContentSearcher: @unchecked Sendable {
             }
             first = false
             if out.done { break }
+        }
+    }
+
+    private let liveQueue = DispatchQueue(label: "xsearch.live", qos: .userInitiated)
+    private var liveGeneration = 0
+
+    /// Live scan (§8.7, explicit only): checks `files` one by one with the same matching as
+    /// the index and delivers appended batches with progress; a new query or scan stops it.
+    func liveScan(_ q: ContentQuery, text: String, files: [LiveFile], deliver: @escaping @MainActor @Sendable (ContentOutput) -> Void) {
+        lock.lock()
+        let gen = generation
+        liveGeneration += 1
+        let live = liveGeneration
+        lock.unlock()
+        let mode = self.mode
+        liveQueue.async { [weak self] in
+            guard let self else { return }
+            func current() -> Bool {
+                self.lock.lock()
+                defer { self.lock.unlock() }
+                return gen == self.generation && live == self.liveGeneration
+            }
+            var out = ContentOutput(text: text, query: q, hits: [], append: true, recall: nil, verified: 0, candidates: 0, done: false, error: nil,
+                                    live: true, scanned: 0, scanTotal: files.count)
+            guard let scan = try? LiveScan(query: q.expression, mode: mode, maxFileBytes: 100 << 20) else { return }
+            var pending: [ContentHit] = []
+            var last = Date()
+            for (i, f) in files.enumerated() {
+                guard current() else { return }
+                if q.allows(size: f.size, mtime: f.mtime), let h = scan.check(path: f.path) {
+                    let url = URL(fileURLWithPath: f.path)
+                    pending.append(ContentHit(fileId: UInt64(f.fileId), name: url.lastPathComponent, dir: url.deletingLastPathComponent().path,
+                                              mtime: f.mtime, size: f.size, state: .complete, hitCount: h.hitCount, snippet: h.snippet,
+                                              snippetHighlights: h.snippetHighlights))
+                }
+                let finished = i == files.count - 1
+                if finished || pending.count >= 50 || Date().timeIntervalSince(last) > 0.15 {
+                    out.hits = pending
+                    out.scanned = i + 1
+                    out.done = finished
+                    let batch = out
+                    DispatchQueue.main.async { if current() { deliver(batch) } }
+                    pending = []
+                    last = Date()
+                }
+            }
+            if files.isEmpty {
+                out.done = true
+                let batch = out
+                DispatchQueue.main.async { deliver(batch) }
+            }
+        }
+    }
+
+    /// Preview of a live hit: the file itself, decoded, with every hit.
+    func livePreview(path: String, expression: String, deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
+        let mode = self.mode
+        previewQueue.async {
+            guard let scan = try? LiveScan(query: expression, mode: mode, maxFileBytes: 100 << 20), let t = scan.preview(path: path) else {
+                DispatchQueue.main.async { deliver(nil) }
+                return
+            }
+            var st = stat()
+            lstat(path, &st)
+            let ns = Int64(st.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(st.st_mtimespec.tv_nsec)
+            let url = URL(fileURLWithPath: path)
+            let doc = ContentDocument(fileId: 0, opSeq: 0, revision: UInt64(bitPattern: ns), name: url.lastPathComponent,
+                                      dir: url.deletingLastPathComponent().path, mtime: Int64(st.st_mtimespec.tv_sec), size: Int64(st.st_size),
+                                      text: t.text, anchorsJson: "[]", pagesJson: "[]", state: .complete)
+            let data = PreviewData(document: doc, highlights: t.highlights)
+            DispatchQueue.main.async { deliver(data) }
         }
     }
 

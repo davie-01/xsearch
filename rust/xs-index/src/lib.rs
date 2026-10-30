@@ -8,7 +8,7 @@ pub mod schema;
 pub mod writer;
 
 pub use doc::{Anchor, AnchorKind, ContentDoc, ExtractState, PageState, Source};
-pub use reader::{Batch, ContentReader, DocView, Hit, Recall, SearchRequest, SearchSession};
+pub use reader::{Batch, ContentReader, DocView, Hit, Recall, SearchRequest, SearchSession, TextHit, TextMatcher};
 pub use writer::{CommitInfo, ContentWriter};
 pub use xs_core::normalize::Mode;
 pub use xs_core::query::{Expr, parse};

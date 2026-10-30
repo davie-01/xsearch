@@ -538,6 +538,64 @@ pub fn extract_epub(path: String, max_unpacked_bytes: u64) -> Result<ExtractionO
     Ok(output(e, xs_parsers::web::EPUB_EXTRACTOR_VERSION))
 }
 
+/// Live scan (§8.7): one parsed query checked against files that have no content index.
+#[derive(uniffi::Object)]
+pub struct LiveScan {
+    matcher: idx::TextMatcher,
+    max_file_bytes: u64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct LiveHit {
+    pub hit_count: u32,
+    pub snippet: String,
+    pub snippet_highlights: Vec<Utf16Range>,
+}
+
+/// A text file read for preview: decoded text and every hit in it.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct LiveText {
+    pub text: String,
+    pub highlights: Vec<Utf16Range>,
+}
+
+impl LiveScan {
+    /// Decoded text (BOM / UTF-8 / GB18030), None when unreadable, too large or binary.
+    fn read(&self, path: &str) -> Option<String> {
+        let meta = std::fs::metadata(path).ok()?;
+        if !meta.is_file() || meta.len() > self.max_file_bytes {
+            return None;
+        }
+        let bytes = std::fs::read(path).ok()?;
+        // Binary data posing as text: a NUL in the first 8 KB.
+        if bytes.iter().take(8192).any(|&b| b == 0) && !bytes.starts_with(&[0xFF, 0xFE]) && !bytes.starts_with(&[0xFE, 0xFF]) {
+            return None;
+        }
+        xs_parsers::decode_text(&bytes, false).ok().map(|e| e.text)
+    }
+}
+
+#[uniffi::export]
+impl LiveScan {
+    #[uniffi::constructor]
+    pub fn new(query: String, mode: MatchMode, max_file_bytes: u64) -> Result<Arc<Self>, EngineError> {
+        Ok(Arc::new(Self { matcher: idx::TextMatcher::new(&parse(&query)?, mode.into()), max_file_bytes }))
+    }
+
+    /// None when the file does not match (or cannot be read as text).
+    pub fn check(&self, path: String) -> Option<LiveHit> {
+        let text = self.read(&path)?;
+        let h = self.matcher.check(&text)?;
+        Some(LiveHit { hit_count: h.hit_count, snippet: h.snippet, snippet_highlights: h.snippet_highlights.into_iter().map(range).collect() })
+    }
+
+    pub fn preview(&self, path: String) -> Option<LiveText> {
+        let text = self.read(&path)?;
+        let highlights = self.matcher.highlights(&text).into_iter().map(range).collect();
+        Some(LiveText { text, highlights })
+    }
+}
+
 /// One unpacked archive member.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ArchiveMember {

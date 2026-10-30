@@ -126,6 +126,22 @@ final class SearchSession {
         }
     }
 
+    /// Text-type files under `dirs` from the name index, for the live scan (§8.7): the name
+    /// scope's exclusion rules apply as they do everywhere else.
+    func liveFiles(dirs: [String]) -> (files: [LiveFile], unresolved: [String]) {
+        let exts = ContentType.text.extensions.sorted().joined(separator: ";")
+        var files: [LiveFile] = []
+        var unresolved: [String] = []
+        for d in dirs {
+            let q = NameQuery.parse("dir:\"\(d)\" ext:\(exts)", home: home)
+            let r = names.search(q, limit: 200_000)
+            unresolved += r.unresolvedDirs
+            files += r.hits.filter { !$0.flags.contains(.directory) }.map { LiveFile(fileId: $0.fileId, path: $0.path, size: $0.size, mtime: $0.mtime) }
+        }
+        // Newest first, like indexed results.
+        return (files.sorted { $0.mtime > $1.mtime }, unresolved)
+    }
+
     nonisolated static func item(path: String, fileId: Int64?, group: ResultItem.Group) -> ResultItem {
         var isDir: ObjCBool = false
         FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
