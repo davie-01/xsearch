@@ -1082,6 +1082,189 @@ public func FfiConverterTypeContentSearch_lower(_ value: ContentSearch) -> Unsaf
 
 
 
+public struct ArchiveListing {
+    public var members: [ArchiveMember]
+    public var skippedByType: UInt32
+    public var skippedTooLarge: UInt32
+    public var encrypted: UInt32
+    public var truncated: Bool
+    public var warnings: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(members: [ArchiveMember], skippedByType: UInt32, skippedTooLarge: UInt32, encrypted: UInt32, truncated: Bool, warnings: [String]) {
+        self.members = members
+        self.skippedByType = skippedByType
+        self.skippedTooLarge = skippedTooLarge
+        self.encrypted = encrypted
+        self.truncated = truncated
+        self.warnings = warnings
+    }
+}
+
+#if compiler(>=6)
+extension ArchiveListing: Sendable {}
+#endif
+
+
+extension ArchiveListing: Equatable, Hashable {
+    public static func ==(lhs: ArchiveListing, rhs: ArchiveListing) -> Bool {
+        if lhs.members != rhs.members {
+            return false
+        }
+        if lhs.skippedByType != rhs.skippedByType {
+            return false
+        }
+        if lhs.skippedTooLarge != rhs.skippedTooLarge {
+            return false
+        }
+        if lhs.encrypted != rhs.encrypted {
+            return false
+        }
+        if lhs.truncated != rhs.truncated {
+            return false
+        }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(members)
+        hasher.combine(skippedByType)
+        hasher.combine(skippedTooLarge)
+        hasher.combine(encrypted)
+        hasher.combine(truncated)
+        hasher.combine(warnings)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveListing: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveListing {
+        return
+            try ArchiveListing(
+                members: FfiConverterSequenceTypeArchiveMember.read(from: &buf), 
+                skippedByType: FfiConverterUInt32.read(from: &buf), 
+                skippedTooLarge: FfiConverterUInt32.read(from: &buf), 
+                encrypted: FfiConverterUInt32.read(from: &buf), 
+                truncated: FfiConverterBool.read(from: &buf), 
+                warnings: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ArchiveListing, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeArchiveMember.write(value.members, into: &buf)
+        FfiConverterUInt32.write(value.skippedByType, into: &buf)
+        FfiConverterUInt32.write(value.skippedTooLarge, into: &buf)
+        FfiConverterUInt32.write(value.encrypted, into: &buf)
+        FfiConverterBool.write(value.truncated, into: &buf)
+        FfiConverterSequenceString.write(value.warnings, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveListing_lift(_ buf: RustBuffer) throws -> ArchiveListing {
+    return try FfiConverterTypeArchiveListing.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveListing_lower(_ value: ArchiveListing) -> RustBuffer {
+    return FfiConverterTypeArchiveListing.lower(value)
+}
+
+
+/**
+ * One unpacked archive member.
+ */
+public struct ArchiveMember {
+    public var name: String
+    public var size: UInt64
+    public var extractedPath: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, size: UInt64, extractedPath: String) {
+        self.name = name
+        self.size = size
+        self.extractedPath = extractedPath
+    }
+}
+
+#if compiler(>=6)
+extension ArchiveMember: Sendable {}
+#endif
+
+
+extension ArchiveMember: Equatable, Hashable {
+    public static func ==(lhs: ArchiveMember, rhs: ArchiveMember) -> Bool {
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.size != rhs.size {
+            return false
+        }
+        if lhs.extractedPath != rhs.extractedPath {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(name)
+        hasher.combine(size)
+        hasher.combine(extractedPath)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveMember: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveMember {
+        return
+            try ArchiveMember(
+                name: FfiConverterString.read(from: &buf), 
+                size: FfiConverterUInt64.read(from: &buf), 
+                extractedPath: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ArchiveMember, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterUInt64.write(value.size, into: &buf)
+        FfiConverterString.write(value.extractedPath, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveMember_lift(_ buf: RustBuffer) throws -> ArchiveMember {
+    return try FfiConverterTypeArchiveMember.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveMember_lower(_ value: ArchiveMember) -> RustBuffer {
+    return FfiConverterTypeArchiveMember.lower(value)
+}
+
+
 public struct CommitRecord {
     public var instanceId: String
     public var batchId: UInt64
@@ -2390,6 +2573,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeArchiveMember: FfiConverterRustBuffer {
+    typealias SwiftType = [ArchiveMember]
+
+    public static func write(_ value: [ArchiveMember], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeArchiveMember.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ArchiveMember] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ArchiveMember]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeArchiveMember.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeContentHit: FfiConverterRustBuffer {
     typealias SwiftType = [ContentHit]
 
@@ -2556,6 +2764,21 @@ public func extractSpreadsheet(path: String, maxUnpackedBytes: UInt64)throws  ->
     )
 })
 }
+/**
+ * Unpacks members whose extension is in `extensions` (lowercase, no dot) into `dest`.
+ */
+public func unpackArchive(path: String, dest: String, extensions: [String], maxMemberBytes: UInt64, maxTotalBytes: UInt64, maxMembers: UInt32)throws  -> ArchiveListing  {
+    return try  FfiConverterTypeArchiveListing_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_unpack_archive(
+        FfiConverterString.lower(path),
+        FfiConverterString.lower(dest),
+        FfiConverterSequenceString.lower(extensions),
+        FfiConverterUInt64.lower(maxMemberBytes),
+        FfiConverterUInt64.lower(maxTotalBytes),
+        FfiConverterUInt32.lower(maxMembers),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -2594,6 +2817,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_spreadsheet() != 16974) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_unpack_archive() != 28679) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindex_document() != 63926) {

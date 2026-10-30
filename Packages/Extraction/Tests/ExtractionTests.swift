@@ -140,3 +140,29 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(h.method == "html/utf-8" && h.text == "标题\n正文 & 附件\n")
     #expect(ExtractionKind.of(name: "a.css") == .text && ExtractionKind.of(name: "b.epub") == .ebook)
 }
+
+@Test func archiveMembersGoThroughTheirExtractors() throws {
+    let dir = tmp("pack")
+    try? FileManager.default.removeItem(atPath: dir)
+    try FileManager.default.createDirectory(atPath: dir + "/资料", withIntermediateDirectories: true)
+    let docx = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../Tests/Fixtures/m0/structure.docx").standardized.path
+    try FileManager.default.copyItem(atPath: docx, toPath: dir + "/资料/结构.docx")
+    try "包内文本 合同编号 HT-01\n".write(toFile: dir + "/说明.txt", atomically: true, encoding: .utf8)
+    try "ignored".write(toFile: dir + "/图.png", atomically: true, encoding: .utf8)
+    let zipPath = tmp("pack.zip")
+    try? FileManager.default.removeItem(atPath: zipPath)
+    let zip = Process()
+    zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+    zip.currentDirectoryURL = URL(fileURLWithPath: dir)
+    zip.arguments = ["-qr", zipPath, "资料", "说明.txt", "图.png"]
+    try zip.run()
+    zip.waitUntilExit()
+    let r = try Extractor.extract(path: zipPath, limits: ExtractionLimits())
+    #expect(r.method == "archive" && r.state == "complete")
+    #expect(r.text.contains("合同编号 HT-01"))
+    let anchors = try JSONDecoder().decode([AnchorJSON].self, from: Data(r.anchorsJSON.utf8))
+    #expect(anchors.allSatisfy { $0.kind == "part" })
+    let names = ((try JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8))) as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+    #expect(names.contains("资料/结构.docx") && names.contains("说明.txt") && names.contains("结构.docx · 段 1"))
+    #expect(!names.contains { $0.contains("图.png") })
+}

@@ -376,7 +376,7 @@ Scope
 | RTF / HTML / ePub | M4 ✅ | RTF：NSAttributedString（失败时用 textutil）；HTML / ePub：Rust 容错扫描 | 正文 | 段落；ePub 另按章节 |
 | WPS（.wps） | M4 | 先用 .doc 的提取路线试；不行再调研 | 正文 | 段落 |
 | 旧版 PPT | M4 | 调研后再定 | | |
-| zip / 7z / tar 包内文件 | M4 | Rust，带“容器链”的虚拟路径 | 包内的子文件 | 子文件内的锚点 |
+| zip / 7z / tar / rar 包内文件 | M4 ✅（简化） | Rust 解包，Swift 按成员类型提取；整个压缩包算一份文档（M4-2 说明），虚拟路径的子文档以后再做 | 包内的子文件 | 成员路径 + 成员内的锚点 |
 | 邮件 .emlx / .eml | M4 | Rust | 主题、发件人、正文、附件（附件作为子文档） | |
 | 图片、扫描版 PDF | **M6** | Vision | 见第 14 节 | 文字框坐标 |
 

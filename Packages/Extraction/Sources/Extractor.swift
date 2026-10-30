@@ -69,6 +69,7 @@ public enum Extractor {
         case .web: engineVersions()["extractor.web"].flatMap(UInt64.init) ?? 1
         case .ebook: engineVersions()["extractor.ebook"].flatMap(UInt64.init) ?? 1
         case .rtf: rtfVersion
+        case .archive: archiveVersion
         }
     }
 
@@ -92,6 +93,9 @@ public enum Extractor {
         case .web:
             try checkSize(path, limits)
             return try rust { try extractHtml(path: path, maxFileBytes: limits.maxFileBytes) }
+        case .archive:
+            // Not bound by the single-file limit: members are (size, total and count limits).
+            return try archive(path, limits: limits)
         case .ebook:
             // An Apple Books ePub can be a folder: its size is the sum of its files.
             return try rust { try extractEpub(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }

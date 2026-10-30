@@ -538,6 +538,51 @@ pub fn extract_epub(path: String, max_unpacked_bytes: u64) -> Result<ExtractionO
     Ok(output(e, xs_parsers::web::EPUB_EXTRACTOR_VERSION))
 }
 
+/// One unpacked archive member.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ArchiveMember {
+    pub name: String,
+    pub size: u64,
+    pub extracted_path: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ArchiveListing {
+    pub members: Vec<ArchiveMember>,
+    pub skipped_by_type: u32,
+    pub skipped_too_large: u32,
+    pub encrypted: u32,
+    pub truncated: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Unpacks members whose extension is in `extensions` (lowercase, no dot) into `dest`.
+#[uniffi::export]
+pub fn unpack_archive(
+    path: String,
+    dest: String,
+    extensions: Vec<String>,
+    max_member_bytes: u64,
+    max_total_bytes: u64,
+    max_members: u32,
+) -> Result<ArchiveListing, EngineError> {
+    let wanted = |name: &str| name.rsplit_once('.').is_some_and(|(_, e)| extensions.iter().any(|x| x.eq_ignore_ascii_case(e)));
+    let limits = xs_parsers::archive::ArchiveLimits { max_member_bytes, max_total_bytes, max_members };
+    let u = xs_parsers::archive::unpack(Path::new(&path), Path::new(&dest), &wanted, limits)?;
+    Ok(ArchiveListing {
+        members: u
+            .members
+            .into_iter()
+            .map(|m| ArchiveMember { name: m.name, size: m.size, extracted_path: m.extracted.to_string_lossy().into_owned() })
+            .collect(),
+        skipped_by_type: u.skipped_by_type,
+        skipped_too_large: u.skipped_too_large,
+        encrypted: u.encrypted,
+        truncated: u.truncated,
+        warnings: u.warnings,
+    })
+}
+
 /// Engine versions, for diagnostics and rebuild decisions.
 #[uniffi::export]
 pub fn engine_versions() -> HashMap<String, String> {
@@ -560,5 +605,6 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.ofd".to_owned(), xs_parsers::office::OFD_EXTRACTOR_VERSION.to_string()),
         ("extractor.web".to_owned(), xs_parsers::web::HTML_EXTRACTOR_VERSION.to_string()),
         ("extractor.ebook".to_owned(), xs_parsers::web::EPUB_EXTRACTOR_VERSION.to_string()),
+        ("extractor.archive".to_owned(), xs_parsers::archive::ARCHIVE_EXTRACTOR_VERSION.to_string()),
     ])
 }

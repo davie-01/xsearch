@@ -64,7 +64,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
                                               (.text, "文本 / 代码"), (.image, "图片"), (.video, "视频"), (.audio, "音频"), (.archive, "压缩包"), (.app, "应用")]
     static let contentTypes: [(ContentType, String)] = [(.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"),
                                                         (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"),
-                                                        (.web, "网页"), (.ebook, "ePub"), (.rtf, "RTF")]
+                                                        (.web, "网页"), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, "压缩包")]
 
     init(session: SearchSession, usage: UsageStore?) {
         self.session = session

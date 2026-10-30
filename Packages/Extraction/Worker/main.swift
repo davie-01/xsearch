@@ -4,6 +4,22 @@
 import Extraction
 import Foundation
 
+// Dev: `xs-extract --probe FILE…` prints statistics only (never names or text).
+if CommandLine.arguments.dropFirst().first == "--probe" {
+    for path in CommandLine.arguments.dropFirst(2) {
+        let start = Date()
+        let ext = (path as NSString).pathExtension.lowercased()
+        do {
+            let r = try autoreleasepool { try Extractor.extract(path: path, limits: ExtractionLimits()) }
+            let anchors = (try? JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8)) as? [Any])?.count ?? 0
+            print("\(ext)\tok\tchars=\(r.text.unicodeScalars.count)\tanchors=\(anchors)\tstate=\(r.state)\twarnings=\(r.warnings.count)\tms=\(Int(Date().timeIntervalSince(start) * 1000))")
+        } catch {
+            print("\(ext)\terror\t\(String("\(error)".filter { !$0.isNumber }.prefix(80)))")
+        }
+    }
+    exit(0)
+}
+
 let faultsAllowed = ProcessInfo.processInfo.environment["XS_EXTRACT_FAULTS"] == "1"
 signal(SIGPIPE, SIG_IGN)
 
