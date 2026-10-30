@@ -70,6 +70,10 @@ final class ContentHitCell: NSTableCellView {
         count.textColor = .secondaryLabelColor
         snippet.font = .systemFont(ofSize: 12.5)
         snippet.lineBreakMode = .byTruncatingTail
+        // One line: a wrapped snippet pushed the path line and badge out of the 74 pt row.
+        snippet.maximumNumberOfLines = 1
+        snippet.usesSingleLineMode = true
+        snippet.cell?.wraps = false
         meta.font = .systemFont(ofSize: 11.5)
         meta.textColor = .tertiaryLabelColor
         meta.lineBreakMode = .byTruncatingMiddle
@@ -96,6 +100,7 @@ final class ContentHitCell: NSTableCellView {
             meta.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -6),
             badge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             badge.centerYAnchor.constraint(equalTo: meta.centerYAnchor),
+            meta.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -6),
         ])
     }
 
@@ -485,6 +490,11 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
             if out.live { liveIds.formUnion(new.map(\.fileId)) }
             hits += new
             table.insertRows(at: IndexSet(start..<hits.count), withAnimation: [])
+            // First results of a live scan after an empty list: select and preview them.
+            if start == 0 && !hits.isEmpty && table.selectedRow < 0 {
+                table.selectRowIndexes([0], byExtendingSelection: false)
+                table.scrollRowToVisible(0)
+            }
         } else {
             hits = out.hits
             table.reloadData()
