@@ -32,6 +32,116 @@ pub struct Normalized {
     pub source_spans: Vec<Range<usize>>,
 }
 pub fn normalize(input: &str, mode: Mode) -> Normalized {
+    let mut spans: Vec<Range<usize>> = vec![];
+    let text = normalize_impl(input, mode, Some(&mut spans), usize::MAX, usize::MAX);
+    Normalized {
+        text,
+        source_spans: spans,
+    }
+}
+/// Same output as `normalize(..).text` without the per-scalar source map: verification only
+/// needs to know whether a document matches, and the map costs 16 bytes per scalar.
+pub fn normalize_text(input: &str, mode: Mode) -> String {
+    normalize_impl(input, mode, None, usize::MAX, usize::MAX)
+}
+/// Normalizes only a prefix: stops once `max_out_bytes` of output exist or `max_source_scalars`
+/// source scalars were consumed. Identical to the start of `normalize` (each scalar maps
+/// independently; only whitespace merging carries state forward), so snippets can map an early
+/// hit without normalizing a whole long document.
+pub fn normalize_prefix(
+    input: &str,
+    mode: Mode,
+    max_out_bytes: usize,
+    max_source_scalars: usize,
+) -> Normalized {
+    let mut spans: Vec<Range<usize>> = vec![];
+    let text = normalize_impl(
+        input,
+        mode,
+        Some(&mut spans),
+        max_out_bytes,
+        max_source_scalars,
+    );
+    Normalized {
+        text,
+        source_spans: spans,
+    }
+}
+fn normalize_impl(
+    input: &str,
+    mode: Mode,
+    mut spans: Option<&mut Vec<Range<usize>>>,
+    max_out_bytes: usize,
+    max_source_scalars: usize,
+) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut last_space = false;
+    if mode == Mode::Strict {
+        // Strict keeps every scalar as is: no decomposition, folding or whitespace merging.
+        let mut end = input.len();
+        for (n, (b, _)) in input.char_indices().enumerate() {
+            if n >= max_source_scalars || b >= max_out_bytes {
+                end = b;
+                break;
+            }
+        }
+        let out = &input[..end];
+        if let Some(spans) = spans.as_deref_mut() {
+            spans.extend((0..out.chars().count()).map(|i| i..i + 1));
+        }
+        return out.to_owned();
+    }
+    let mut push =
+        |d: char, i: usize, out: &mut String, spans: &mut Option<&mut Vec<Range<usize>>>| {
+            let d = if d.is_whitespace() { ' ' } else { d };
+            if d == ' ' && last_space {
+                if let Some(spans) = spans.as_deref_mut() {
+                    spans.last_mut().unwrap().end = i + 1;
+                }
+            } else {
+                out.push(d);
+                if let Some(spans) = spans.as_deref_mut() {
+                    spans.push(i..i + 1);
+                }
+            }
+            last_space = d == ' ';
+        };
+    let mut decomposed: Vec<char> = Vec::with_capacity(8);
+    for (i, c) in input.chars().enumerate() {
+        if i >= max_source_scalars || out.len() >= max_out_bytes {
+            break;
+        }
+        // ASCII fast path: NFKD is identity; loose folding is A–Z → a–z only.
+        if c.is_ascii() {
+            let d = if mode == Mode::Loose {
+                c.to_ascii_lowercase()
+            } else {
+                c
+            };
+            push(d, i, &mut out, &mut spans);
+            continue;
+        }
+        // Per-scalar NFKD without allocating a String per character.
+        decomposed.clear();
+        // A single scalar's full decomposition is already in canonical order; the exhaustive
+        // test against `nfkd()` below checks this for every scalar the tables touch.
+        unicode_normalization::char::decompose_compatible(c, |d| decomposed.push(d));
+        for &d in &decomposed {
+            if mode == Mode::Loose
+                && let Some(f) = folding::fold(d)
+            {
+                for x in f.chars() {
+                    push(x, i, &mut out, &mut spans);
+                }
+                continue;
+            }
+            push(d, i, &mut out, &mut spans);
+        }
+    }
+    out
+}
+#[allow(dead_code)]
+fn normalize_reference(input: &str, mode: Mode) -> Normalized {
     let mut chars: Vec<char> = vec![];
     let mut spans: Vec<Range<usize>> = vec![];
     for (i, c) in input.chars().enumerate() {
@@ -110,4 +220,53 @@ pub fn occurrences(text: &str, needle: &str) -> Vec<Range<usize>> {
         .filter(|(_, (byte, _))| text[*byte..].starts_with(needle))
         .map(|(scalar, _)| scalar..scalar + needle.chars().count())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fast_paths_match_reference() {
+        let mut samples: Vec<String> = [
+            "",
+            "abc",
+            "ABC  def\t\n x",
+            "cafe\u{301} café ﬁ Straße İ ＡＢＣ",
+            "😀𠀀甲乙丙",
+            "a\t\n b",
+            "각 각",
+            "a\u{315}\u{300}",
+            "  lead and trail  ",
+            "ǅ ẞ Ⅻ ㎒ ﬀ",
+            "\u{3000}全角\u{3000}空格",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        // Every scalar the casefold and NFKD tables touch, embedded in ASCII context.
+        for c in (0x80u32..0x3_0000).filter_map(char::from_u32) {
+            if folding::fold(c).is_some() || c.to_string().nfkd().ne(std::iter::once(c)) {
+                samples.push(format!("A{c} B"));
+            }
+        }
+        for s in &samples {
+            for mode in Mode::ALL {
+                let reference = normalize_reference(s, mode);
+                assert_eq!(normalize(s, mode), reference, "{s:?} {mode:?}");
+                assert_eq!(normalize_text(s, mode), reference.text, "{s:?} {mode:?}");
+                for k in 0..=s.chars().count() {
+                    let p = normalize_prefix(s, mode, usize::MAX, k);
+                    assert!(reference.text.starts_with(&p.text), "{s:?} {mode:?} {k}");
+                    assert_eq!(
+                        p.source_spans[..],
+                        reference.source_spans[..p.source_spans.len()]
+                            .iter()
+                            .map(|r| r.start..r.end.min(k.max(r.start + 1)))
+                            .collect::<Vec<_>>()[..],
+                        "{s:?} {mode:?} {k}"
+                    );
+                }
+            }
+        }
+    }
 }

@@ -1503,6 +1503,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "xs-index"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tantivy",
+ "tempfile",
+ "xs-core",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"

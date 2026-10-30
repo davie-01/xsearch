@@ -1,0 +1,16 @@
+[package]
+name = "xs-index"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "XSearch content index: Tantivy schema, single writer, verified literal search (ARCHITECTURE §8)."
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tantivy.workspace = true
+xs-core = { path = "../xs-core" }
+
+[dev-dependencies]
+tempfile.workspace = true
