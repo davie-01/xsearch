@@ -562,6 +562,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let text = field.stringValue
         contentChip.isHidden = mode != .content
         if mode == .content {
+            session.content.mode = Preferences.shared.contentMatchMode
             session.content.search(text, home: NSHomeDirectory(), syntax: Preferences.shared.querySyntax) { [weak self] out in self?.applyContent(out) }
             return
         }
@@ -692,9 +693,24 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             return
         }
         usage?.recordOpen(path: path, fileId: Int64(hit.fileId))
+        // Line / page of the occurrence shown in the preview (打开方式).
+        let isShown = contentPane.selected?.fileId == hit.fileId
+        let line = isShown ? contentPane.preview.currentLine : nil, page = isShown ? contentPane.preview.currentPage : nil
         hide()
         let url = URL(fileURLWithPath: path)
-        if reveal { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { NSWorkspace.shared.open(url) }
+        if reveal {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else if let message = Opener.open(path: path, line: line, page: page) {
+            Self.inform(message)
+        }
+    }
+
+    /// After the panel is gone: a plain alert in front.
+    static func inform(_ message: String) {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.runModal()
     }
 
     @objc private func showScopeSettings() {
@@ -1000,7 +1016,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if mode == .name { row("kind:文件夹", "类型：文件夹 / 应用 / pdf / doc / 图片 …") }
         row("size:>10mb", "大小：> >= < <=、1m..10m、empty")
         row("dm:today", "修改时间：today / 本周 / 7d / 2024-05 / >=2025 / 2024..2025-06")
-        s.append(NSAttributedString(string: "\n可在 设置 → 通用 → 搜索语法 中开关各项语法。", attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        s.append(NSAttributedString(string: "\n可在 设置 → 搜索语法 中开关各项语法。", attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
         return s
     }
 

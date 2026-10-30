@@ -1,4 +1,5 @@
 import Foundation
+import ContentEngine
 import XSearchCore
 
 /// Settings (§6.4). Stored in UserDefaults; indexes live under Application Support.
@@ -34,6 +35,29 @@ final class Preferences {
             return s
         }
         set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "querySyntax") }
+    }
+
+    /// Settings → 搜索语法 → 内容匹配模式.
+    var matchMode: String {
+        get { defaults.string(forKey: "matchMode") ?? "loose" }
+        set { defaults.set(newValue, forKey: "matchMode") }
+    }
+
+    var contentMatchMode: MatchMode {
+        switch matchMode {
+        case "caseSensitive": .caseSensitive
+        case "strict": .strict
+        default: .loose
+        }
+    }
+
+    /// Settings → 打开方式.
+    var openWith: OpenWith {
+        get {
+            guard let data = defaults.data(forKey: "openWith"), let o = try? JSONDecoder().decode(OpenWith.self, from: data) else { return OpenWith() }
+            return o
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "openWith") }
     }
 
     var hotKey: HotKey.Combo {

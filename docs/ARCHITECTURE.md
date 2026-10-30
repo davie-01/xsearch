@@ -1,6 +1,6 @@
 # XSearch 架构设计
 
-> 版本：v0.10（2026-10-30）
+> 版本：v0.11（2026-10-30）
 > 状态：M0 完成（[M0 报告](m0/RESULTS.md)）；M1 完成（[M1 进度](m1/STATUS.md)）；**M2 内容最小闭环完成**（[M2 进度](m2/STATUS.md)）。
 > 平台：macOS 26 及以上，Apple Silicon（arm64）
 > 相关文档：`design/UI-SPEC.md`（界面与交互规范，v1.1）、`design/design-tokens.json`（设计变量）、`design/prototype/`（原型源文件）；`XSearch-architecture-review-v0.3.md`（评审意见）
@@ -590,6 +590,7 @@ XSearch/
 
 | 版本 | 变更 |
 |---|---|
+| v0.11 | M3-3/M3-4：收藏（user.sqlite，按 file_id 跟踪移动）、移到废纸篓、阅读窗口（PDF 原页面精确高亮、外部打开到第 N 页）、完整窗口、搜索语法与打开方式设置、隐藏主菜单 |
 | v0.10 | M3-1/M3-2：表格、PPTX、OFD 提取；名称模式支持运算符、通配符、正则和 size:/dm:；内容模式支持邻近查询和正则；§8.6、§12 补充实现细节 |
 | v0.9 | M2 实现：xs-index/xs-parsers/xs-ffi（UniFFI）；ExtractionWorker 为可强杀的辅助进程；IndexService 暂在进程内；内容任务由对账器同事务写入、op_seq 全局递增；提取缓存键为 SHA-256 + 提取器版本 + 配置；重建内容索引为新实例追平后切换 |
 | v0.8 | M1 实现：Swift Package（XSearchCore / NameEngine / Catalog）+ AppKit 应用；文件名键通过 C ABI 使用 Rust 实现（D12 延伸到名称）；9.2 节补充 M1 对账规则（目录 inode 变化即新目录、fsgetpath 追踪移动、迭代解析、失败批次兜底）；增量层改为按“代号”rebase，快照只记录已完整提交的序号；M1 中空格按 AND；暂用 SwiftPM + 打包脚本代替 XcodeGen |

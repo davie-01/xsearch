@@ -145,6 +145,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let delay = env["XS_LAUNCHER_DELAY"].flatMap(Double.init) ?? 1.5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.launcher.show(text: text) }
         }
+        // Dev: open a settings tab directly (XS_SETTINGS_TAB=搜索语法).
+        if let tab = env["XS_SETTINGS_TAB"].flatMap(SettingsTab.init(rawValue:)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.openSettings(tab: tab) }
+        }
         // Dev: open the full window directly (XS_FULL_MODE=content for content mode).
         if let text = env["XS_FULL_TEXT"] {
             let mode: Preferences.Mode = env["XS_FULL_MODE"] == "content" ? .content : .name

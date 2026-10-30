@@ -5,12 +5,14 @@ import SwiftUI
 import XSearchCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "通用", scope = "索引范围", diagnostics = "诊断", privacy = "隐私与数据"
+    case general = "通用", scope = "索引范围", syntax = "搜索语法", openWith = "打开方式", diagnostics = "诊断", privacy = "隐私与数据"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .general: "gearshape"
         case .scope: "folder"
+        case .syntax: "text.magnifyingglass"
+        case .openWith: "arrow.up.forward.app"
         case .diagnostics: "stethoscope"
         case .privacy: "lock"
         }
@@ -28,6 +30,8 @@ final class SettingsModel: ObservableObject {
     @Published var summonMode: Preferences.SummonMode
     @Published var launchAtLogin: Bool
     @Published var syntax: QuerySyntax { didSet { Preferences.shared.querySyntax = syntax } }
+    @Published var matchMode = Preferences.shared.matchMode { didSet { Preferences.shared.matchMode = matchMode } }
+    @Published var openWith = Preferences.shared.openWith { didSet { Preferences.shared.openWith = openWith } }
     @Published var newRule = ""
     @Published var content: ContentScope
     @Published var contentStatus: ContentIndexer.Status?
@@ -193,6 +197,8 @@ struct SettingsView: View {
                     switch model.tab {
                     case .general: GeneralPane(model: model)
                     case .scope: ScopePane(model: model)
+                    case .syntax: SyntaxPane(model: model)
+                    case .openWith: OpenWithPane(model: model)
                     case .diagnostics: DiagnosticsPane(model: model)
                     case .privacy: PrivacyPane(model: model)
                     }
@@ -247,11 +253,50 @@ struct GeneralPane: View {
             .pickerStyle(.radioGroup)
             .labelsHidden()
         }
-        Card(title: "搜索语法", subtitle: "关闭后对应符号按普通字符搜索；按 ⌘/ 查看速查") {
-            Toggle("运算符：| 任一、- 排除、括号分组（两种模式）", isOn: $model.syntax.operators)
-            Toggle("通配符：* ? **（名称模式）", isOn: $model.syntax.wildcards)
-            Toggle("正则：regex:…", isOn: $model.syntax.regex)
-            Toggle("邻近查询：\"甲 乙\"~N（内容模式）", isOn: $model.syntax.proximity)
+    }
+}
+
+struct SyntaxPane: View {
+    @ObservedObject var model: SettingsModel
+    var body: some View {
+        Text("搜索语法").font(.system(size: 20, weight: .semibold))
+        Card(title: "语法开关", subtitle: "关闭后对应符号按普通字符搜索；按 ⌘/ 查看速查") {
+            Toggle(isOn: $model.syntax.operators) { Text(verbatim: "运算符　甲 | 乙、-草稿、(甲 | 乙) 丙　两种模式") }
+            Toggle(isOn: $model.syntax.wildcards) { Text(verbatim: "通配符　*.pdf、报告?.docx、**/合同/*.pdf　名称模式") }
+            Toggle(isOn: $model.syntax.regex) { Text(verbatim: "正则　regex:^\\d+\\.txt$") }
+            Toggle(isOn: $model.syntax.proximity) { Text(verbatim: "邻近查询　\"合同 金额\"~10　内容模式") }
+        }
+        Card(title: "内容匹配模式", subtitle: "只影响内容搜索；完整窗口里可以临时切换") {
+            Picker("", selection: $model.matchMode) {
+                Text("宽松（默认）：不区分大小写、全角半角和空白差异").tag("loose")
+                Text("区分大小写：其余与宽松相同").tag("caseSensitive")
+                Text("严格原文：逐字符比较，不做任何归一化").tag("strict")
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+        }
+    }
+}
+
+struct OpenWithPane: View {
+    @ObservedObject var model: SettingsModel
+    var body: some View {
+        Text("打开方式").font(.system(size: 20, weight: .semibold))
+        Card(title: "文本与代码", subtitle: "在内容模式下打开时，用所选编辑器跳到命中所在的行") {
+            Picker("", selection: $model.openWith.editor) {
+                ForEach(Editor.allCases, id: \.self) { e in
+                    Text(e.isInstalled ? e.title : e.title + "（未安装）").tag(e).disabled(!e.isInstalled)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        Card(title: "PDF", subtitle: "在内容模式下打开时，用外部阅读器跳到命中所在的页") {
+            Toggle("打开到命中页", isOn: $model.openWith.pdfAtPage)
+            Text(NSWorkspace.shared.urlForApplication(withBundleIdentifier: ExternalPDF.skimID) != nil
+                 ? "已安装 Skim：直接跳页。"
+                 : "使用“预览”：需要在 系统设置 → 隐私与安全性 → 辅助功能 中允许 XSearch，否则打开第 1 页。安装 Skim 后不需要这项权限。")
+                .font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
     }
 }

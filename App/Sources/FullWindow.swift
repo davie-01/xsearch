@@ -275,7 +275,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func show(text: String, mode: Preferences.Mode) {
         // The index instance can change (content rebuild): follow the launcher's searcher.
         content.indexPath = session.content.indexPath
-        content.mode = session.content.mode
+        matchPopup.selectItem(at: ["loose", "caseSensitive", "strict"].firstIndex(of: Preferences.shared.matchMode) ?? 0)
         field.stringValue = text
         if mode != self.mode {
             self.mode = mode
@@ -492,6 +492,15 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         let urls = selectedRows.map { URL(fileURLWithPath: $0.path) }.filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !urls.isEmpty else { return }
         for r in selectedRows { usage?.recordOpen(path: r.path, fileId: r.fileId) }
+        // One content hit: honour 打开方式 at the previewed occurrence.
+        if !reveal, selectedRows.count == 1, selectedRows[0].hit != nil {
+            if let message = Opener.open(path: urls[0].path, line: textPreview.currentLine, page: textPreview.currentPage), let window {
+                let alert = NSAlert()
+                alert.messageText = message
+                alert.beginSheetModal(for: window)
+            }
+            return
+        }
         if reveal { NSWorkspace.shared.activateFileViewerSelecting(urls) } else { urls.forEach { NSWorkspace.shared.open($0) } }
     }
 

@@ -360,6 +360,19 @@ final class PreviewPane: NSView {
     private var currentPath = ""
     private var subtitlePath: String { (currentPath as NSString).deletingLastPathComponent }
 
+    /// 1-based line of the current hit in the stored text (editor "open at line").
+    var currentLine: Int? {
+        guard currentHit >= 0, currentHit < hits.count else { return nil }
+        let prefix = (textView.string as NSString).substring(to: hits[currentHit].location)
+        return prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+    }
+
+    /// Page of the current hit (PDF "open at page").
+    var currentPage: Int? {
+        guard currentHit >= 0, currentHit < hits.count else { return nil }
+        return anchors.last { $0.utf16 <= hits[currentHit].location && $0.info.kind == "page" }?.info.page
+    }
+
     @objc func goNext() { go(to: currentHit + 1) }
     @objc func goPrev() { go(to: currentHit - 1) }
     @objc private func doLocate() { onLocate?() }
