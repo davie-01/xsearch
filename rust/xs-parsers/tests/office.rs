@@ -66,3 +66,27 @@ fn ofd_pages_follow_document_order() {
     assert_eq!(e.text.lines().collect::<Vec<_>>(), vec!["电子公文 第一页", "发文字号", "第二页 附件"]);
     assert_eq!(e.anchors.iter().map(|a| a.kind.clone()).collect::<Vec<_>>(), vec![AnchorKind::Page { page: 1 }, AnchorKind::Page { page: 2 }]);
 }
+
+#[test]
+fn scanned_ofd_pages_wait_for_ocr() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = r#"<ofd:Page xmlns:ofd="http://www.ofdspec.org/2016"><ofd:Content><ofd:Layer><ofd:ImageObject ID="5" ResourceID="9"/></ofd:Layer></ofd:Content></ofd:Page>"#;
+    let text = r#"<ofd:Page xmlns:ofd="http://www.ofdspec.org/2016"><ofd:Content><ofd:Layer><ofd:TextObject ID="1"><ofd:TextCode>正文</ofd:TextCode></ofd:TextObject></ofd:Layer></ofd:Content></ofd:Page>"#;
+    let build = |name: &str, pages: &[&str]| {
+        let p = dir.path().join(name);
+        let mut files = vec![
+            ("OFD.xml", r#"<ofd:OFD xmlns:ofd="http://www.ofdspec.org/2016"><ofd:DocBody><ofd:DocRoot>Doc_0/Document.xml</ofd:DocRoot></ofd:DocBody></ofd:OFD>"#.to_string()),
+        ];
+        let locs: String = (0..pages.len()).map(|i| format!(r#"<ofd:Page ID="{i}" BaseLoc="Pages/Page_{i}/Content.xml"/>"#)).collect();
+        files.push(("Doc_0/Document.xml", format!(r#"<ofd:Document xmlns:ofd="http://www.ofdspec.org/2016"><ofd:Pages>{locs}</ofd:Pages></ofd:Document>"#)));
+        let names: Vec<String> = (0..pages.len()).map(|i| format!("Doc_0/Pages/Page_{i}/Content.xml")).collect();
+        for (i, body) in pages.iter().enumerate() {
+            files.push((names[i].as_str(), body.to_string()));
+        }
+        zip(&p, &files);
+        office::ofd(&p, Limits::default()).unwrap()
+    };
+    assert_eq!(build("scan.ofd", &[image, image]).state, ExtractState::WaitingOcr);
+    let mixed = build("mixed.ofd", &[text, image]);
+    assert_eq!((mixed.state, mixed.warnings.len()), (ExtractState::Partial, 1));
+}

@@ -8,7 +8,7 @@ use xs_index::{Anchor, AnchorKind, ExtractState};
 
 pub const SHEET_EXTRACTOR_VERSION: u64 = 1;
 pub const PPTX_EXTRACTOR_VERSION: u64 = 1;
-pub const OFD_EXTRACTOR_VERSION: u64 = 1;
+pub const OFD_EXTRACTOR_VERSION: u64 = 2;
 
 struct Out {
     text: String,
@@ -226,6 +226,7 @@ pub fn ofd(path: &Path, limits: Limits) -> Result<Extraction> {
         pages = found.into_iter().map(|(_, n)| n).collect();
     }
     let mut out = Out::new(limits);
+    let mut image_only = 0;
     for (i, page) in pages.iter().enumerate() {
         out.anchor(AnchorKind::Page { page: i as u32 + 1 });
         let Ok(xml) = zip_text(&mut zip, page, limits, &mut used) else {
@@ -234,6 +235,7 @@ pub fn ofd(path: &Path, limits: Limits) -> Result<Extraction> {
             continue;
         };
         let content = roxmltree::Document::parse(&xml)?;
+        let before = out.chars;
         for obj in content.descendants().filter(|n| local(n, "TextObject")) {
             let line: String = obj.descendants().filter(|n| local(n, "TextCode")).filter_map(|n| n.text()).collect();
             if !line.trim().is_empty() {
@@ -241,9 +243,23 @@ pub fn ofd(path: &Path, limits: Limits) -> Result<Extraction> {
                 out.push("\n");
             }
         }
+        // Scanned pages: images and no text layer (OCR is M6).
+        if out.chars == before && content.descendants().any(|n| local(&n, "ImageObject")) {
+            image_only += 1;
+        }
         if out.partial {
             break;
         }
     }
-    Ok(out.done("ofd"))
+    let pages_total = pages.len();
+    let mut e = out.done("ofd");
+    if image_only > 0 {
+        e.warnings.push(format!("{image_only} 页没有文字层，等待 OCR"));
+        if image_only == pages_total {
+            e.state = ExtractState::WaitingOcr;
+        } else if e.state == ExtractState::Complete {
+            e.state = ExtractState::Partial;
+        }
+    }
+    Ok(e)
 }
