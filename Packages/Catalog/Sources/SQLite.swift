@@ -118,6 +118,7 @@ final class Statement {
             case let x as Int: sqlite3_bind_int64(stmt, idx, Int64(x))
             case let x as UInt64: sqlite3_bind_int64(stmt, idx, Int64(bitPattern: x))
             case let x as Bool: sqlite3_bind_int64(stmt, idx, x ? 1 : 0)
+            case let x as Double: sqlite3_bind_double(stmt, idx, x)
             case let x as String: sqlite3_bind_text(stmt, idx, x, -1, SQLITE_TRANSIENT)
             case let x as Data: _ = x.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32($0.count), SQLITE_TRANSIENT) }
             default: preconditionFailure("unsupported bind type \(type(of: v))")
@@ -139,7 +140,17 @@ final class Statement {
 
     func run() throws { while try step() {} }
 
+    /// Reads at most one row and resets right away. A statement left on a row keeps an open
+    /// read transaction: the connection would keep seeing an old snapshot (missing other
+    /// connections' writes) and block WAL checkpoints. Use this for every single-row read.
+    func first<T>(_ map: (Statement) throws -> T) throws -> T? {
+        defer { sqlite3_reset(stmt) }
+        guard try step() else { return nil }
+        return try map(self)
+    }
+
     func int(_ col: Int32) -> Int64 { sqlite3_column_int64(stmt, col) }
+    func double(_ col: Int32) -> Double { sqlite3_column_double(stmt, col) }
     func text(_ col: Int32) -> String {
         guard let p = sqlite3_column_text(stmt, col) else { return "" }
         return String(cString: p)

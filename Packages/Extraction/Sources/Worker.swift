@@ -147,7 +147,8 @@ public final class ExtractionWorker: @unchecked Sendable {
         let done = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var reply: Data?
         let fd = fromWorker.fileDescriptor
-        DispatchQueue.global(qos: .utility).async {
+        // A dedicated thread, not GCD: this read can block for the whole timeout.
+        Thread.detachNewThread {
             reply = Framing.read(from: fd)
             done.signal()
         }

@@ -14,6 +14,8 @@ final class Reconciler {
         var roots: [String]
         var rules: ExclusionRules
         var home: String
+        /// nil: content indexing off.
+        var content: ContentRules?
     }
 
     struct Task {
@@ -49,6 +51,14 @@ final class Reconciler {
     private var vanishedIn: [Int64: String] = [:]
     private var chased = Set<Int64>()
     private var inTransaction = false
+    /// Content bookkeeping, settled into tasks before each commit (same transaction).
+    private var contentTouched = Set<Int64>()
+    private var contentRemoved = Set<Int64>()
+    private var movedDirs = Set<Int64>()
+    private var refreshAllContent = false
+    private var opCounter: Int64?
+    /// Content tasks written in this batch (tests, status).
+    private(set) var tasksWritten = 0
     /// Entries written to the catalog in this batch (status display).
     private(set) var touched = 0
 
@@ -99,6 +109,7 @@ final class Reconciler {
     }
 
     private func commit() throws {
+        try settleContent()
         try catalog.db.exec("COMMIT")
         catalog.db.resetStatements()
         inTransaction = false
@@ -107,6 +118,10 @@ final class Reconciler {
     }
 
     private func wrote(_ change: NameChange) throws {
+        switch change {
+        case .upsert(let r): if !r.flags.contains(.directory) { contentTouched.insert(r.fileId) }
+        case .remove(let id): contentRemoved.insert(id)
+        }
         changes.append(change)
         writesSinceCommit += 1
         touched += 1
@@ -130,6 +145,7 @@ final class Reconciler {
     private func expand(_ op: JournalOp, into tasks: inout [Int64: Task]) throws {
         switch op.kind {
         case .scope:
+            refreshAllContent = true
             try syncRoots()
             for r in try catalog.rootRows() where ctx.roots.contains(r.name) {
                 addTask(Task(id: r.id, path: r.name, recursive: true), &tasks)
@@ -421,6 +437,8 @@ final class Reconciler {
         r.ino = e.ino; r.dev = e.dev; r.size = e.size; r.mtimeNs = e.mtimeNs; r.birthNs = e.birthNs
         try catalog.update(r, seq: seq)
         try wrote(.upsert(FileCatalog.record(r)))
+        // Every file below a moved directory has a new path (the content index stores it).
+        if r.flags.contains(.directory) { movedDirs.insert(r.id) }
         // Changes inside a directory moved in this batch may have been reported under paths
         // that no longer resolve: reconcile its whole subtree at the new location.
         if descends(e) { submit(Task(id: r.id, path: childPath(m.parentPath, e.name), recursive: true)) }
@@ -456,6 +474,61 @@ final class Reconciler {
             triedPath[id] = path
             submit(Task(id: id, path: path, recursive: false))
         }
+    }
+
+    // MARK: Content tasks
+
+    /// Turns this chunk's catalog changes into content tasks (§9.2: every change that affects
+    /// extraction or index fields gets a new op_seq and task). Runs inside the open transaction,
+    /// so tasks commit atomically with the catalog rows that caused them.
+    private func settleContent() throws {
+        defer {
+            contentTouched.removeAll()
+            contentRemoved.removeAll()
+            movedDirs.removeAll()
+            refreshAllContent = false
+        }
+        guard inTransaction else { return }
+        var counter = try opCounter ?? catalog.opSeqCounter()
+        let start = counter
+        var dirPaths: [Int64: String] = [:]
+        func dirPath(_ id: Int64) throws -> String? {
+            if let p = dirPaths[id] { return p }
+            guard let p = try catalog.path(of: id) else { return nil }
+            dirPaths[id] = p
+            return p
+        }
+        var touched = contentTouched
+        for d in movedDirs { touched.formUnion(try catalog.descendantFiles(of: d)) }
+        if refreshAllContent { touched.formUnion(try catalog.contentCandidates()) }
+        touched.subtract(contentRemoved)
+        for id in touched {
+            guard let info = try catalog.contentInfo(id), !info.deleted, !info.flags.contains(.directory) else { continue }
+            var eligible = false
+            if let rules = ctx.content, ContentType.of(name: info.name) != nil, info.parentId != 0, let dir = try dirPath(info.parentId) {
+                eligible = rules.eligible(path: childPath(dir, info.name), name: info.name, isDirectory: false)
+            }
+            if eligible {
+                counter += 1
+                try catalog.setContent(id, inContent: true, opSeq: counter)
+                try catalog.enqueue(id, opSeq: counter, kind: .index, priority: info.mtimeNs / 1_000_000_000)
+                tasksWritten += 1
+            } else if info.inContent {
+                counter += 1
+                try catalog.setContent(id, inContent: false, opSeq: counter)
+                try catalog.enqueue(id, opSeq: counter, kind: .delete, priority: Int64.max / 2)
+                tasksWritten += 1
+            }
+        }
+        for id in contentRemoved {
+            guard let info = try catalog.contentInfo(id), info.inContent else { continue }
+            counter += 1
+            try catalog.setContent(id, inContent: false, opSeq: counter)
+            try catalog.enqueue(id, opSeq: counter, kind: .delete, priority: Int64.max / 2)
+            tasksWritten += 1
+        }
+        if counter != start { try catalog.setOpSeqCounter(counter) }
+        opCounter = counter
     }
 
     private func sameKind(_ r: Row, _ e: DiskEntry) -> Bool {

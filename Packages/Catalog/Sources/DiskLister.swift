@@ -98,24 +98,56 @@ enum DiskLister {
     }
 }
 
-/// Lists directories on a small thread pool so a recursive scan is not bound by one thread's
-/// metadata latency. Results come back in completion order; the single writer applies them.
+/// Process-wide pool of dedicated threads for blocking directory listings. Not GCD: the
+/// reconcilers that wait for listings run on GCD threads themselves, and many of them blocking
+/// at once could exhaust GCD's thread limit so the listings never get a thread (deadlock).
+final class ListingPool: @unchecked Sendable {
+    static let shared = ListingPool(threads: 8)
+    private let cond = NSCondition()
+    private var jobs: [() -> Void] = []
+
+    init(threads: Int) {
+        for i in 0..<threads {
+            let t = Thread { [unowned self] in self.loop() }
+            t.name = "xsearch.lister.\(i)"
+            t.qualityOfService = .utility
+            t.start()
+        }
+    }
+
+    func run(_ job: @escaping () -> Void) {
+        cond.lock()
+        jobs.append(job)
+        cond.signal()
+        cond.unlock()
+    }
+
+    private func loop() {
+        while true {
+            cond.lock()
+            while jobs.isEmpty { cond.wait() }
+            let job = jobs.removeFirst()
+            cond.unlock()
+            job()
+        }
+    }
+}
+
+/// Lists directories in parallel on `ListingPool` so a recursive scan is not bound by one
+/// thread's metadata latency. Results come back in completion order; the single writer
+/// applies them.
 final class ParallelLister: @unchecked Sendable {
     struct Job { var id: Int64; var path: String; var fresh: Bool; var recursive: Bool }
     struct Output { var job: Job; var result: Result<[DiskEntry], POSIXError> }
 
-    private let queue = DispatchQueue(label: "xsearch.lister", qos: .utility, attributes: .concurrent)
-    private let slots = DispatchSemaphore(value: 8)
     private let lock = NSCondition()
     private var done: [Output] = []
     private(set) var pending = 0
 
     func submit(_ job: Job) {
         pending += 1
-        queue.async { [self] in
-            slots.wait()
+        ListingPool.shared.run { [self] in
             let result = DiskLister.list(job.path)
-            slots.signal()
             lock.lock()
             done.append(Output(job: job, result: result))
             lock.signal()

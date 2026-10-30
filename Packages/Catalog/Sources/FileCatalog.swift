@@ -78,15 +78,107 @@ final class FileCatalog {
                 flags INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS consumers(name TEXT PRIMARY KEY, applied_jseq INTEGER NOT NULL);
             INSERT OR IGNORE INTO consumers(name, applied_jseq) VALUES('name', 0);
+            -- Content tasks (§9.3 step 1). Identity: file_id + op_seq + kind. Written in the same
+            -- transaction as the catalog change that caused them.
+            CREATE TABLE IF NOT EXISTS content_tasks(
+                file_id INTEGER NOT NULL,
+                op_seq INTEGER NOT NULL,
+                kind INTEGER NOT NULL,
+                state INTEGER NOT NULL DEFAULT 0,
+                lease_until REAL NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                not_before REAL NOT NULL DEFAULT 0,
+                priority INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                PRIMARY KEY(file_id, op_seq, kind));
+            CREATE INDEX IF NOT EXISTS content_tasks_ready ON content_tasks(state, not_before, priority);
+            -- Members of the one unconfirmed batch (§9.3: at most one per instance), recorded before
+            -- the index commit so a crash between commit and confirmation can be resolved.
+            -- state / error: what confirmation records for the file (0 none, 1 complete, 2 partial,
+            -- 3 waiting for OCR, 4 failed).
+            CREATE TABLE IF NOT EXISTS content_batch(file_id INTEGER NOT NULL, op_seq INTEGER NOT NULL, kind INTEGER NOT NULL,
+                state INTEGER NOT NULL DEFAULT 0, error TEXT);
             """)
+        // M2 columns on catalogs created by M1.
+        let columns = try Set(Self.columns(db, "files"))
+        for (name, decl) in [("content_state", "INTEGER NOT NULL DEFAULT 0"), ("content_error", "TEXT")] where !columns.contains(name) {
+            try db.exec("ALTER TABLE files ADD COLUMN \(name) \(decl)")
+        }
         for suffix in ["-wal", "-shm"] { chmod(url.path + suffix, 0o600) }
+    }
+
+    static func columns(_ db: SQLite, _ table: String) throws -> [String] {
+        let s = try db.prepare("SELECT name FROM pragma_table_info(?)").bind(table)
+        var out: [String] = []
+        while try s.step() { out.append(s.text(0)) }
+        return out
+    }
+
+    // MARK: Content
+
+    enum TaskKind: Int64 { case index = 1, delete = 2 }
+
+    struct ContentInfo {
+        var id: Int64
+        var parentId: Int64
+        var name: String
+        var flags: EntryFlags
+        var mtimeNs: Int64
+        var inContent: Bool
+        var opSeq: Int64
+        var deleted: Bool
+    }
+
+    func contentInfo(_ id: Int64) throws -> ContentInfo? {
+        try db.prepare("SELECT id, parent_id, name, flags, mtime_ns, in_content, op_seq, deleted FROM files WHERE id = ?").bind(id).first { s in
+            ContentInfo(id: s.int(0), parentId: s.int(1), name: s.text(2), flags: EntryFlags(rawValue: UInt8(truncatingIfNeeded: s.int(3))),
+                        mtimeNs: s.int(4), inContent: s.int(5) != 0, opSeq: s.int(6), deleted: s.int(7) != 0)
+        }
+    }
+
+    func setContent(_ id: Int64, inContent: Bool, opSeq: Int64) throws {
+        try db.prepare("UPDATE files SET in_content = ?, op_seq = ? WHERE id = ?").bind(inContent, opSeq, id).run()
+    }
+
+    /// Adds a task and drops older pending tasks of the same file: only the newest op matters,
+    /// and leased older ones are rejected by the writer's sequence check anyway.
+    func enqueue(_ fileId: Int64, opSeq: Int64, kind: TaskKind, priority: Int64) throws {
+        try db.prepare("DELETE FROM content_tasks WHERE file_id = ? AND op_seq < ? AND state = 0").bind(fileId, opSeq).run()
+        try db.prepare("INSERT OR IGNORE INTO content_tasks(file_id, op_seq, kind, priority) VALUES(?, ?, ?, ?)")
+            .bind(fileId, opSeq, kind.rawValue, priority).run()
+    }
+
+    /// Global op_seq counter: sequences never go backwards even if a file id is reused, so a
+    /// new file can never fall behind an old tombstone's fence.
+    func opSeqCounter() throws -> Int64 { try meta("op_seq_counter").flatMap(Int64.init) ?? 0 }
+    func setOpSeqCounter(_ v: Int64) throws { try setMeta("op_seq_counter", String(v)) }
+
+    /// Live file ids below a directory (any depth).
+    func descendantFiles(of id: Int64) throws -> [Int64] {
+        let s = try db.prepare("""
+            WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT f.id FROM files f JOIN sub ON f.parent_id = sub.id WHERE f.deleted = 0)
+            SELECT f.id FROM files f JOIN sub ON f.id = sub.id WHERE (f.flags & 1) = 0
+            """).bind(id)
+        var out: [Int64] = []
+        while try s.step() { out.append(s.int(0)) }
+        return out
+    }
+
+    /// Every live file whose name has an extractable extension: candidates on a scope change.
+    func contentCandidates() throws -> [Int64] {
+        let s = try db.prepare("SELECT id, name, in_content FROM files WHERE deleted = 0 AND (flags & 1) = 0")
+        var out: [Int64] = []
+        while try s.step() {
+            if s.int(2) != 0 || ContentType.of(name: s.text(1)) != nil { out.append(s.int(0)) }
+        }
+        return out
     }
 
     // MARK: Meta
 
     func meta(_ key: String) throws -> String? {
         let s = try db.prepare("SELECT value FROM meta WHERE key = ?").bind(key)
-        return try s.step() ? s.text(0) : nil
+        return try s.first { s in s.text(0) } ?? nil
     }
 
     func setMeta(_ key: String, _ value: String?) throws {
@@ -124,7 +216,7 @@ final class FileCatalog {
 
     func consumer(_ name: String) throws -> Int64 {
         let s = try db.prepare("SELECT applied_jseq FROM consumers WHERE name = ?").bind(name)
-        return try s.step() ? s.int(0) : 0
+        return try s.first { s in s.int(0) } ?? 0
     }
 
     func setConsumer(_ name: String, _ jseq: Int64) throws {
@@ -138,7 +230,7 @@ final class FileCatalog {
 
     func journalBacklog() throws -> Int {
         let s = try db.prepare("SELECT COUNT(*) FROM op_journal WHERE jseq > (SELECT applied_jseq FROM consumers WHERE name = 'name')")
-        return try s.step() ? Int(s.int(0)) : 0
+        return try s.first { s in Int(s.int(0)) } ?? 0
     }
 
     // MARK: Rows
@@ -182,7 +274,7 @@ final class FileCatalog {
 
     func liveCount() throws -> Int {
         let s = try db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0")
-        return try s.step() ? Int(s.int(0)) : 0
+        return try s.first { s in Int(s.int(0)) } ?? 0
     }
 
     func rootRows() throws -> [Row] {
@@ -200,17 +292,17 @@ final class FileCatalog {
     }
 
     func hasChildren(_ id: Int64) throws -> Bool {
-        try db.prepare("SELECT 1 FROM files WHERE parent_id = ? AND deleted = 0 LIMIT 1").bind(id).step()
+        try db.prepare("SELECT 1 FROM files WHERE parent_id = ? AND deleted = 0 LIMIT 1").bind(id).first { _ in true } ?? false
     }
 
     func row(id: Int64) throws -> Row? {
         let s = try db.prepare("SELECT \(Self.rowColumns) FROM files WHERE id = ? AND deleted = 0").bind(id)
-        return try s.step() ? row(s) : nil
+        return try s.first { s in row(s) } ?? nil
     }
 
     func child(of parent: Int64, named name: String) throws -> Row? {
         let s = try db.prepare("SELECT \(Self.rowColumns) FROM files WHERE parent_id = ? AND name = ? AND deleted = 0").bind(parent, name)
-        return try s.step() ? row(s) : nil
+        return try s.first { s in row(s) } ?? nil
     }
 
     func rows(dev: Int64, ino: Int64) throws -> [Row] {

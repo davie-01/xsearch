@@ -2,6 +2,7 @@ import AppKit
 import ContentEngine
 import Foundation
 import PDFKit
+import XSearchCore
 
 /// What a worker returns for one file. Anchors / pages are JSON in the `xs_index` formats
 /// (`Anchor`, `PageState`), so they go to the index writer unchanged.
@@ -43,25 +44,11 @@ public enum ExtractionError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-/// Formats handled in M2 (ARCHITECTURE §10, D7). OFD is M3, WPS M4, OCR M6.
-public enum ExtractionKind: String, Codable, Sendable {
-    case text, docx, pdf, doc
+/// Formats handled in M2; the extension table lives in `XSearchCore.ContentType`.
+public typealias ExtractionKind = ContentType
 
-    public static let textExtensions: Set<String> = [
-        "txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini", "conf", "cfg",
-        "swift", "rs", "c", "h", "m", "mm", "cc", "cpp", "hpp", "py", "js", "mjs", "ts", "tsx", "jsx", "go", "java", "kt",
-        "rb", "php", "sh", "zsh", "bash", "fish", "html", "htm", "css", "scss", "sql", "lua", "r", "pl", "vue", "svelte",
-    ]
-
-    public static func of(path: String) -> ExtractionKind? {
-        let ext = (path as NSString).pathExtension.lowercased()
-        switch ext {
-        case "docx", "docm": return .docx
-        case "pdf": return .pdf
-        case "doc", "dot": return .doc
-        default: return textExtensions.contains(ext) ? .text : nil
-        }
-    }
+extension ContentType {
+    public static func of(path: String) -> ContentType? { of(name: (path as NSString).lastPathComponent) }
 }
 
 public enum Extractor {

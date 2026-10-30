@@ -305,3 +305,57 @@ func changeInsideRenamedDirectory(order: Int) throws {
     let idx = indexedPaths(s, box), disk = diskPaths(box)
     #expect(ok, "order \(order): index-only \(idx.subtracting(disk).sorted()) disk-only \(disk.subtracting(idx).sorted())")
 }
+
+// MARK: Content tasks (M2-3)
+
+func pendingByName(_ s: NameService) -> [String: [Int64]] {
+    var out: [String: [Int64]] = [:]
+    for (t, path) in s.contentTasks() where t.state == 0 {
+        out[(path ?? "#\(t.fileId)") .components(separatedBy: "/").suffix(2).joined(separator: "/"), default: []].append(t.kind)
+    }
+    return out
+}
+
+@Test func contentTasksFollowCatalogChanges() throws {
+    let box = try Sandbox("content")
+    try box.write("docs/a.txt", "合同 v1")
+    try box.write("docs/b.pdf", "%PDF-fake")
+    try box.write("docs/image.png", "x")
+    try box.write("docs/sub/c.docx", "x")
+    try box.write("other/d.txt", "outside")
+    try box.write("other/moveme/e.md", "dir to move in")
+    let s = NameService(directory: box.data, home: "/nonexistent-home")
+    let content = ContentScope(folders: [box.p("docs")])
+    s.start(scope: box.scope, content: content)
+    defer { s.shutdown() }
+    #expect(s.waitUntilIdle())
+    var tasks = pendingByName(s)
+    #expect(tasks == ["docs/a.txt": [1], "docs/b.pdf": [1], "sub/c.docx": [1]], "\(tasks)")
+    let firstSeq = s.contentTasks().first { $0.path?.hasSuffix("a.txt") == true }!.task.opSeq
+
+    // Edit: a newer index task replaces the pending one.
+    try "合同 v2 longer".write(toFile: box.p("docs/a.txt"), atomically: true, encoding: .utf8)
+    #expect(eventually(s) { s.contentTasks().contains { $0.path?.hasSuffix("a.txt") == true && $0.task.opSeq > firstSeq } })
+    #expect(s.contentTasks().filter { $0.path?.hasSuffix("a.txt") == true && $0.task.state == 0 }.count == 1)
+
+    // Move out of the content folder → delete; move a directory in → index its files.
+    try box.mv("docs/b.pdf", "other/b.pdf")
+    try box.mv("other/moveme", "docs/moveme")
+    #expect(eventually(s) {
+        let t = pendingByName(s)
+        return t["other/b.pdf"] == [2] && t["moveme/e.md"] == [1]
+    }, "\(pendingByName(s))")
+
+    // Delete → delete task (the row is a tombstone, so no path).
+    try box.rm("docs/sub/c.docx")
+    #expect(eventually(s) { s.contentTasks().contains { $0.task.kind == 2 && $0.path == nil } })
+
+    // Widen the scope: files in `other` become content.
+    s.setContentScope(ContentScope(folders: [box.p("docs"), box.p("other")]))
+    #expect(s.waitUntilIdle())
+    tasks = pendingByName(s)
+    #expect(tasks["other/d.txt"] == [1] && tasks["other/b.pdf"] == [1], "\(tasks)")
+    // op_seq is globally increasing.
+    let seqs = s.contentTasks().map(\.task.opSeq)
+    #expect(Set(seqs).count == seqs.count)
+}

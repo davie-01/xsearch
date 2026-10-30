@@ -31,6 +31,8 @@ public final class NameService: @unchecked Sendable {
     private var catalog: FileCatalog?
     private var watcher: FSEventsWatcher?
     private var scope = NameScope.default
+    /// nil: content indexing disabled.
+    private var contentScope: ContentScope?
     private var context: Reconciler.Context?
     private var persistedSeq: Int64 = -1
     private var lastPersist = Date.distantPast
@@ -72,20 +74,31 @@ public final class NameService: @unchecked Sendable {
 
     // MARK: Lifecycle
 
-    public func start(scope: NameScope) {
+    public func start(scope: NameScope, content: ContentScope? = nil) {
         queue.async { [self] in
-            do { try open(scope: scope) } catch { fail(error) }
+            do { try open(scope: scope, content: content) } catch { fail(error) }
         }
     }
 
     public func setScope(_ scope: NameScope) {
+        setScopes(scope, content: contentScope)
+    }
+
+    /// Changes the content scope: one reconcile re-decides which files are content-indexed and
+    /// writes index / delete tasks for the difference (§6.2).
+    public func setContentScope(_ content: ContentScope?) {
+        setScopes(scope, content: content)
+    }
+
+    private func setScopes(_ scope: NameScope, content: ContentScope?) {
         queue.async { [self] in
             do {
                 guard let catalog else { return }
                 self.scope = scope
+                contentScope = content
                 context = makeContext(scope)
                 try catalog.append([(.scope, "", 0)], lastEventId: nil)
-                try catalog.setMeta("fingerprint", scope.fingerprint(home: home))
+                try catalog.setMeta("fingerprint", fingerprint())
                 restartWatcher(since: try catalog.meta("fsevents_last_id").flatMap(UInt64.init) ?? FSEventsWatcher.currentEventId)
                 process()
             } catch { fail(error) }
@@ -100,6 +113,31 @@ public final class NameService: @unchecked Sendable {
             mergeQueue.sync {}
             try? persist(force: true)
             try? catalog?.db.checkpoint()
+        }
+    }
+
+    struct TaskRow: Equatable { var fileId: Int64; var opSeq: Int64; var kind: Int64; var state: Int64 }
+
+    /// Test / diagnostics: content tasks and the file each belongs to.
+    func contentTasks() -> [(task: TaskRow, path: String?)] {
+        queue.sync {
+            guard let catalog, let s = try? catalog.db.prepare("SELECT file_id, op_seq, kind, state FROM content_tasks ORDER BY op_seq") else { return [] }
+            var out: [(TaskRow, String?)] = []
+            while (try? s.step()) == true {
+                out.append((TaskRow(fileId: s.int(0), opSeq: s.int(1), kind: s.int(2), state: s.int(3)), nil))
+            }
+            return out.map { ($0.0, try? catalog.path(of: $0.0.fileId)) }
+        }
+    }
+
+    /// Test / diagnostics: per-file content state and error.
+    func contentStates() -> [(name: String, state: Int64, error: String?)] {
+        queue.sync {
+            guard let catalog, let s = try? catalog.db.prepare("SELECT name, content_state, content_error FROM files WHERE in_content = 1 AND deleted = 0") else { return [] }
+            var out: [(String, Int64, String?)] = []
+            while (try? s.step()) == true { out.append((s.text(0), s.int(1), s.isNull(2) ? nil : s.text(2))) }
+            catalog.db.resetStatements()
+            return out
         }
     }
 
@@ -134,11 +172,24 @@ public final class NameService: @unchecked Sendable {
         var s = scope
         // Never index our own data directory: writing it would feed events back to us.
         s.excludes.append(directory.path)
-        return .init(roots: scope.roots(home: home), rules: ExclusionRules(s, home: home), home: home)
+        // One catalog covers the union of both scopes (§6.2): content folders outside the name
+        // scope are scanned too.
+        var roots = scope.roots(home: home)
+        for r in contentScope?.roots(home: home) ?? [] where !roots.contains(where: { PathUtil.isWithin(r, $0) }) {
+            roots.removeAll { PathUtil.isWithin($0, r) }
+            roots.append(r)
+        }
+        return .init(roots: roots.sorted(), rules: ExclusionRules(s, home: home), home: home,
+                     content: contentScope.map { ContentRules($0, home: home) })
     }
 
-    private func open(scope: NameScope) throws {
+    private func fingerprint() -> String {
+        scope.fingerprint(home: home) + "\u{3}" + (contentScope?.fingerprint(home: home) ?? "no-content")
+    }
+
+    private func open(scope: NameScope, content: ContentScope?) throws {
         self.scope = scope
+        contentScope = content
         context = makeContext(scope)
         let catalog = try FileCatalog(url: directory.appendingPathComponent("catalog.sqlite"))
         self.catalog = catalog
@@ -170,7 +221,7 @@ public final class NameService: @unchecked Sendable {
             if since != nil { ops.append((.scope, "", 0)) }  // history unusable: reconcile everything
             since = nil
         }
-        let fingerprint = scope.fingerprint(home: home)
+        let fingerprint = fingerprint()
         if try catalog.meta("fingerprint") != fingerprint && !ops.contains(where: { $0.0 == .scope }) {
             ops.append((.scope, "", 0))
         }
