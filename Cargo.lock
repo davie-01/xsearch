@@ -1901,6 +1901,7 @@ dependencies = [
  "uniffi",
  "xs-core",
  "xs-index",
+ "xs-parsers",
 ]
 
 [[package]]
@@ -1913,6 +1914,19 @@ dependencies = [
  "tantivy",
  "tempfile",
  "xs-core",
+]
+
+[[package]]
+name = "xs-parsers"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "encoding_rs",
+ "roxmltree",
+ "serde",
+ "tempfile",
+ "xs-index",
+ "zip",
 ]
 
 [[package]]

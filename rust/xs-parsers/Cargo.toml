@@ -1,0 +1,17 @@
+[package]
+name = "xs-parsers"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "XSearch text extraction in Rust: plain text / code (encoding detection) and DOCX (ARCHITECTURE §10)."
+
+[dependencies]
+anyhow.workspace = true
+encoding_rs.workspace = true
+roxmltree.workspace = true
+serde.workspace = true
+zip.workspace = true
+xs-index = { path = "../xs-index" }
+
+[dev-dependencies]
+tempfile.workspace = true

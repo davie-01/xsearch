@@ -382,6 +382,16 @@ RustBuffer uniffi_xs_ffi_fn_func_engine_versions(RustCallStatus *_Nonnull out_st
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_DOCX
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_DOCX
+RustBuffer uniffi_xs_ffi_fn_func_extract_docx(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_PLAIN_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_PLAIN_TEXT
+RustBuffer uniffi_xs_ffi_fn_func_extract_plain_text(RustBuffer path, uint64_t max_file_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_FFI_XS_FFI_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_XS_FFI_RUSTBUFFER_ALLOC
 RustBuffer ffi_xs_ffi_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -665,6 +675,18 @@ void ffi_xs_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonn
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_ENGINE_VERSIONS
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_ENGINE_VERSIONS
 uint16_t uniffi_xs_ffi_checksum_func_engine_versions(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_DOCX
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_DOCX
+uint16_t uniffi_xs_ffi_checksum_func_extract_docx(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_PLAIN_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_PLAIN_TEXT
+uint16_t uniffi_xs_ffi_checksum_func_extract_plain_text(void
     
 );
 #endif

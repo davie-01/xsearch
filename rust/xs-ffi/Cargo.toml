@@ -19,3 +19,4 @@ serde_json.workspace = true
 uniffi = { version = "=0.29.5", features = ["cli"] }
 xs-core = { path = "../xs-core" }
 xs-index = { path = "../xs-index" }
+xs-parsers = { path = "../xs-parsers" }

@@ -432,6 +432,56 @@ impl ContentIndexWriter {
     }
 }
 
+/// Result of a Rust extractor. Anchors / pages are JSON in the `xs_index` formats.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ExtractionOutput {
+    pub text: String,
+    pub anchors_json: String,
+    pub pages_json: String,
+    pub state: ExtractStateKind,
+    pub warnings: Vec<String>,
+    pub method: String,
+    pub extractor_ver: u64,
+}
+
+fn output(e: xs_parsers::Extraction, extractor_ver: u64) -> ExtractionOutput {
+    ExtractionOutput {
+        text: e.text,
+        anchors_json: serde_json::to_string(&e.anchors).unwrap_or_else(|_| "[]".into()),
+        pages_json: "[]".into(),
+        state: e.state.into(),
+        warnings: e.warnings,
+        method: e.method,
+        extractor_ver,
+    }
+}
+
+fn limits(max_file_bytes: u64, max_unpacked_bytes: u64) -> xs_parsers::Limits {
+    xs_parsers::Limits {
+        max_file_bytes,
+        max_unpacked_bytes,
+    }
+}
+
+/// Plain text / source code with encoding detection; binary files are an error.
+#[uniffi::export]
+pub fn extract_plain_text(
+    path: String,
+    max_file_bytes: u64,
+) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::plain_text(Path::new(&path), limits(max_file_bytes, max_file_bytes))?;
+    Ok(output(e, xs_parsers::TEXT_EXTRACTOR_VERSION))
+}
+
+#[uniffi::export]
+pub fn extract_docx(
+    path: String,
+    max_unpacked_bytes: u64,
+) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::docx::extract(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, xs_parsers::DOCX_EXTRACTOR_VERSION))
+}
+
 /// Engine versions, for diagnostics and rebuild decisions.
 #[uniffi::export]
 pub fn engine_versions() -> HashMap<String, String> {

@@ -1663,6 +1663,119 @@ public func FfiConverterTypeContentInput_lower(_ value: ContentInput) -> RustBuf
 }
 
 
+/**
+ * Result of a Rust extractor. Anchors / pages are JSON in the `xs_index` formats.
+ */
+public struct ExtractionOutput {
+    public var text: String
+    public var anchorsJson: String
+    public var pagesJson: String
+    public var state: ExtractStateKind
+    public var warnings: [String]
+    public var method: String
+    public var extractorVer: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(text: String, anchorsJson: String, pagesJson: String, state: ExtractStateKind, warnings: [String], method: String, extractorVer: UInt64) {
+        self.text = text
+        self.anchorsJson = anchorsJson
+        self.pagesJson = pagesJson
+        self.state = state
+        self.warnings = warnings
+        self.method = method
+        self.extractorVer = extractorVer
+    }
+}
+
+#if compiler(>=6)
+extension ExtractionOutput: Sendable {}
+#endif
+
+
+extension ExtractionOutput: Equatable, Hashable {
+    public static func ==(lhs: ExtractionOutput, rhs: ExtractionOutput) -> Bool {
+        if lhs.text != rhs.text {
+            return false
+        }
+        if lhs.anchorsJson != rhs.anchorsJson {
+            return false
+        }
+        if lhs.pagesJson != rhs.pagesJson {
+            return false
+        }
+        if lhs.state != rhs.state {
+            return false
+        }
+        if lhs.warnings != rhs.warnings {
+            return false
+        }
+        if lhs.method != rhs.method {
+            return false
+        }
+        if lhs.extractorVer != rhs.extractorVer {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(text)
+        hasher.combine(anchorsJson)
+        hasher.combine(pagesJson)
+        hasher.combine(state)
+        hasher.combine(warnings)
+        hasher.combine(method)
+        hasher.combine(extractorVer)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeExtractionOutput: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ExtractionOutput {
+        return
+            try ExtractionOutput(
+                text: FfiConverterString.read(from: &buf), 
+                anchorsJson: FfiConverterString.read(from: &buf), 
+                pagesJson: FfiConverterString.read(from: &buf), 
+                state: FfiConverterTypeExtractStateKind.read(from: &buf), 
+                warnings: FfiConverterSequenceString.read(from: &buf), 
+                method: FfiConverterString.read(from: &buf), 
+                extractorVer: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ExtractionOutput, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.text, into: &buf)
+        FfiConverterString.write(value.anchorsJson, into: &buf)
+        FfiConverterString.write(value.pagesJson, into: &buf)
+        FfiConverterTypeExtractStateKind.write(value.state, into: &buf)
+        FfiConverterSequenceString.write(value.warnings, into: &buf)
+        FfiConverterString.write(value.method, into: &buf)
+        FfiConverterUInt64.write(value.extractorVer, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeExtractionOutput_lift(_ buf: RustBuffer) throws -> ExtractionOutput {
+    return try FfiConverterTypeExtractionOutput.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeExtractionOutput_lower(_ value: ExtractionOutput) -> RustBuffer {
+    return FfiConverterTypeExtractionOutput.lower(value)
+}
+
+
 public struct SearchFilters {
     public var dirs: [String]
     public var exts: [String]
@@ -2368,6 +2481,25 @@ public func engineVersions() -> [String: String]  {
     )
 })
 }
+public func extractDocx(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_docx(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+/**
+ * Plain text / source code with encoding detection; binary files are an error.
+ */
+public func extractPlainText(path: String, maxFileBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_plain_text(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxFileBytes),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -2385,6 +2517,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_xs_ffi_checksum_func_engine_versions() != 30013) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_docx() != 40192) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_plain_text() != 35752) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindex_document() != 63926) {

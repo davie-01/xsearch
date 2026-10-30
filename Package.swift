@@ -7,7 +7,7 @@ let rustLib = Context.packageDirectory + "/target/release"
 let package = Package(
     name: "XSearch",
     platforms: [.macOS(.v26)],
-    products: [.executable(name: "XSearch", targets: ["XSearch"])],
+    products: [.executable(name: "XSearch", targets: ["XSearch"]), .executable(name: "xs-extract", targets: ["xs-extract"])],
     targets: [
         .target(
             name: "CXSearchCore",
@@ -24,11 +24,15 @@ let package = Package(
         .target(name: "CScan", path: "Packages/NameEngine/CScan", linkerSettings: [.linkedLibrary("z")]),
         .target(name: "NameEngine", dependencies: ["XSearchCore", "CScan"], path: "Packages/NameEngine/Sources"),
         .target(name: "Catalog", dependencies: ["XSearchCore", "NameEngine", "CScan"], path: "Packages/Catalog/Sources", linkerSettings: [.linkedLibrary("sqlite3")]),
-        .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog", "ContentEngine"], path: "App/Sources"),
+        .target(name: "Extraction", dependencies: ["ContentEngine"], path: "Packages/Extraction/Sources"),
+        // Extraction worker process (killable on timeout / crash); bundled into the app.
+        .executableTarget(name: "xs-extract", dependencies: ["Extraction"], path: "Packages/Extraction/Worker"),
+        .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog", "ContentEngine", "Extraction"], path: "App/Sources"),
         .testTarget(name: "XSearchCoreTests", dependencies: ["XSearchCore"], path: "Packages/XSearchCore/Tests"),
         .testTarget(name: "NameEngineTests", dependencies: ["NameEngine"], path: "Packages/NameEngine/Tests"),
         .testTarget(name: "CatalogTests", dependencies: ["Catalog"], path: "Packages/Catalog/Tests"),
         .testTarget(name: "ContentEngineTests", dependencies: ["ContentEngine"], path: "Packages/ContentEngine/Tests"),
+        .testTarget(name: "ExtractionTests", dependencies: ["Extraction", "xs-extract"], path: "Packages/Extraction/Tests"),
     ],
     swiftLanguageModes: [.v6]
 )
