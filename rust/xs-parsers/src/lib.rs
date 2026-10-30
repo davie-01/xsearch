@@ -5,6 +5,7 @@ use std::{fs::File, io::Read, path::Path};
 use xs_index::{Anchor, AnchorKind, ExtractState};
 
 pub mod docx;
+pub mod office;
 
 /// Bumped when an extractor's output can change for the same input bytes, so affected files
 /// are re-extracted (§9.1 extractor_ver).

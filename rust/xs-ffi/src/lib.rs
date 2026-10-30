@@ -501,6 +501,24 @@ pub fn extract_docx(
     Ok(output(e, xs_parsers::DOCX_EXTRACTOR_VERSION))
 }
 
+#[uniffi::export]
+pub fn extract_spreadsheet(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::office::spreadsheet(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, xs_parsers::office::SHEET_EXTRACTOR_VERSION))
+}
+
+#[uniffi::export]
+pub fn extract_pptx(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::office::pptx(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, xs_parsers::office::PPTX_EXTRACTOR_VERSION))
+}
+
+#[uniffi::export]
+pub fn extract_ofd(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::office::ofd(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, xs_parsers::office::OFD_EXTRACTOR_VERSION))
+}
+
 /// Engine versions, for diagnostics and rebuild decisions.
 #[uniffi::export]
 pub fn engine_versions() -> HashMap<String, String> {
@@ -518,5 +536,8 @@ pub fn engine_versions() -> HashMap<String, String> {
             "extractor.docx".to_owned(),
             xs_parsers::DOCX_EXTRACTOR_VERSION.to_string(),
         ),
+        ("extractor.sheet".to_owned(), xs_parsers::office::SHEET_EXTRACTOR_VERSION.to_string()),
+        ("extractor.slide".to_owned(), xs_parsers::office::PPTX_EXTRACTOR_VERSION.to_string()),
+        ("extractor.ofd".to_owned(), xs_parsers::office::OFD_EXTRACTOR_VERSION.to_string()),
     ])
 }

@@ -62,6 +62,14 @@ pub enum AnchorKind {
     Part {
         name: String,
     },
+    /// Spreadsheet row start: "Sheet1!A12".
+    Sheet {
+        sheet: String,
+        cell: String,
+    },
+    Slide {
+        slide: u32,
+    },
     OcrBox {
         page: u32,
         x: f32,

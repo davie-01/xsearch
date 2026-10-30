@@ -106,3 +106,23 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     guard case .extracted = worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) else { Issue.record("not restarted"); return }
     #expect(worker.restarts == 2)
 }
+
+@Test func slidesDispatchThroughRust() throws {
+    let dir = tmp("deck")
+    try? FileManager.default.removeItem(atPath: dir)
+    try FileManager.default.createDirectory(atPath: dir + "/ppt/slides", withIntermediateDirectories: true)
+    let slide = #"<p:sld xmlns:p="p" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:p><a:r><a:t>季度汇报 预算</a:t></a:r></a:p></p:sld>"#
+    try slide.write(toFile: dir + "/ppt/slides/slide1.xml", atomically: true, encoding: .utf8)
+    let pptx = tmp("deck.pptx")
+    try? FileManager.default.removeItem(atPath: pptx)
+    let zip = Process()
+    zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+    zip.currentDirectoryURL = URL(fileURLWithPath: dir)
+    zip.arguments = ["-qr", pptx, "ppt"]
+    try zip.run()
+    zip.waitUntilExit()
+    #expect(ExtractionKind.of(name: "deck.PPTX") == .slide && ExtractionKind.of(name: "a.xls") == .sheet && ExtractionKind.of(name: "a.ofd") == .ofd)
+    let r = try Extractor.extract(path: pptx, limits: ExtractionLimits())
+    #expect(r.method == "pptx" && r.text.contains("季度汇报 预算"))
+    #expect(r.anchorsJSON.contains(#""kind":"slide""#) && r.anchorsJSON.contains(#""slide":1"#))
+}

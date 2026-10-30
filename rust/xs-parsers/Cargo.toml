@@ -7,6 +7,7 @@ description = "XSearch text extraction in Rust: plain text / code (encoding dete
 
 [dependencies]
 anyhow.workspace = true
+calamine = { version = "=0.30.1", default-features = false }
 encoding_rs.workspace = true
 roxmltree.workspace = true
 serde.workspace = true

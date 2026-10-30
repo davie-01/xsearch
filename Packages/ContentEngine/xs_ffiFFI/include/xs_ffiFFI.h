@@ -392,9 +392,24 @@ RustBuffer uniffi_xs_ffi_fn_func_engine_versions(RustCallStatus *_Nonnull out_st
 RustBuffer uniffi_xs_ffi_fn_func_extract_docx(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_OFD
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_OFD
+RustBuffer uniffi_xs_ffi_fn_func_extract_ofd(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_PLAIN_TEXT
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_PLAIN_TEXT
 RustBuffer uniffi_xs_ffi_fn_func_extract_plain_text(RustBuffer path, uint64_t max_file_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_PPTX
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_PPTX
+RustBuffer uniffi_xs_ffi_fn_func_extract_pptx(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_SPREADSHEET
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_SPREADSHEET
+RustBuffer uniffi_xs_ffi_fn_func_extract_spreadsheet(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_XS_FFI_RUSTBUFFER_ALLOC
@@ -689,9 +704,27 @@ uint16_t uniffi_xs_ffi_checksum_func_extract_docx(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_OFD
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_OFD
+uint16_t uniffi_xs_ffi_checksum_func_extract_ofd(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_PLAIN_TEXT
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_PLAIN_TEXT
 uint16_t uniffi_xs_ffi_checksum_func_extract_plain_text(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_PPTX
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_PPTX
+uint16_t uniffi_xs_ffi_checksum_func_extract_pptx(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_SPREADSHEET
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_SPREADSHEET
+uint16_t uniffi_xs_ffi_checksum_func_extract_spreadsheet(void
     
 );
 #endif

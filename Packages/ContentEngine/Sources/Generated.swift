@@ -2505,6 +2505,14 @@ public func extractDocx(path: String, maxUnpackedBytes: UInt64)throws  -> Extrac
     )
 })
 }
+public func extractOfd(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_ofd(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
 /**
  * Plain text / source code with encoding detection; binary files are an error.
  */
@@ -2513,6 +2521,22 @@ public func extractPlainText(path: String, maxFileBytes: UInt64)throws  -> Extra
     uniffi_xs_ffi_fn_func_extract_plain_text(
         FfiConverterString.lower(path),
         FfiConverterUInt64.lower(maxFileBytes),$0
+    )
+})
+}
+public func extractPptx(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_pptx(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+public func extractSpreadsheet(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_spreadsheet(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
     )
 })
 }
@@ -2538,7 +2562,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_xs_ffi_checksum_func_extract_docx() != 40192) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xs_ffi_checksum_func_extract_ofd() != 33112) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xs_ffi_checksum_func_extract_plain_text() != 35752) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_pptx() != 34800) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_spreadsheet() != 16974) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindex_document() != 63926) {

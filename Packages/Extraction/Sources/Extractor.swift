@@ -62,6 +62,9 @@ public enum Extractor {
         case .doc: docVersion
         case .text: engineVersions()["extractor.text"].flatMap(UInt64.init) ?? 1
         case .docx: engineVersions()["extractor.docx"].flatMap(UInt64.init) ?? 1
+        case .sheet: engineVersions()["extractor.sheet"].flatMap(UInt64.init) ?? 1
+        case .slide: engineVersions()["extractor.slide"].flatMap(UInt64.init) ?? 1
+        case .ofd: engineVersions()["extractor.ofd"].flatMap(UInt64.init) ?? 1
         }
     }
 
@@ -79,6 +82,15 @@ public enum Extractor {
         case .doc:
             try checkSize(path, limits)
             return try doc(path)
+        case .sheet:
+            try checkSize(path, limits)
+            return try rust { try extractSpreadsheet(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case .slide:
+            try checkSize(path, limits)
+            return try rust { try extractPptx(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case .ofd:
+            try checkSize(path, limits)
+            return try rust { try extractOfd(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
         }
     }
 

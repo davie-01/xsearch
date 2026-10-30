@@ -29,15 +29,18 @@ public struct ContentScope: Codable, Sendable, Equatable {
     }
 }
 
-/// Content types extracted in M2 (D7: .doc and .docx together; OFD M3, WPS M4, OCR M6).
+/// Content types (D7: .doc/.docx in M2; spreadsheets, slides and OFD in M3; WPS M4, OCR M6).
 public enum ContentType: String, Codable, Sendable, CaseIterable {
-    case text, docx, pdf, doc
+    case text, docx, pdf, doc, sheet, slide, ofd
 
     public var extensions: Set<String> {
         switch self {
         case .docx: ["docx", "docm"]
         case .pdf: ["pdf"]
         case .doc: ["doc", "dot"]
+        case .sheet: ["xlsx", "xlsm", "xls", "ods"]
+        case .slide: ["pptx", "pptm"]
+        case .ofd: ["ofd"]
         case .text: [
             "txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini", "conf", "cfg",
             "swift", "rs", "c", "h", "m", "mm", "cc", "cpp", "hpp", "py", "js", "mjs", "ts", "tsx", "jsx", "go", "java", "kt",
