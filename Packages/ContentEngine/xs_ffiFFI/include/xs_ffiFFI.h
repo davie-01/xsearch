@@ -316,6 +316,11 @@ RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_applied_seqs(void*_Nonnull
 void uniffi_xs_ffi_fn_method_contentindexwriter_commit(void*_Nonnull ptr, uint64_t batch_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
+RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_find_by_extract_key(void*_Nonnull ptr, RustBuffer key, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_GARBAGE_COLLECT
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_GARBAGE_COLLECT
 void uniffi_xs_ffi_fn_method_contentindexwriter_garbage_collect(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -729,6 +734,12 @@ uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_applied_seqs(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_COMMIT
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_COMMIT
 uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_commit(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
+uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_find_by_extract_key(void
     
 );
 #endif

@@ -1,6 +1,6 @@
 # XSearch
 
-面向 macOS 26+ / Apple Silicon 的原生文件名与文件内容搜索应用。已完成 **M0 技术验证**；**M1（名称与启动）代码与自动化测试已完成，界面待人工验收**，进度与证据见 `docs/m1/STATUS.md`。
+面向 macOS 26+ / Apple Silicon 的原生文件名与文件内容搜索应用。已完成 M0 技术验证、M1（名称与启动）和 **M2（内容搜索最小闭环）**，进度与证据见 `docs/m1/STATUS.md`、`docs/m2/STATUS.md`。
 
 ## M1 应用
 

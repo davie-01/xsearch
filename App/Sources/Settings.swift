@@ -345,6 +345,9 @@ struct PrivacyPane: View {
                 .font(.system(size: 12.5))
             Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([Preferences.dataDirectory]) }
         }
+        Card(title: "重建内容索引", subtitle: "在后台重新提取全部内容文件；完成前继续使用旧索引，完成后删除旧索引并回收空间。") {
+            Button("重建内容索引…") { model.delegate?.rebuildContentIndex() }
+        }
         Card(title: "重建文件名索引", subtitle: "删除文件名索引并重新扫描。最近打开记录和设置单独保存，不受影响。") {
             Button("重建文件名索引…") { confirmRebuild = true }
                 .foregroundStyle(.red)

@@ -427,6 +427,25 @@ impl ContentIndexWriter {
         self.with(|w| w.applied_seqs())
     }
 
+    /// Committed document with this extraction cache key, for reuse without re-extracting.
+    pub fn find_by_extract_key(&self, key: String) -> Result<Option<ContentDocument>, EngineError> {
+        self.with(|w| {
+            Ok(w.find_by_extract_key(&key)?.map(|d| ContentDocument {
+                file_id: d.file_id,
+                op_seq: d.op_seq,
+                revision: d.revision,
+                name: d.name,
+                dir: d.dir,
+                mtime: d.mtime,
+                size: d.size,
+                text: d.text,
+                anchors_json: serde_json::to_string(&d.anchors).unwrap_or_else(|_| "[]".into()),
+                pages_json: serde_json::to_string(&d.pages).unwrap_or_else(|_| "[]".into()),
+                state: d.state.into(),
+            }))
+        })
+    }
+
     pub fn garbage_collect(&self) -> Result<(), EngineError> {
         self.with(|w| w.garbage_collect())
     }
@@ -490,6 +509,14 @@ pub fn engine_versions() -> HashMap<String, String> {
         (
             "normalization".to_owned(),
             xs_core::normalize::NORM_VERSION.to_owned(),
+        ),
+        (
+            "extractor.text".to_owned(),
+            xs_parsers::TEXT_EXTRACTOR_VERSION.to_string(),
+        ),
+        (
+            "extractor.docx".to_owned(),
+            xs_parsers::DOCX_EXTRACTOR_VERSION.to_string(),
         ),
     ])
 }

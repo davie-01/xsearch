@@ -720,6 +720,11 @@ public protocol ContentIndexWriterProtocol: AnyObject, Sendable {
     
     func commit(batchId: UInt64) throws 
     
+    /**
+     * Committed document with this extraction cache key, for reuse without re-extracting.
+     */
+    func findByExtractKey(key: String) throws  -> ContentDocument?
+    
     func garbageCollect() throws 
     
     func instanceId() throws  -> String
@@ -809,6 +814,17 @@ open func commit(batchId: UInt64)throws   {try rustCallWithError(FfiConverterTyp
         FfiConverterUInt64.lower(batchId),$0
     )
 }
+}
+    
+    /**
+     * Committed document with this extraction cache key, for reuse without re-extracting.
+     */
+open func findByExtractKey(key: String)throws  -> ContentDocument?  {
+    return try  FfiConverterOptionTypeContentDocument.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_method_contentindexwriter_find_by_extract_key(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),$0
+    )
+})
 }
     
 open func garbageCollect()throws   {try rustCallWithError(FfiConverterTypeEngineError_lift) {
@@ -2544,6 +2560,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_commit() != 60864) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_method_contentindexwriter_find_by_extract_key() != 11352) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_garbage_collect() != 26191) {

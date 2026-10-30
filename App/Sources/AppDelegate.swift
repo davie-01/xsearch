@@ -198,6 +198,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     var currentContentScope: ContentScope { contentScope }
+
+    /// Settings › 隐私与数据 › 重建内容索引: new instance in the background, switch when caught up.
+    func rebuildContentIndex() {
+        try? indexer?.rebuildContentIndex()
+        statusChanged()
+    }
     var contentStatus: ContentIndexer.Status? { indexer?.status }
     var nameService: NameService { names }
 

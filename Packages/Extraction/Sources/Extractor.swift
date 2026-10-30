@@ -55,6 +55,16 @@ public enum Extractor {
     public static let pdfVersion: UInt64 = 1
     public static let docVersion: UInt64 = 1
 
+    /// Current extractor version per type (Rust ones come from the engine).
+    public static func version(of type: ContentType) -> UInt64 {
+        switch type {
+        case .pdf: pdfVersion
+        case .doc: docVersion
+        case .text: engineVersions()["extractor.text"].flatMap(UInt64.init) ?? 1
+        case .docx: engineVersions()["extractor.docx"].flatMap(UInt64.init) ?? 1
+        }
+    }
+
     public static func extract(path: String, limits: ExtractionLimits) throws -> ExtractionResult {
         guard let kind = ExtractionKind.of(path: path) else { throw ExtractionError.unsupported((path as NSString).pathExtension) }
         switch kind {

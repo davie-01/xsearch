@@ -160,6 +160,70 @@ impl ContentWriter {
         })
     }
 
+    /// A committed live document with this extraction cache key (§10: identical bytes with the
+    /// same extractor and config reuse text, anchors and page states instead of re-parsing).
+    pub fn find_by_extract_key(&self, key: &str) -> Result<Option<crate::reader::DocView>> {
+        if key.is_empty() {
+            return Ok(None);
+        }
+        let searcher = self.reader.searcher();
+        let q = tantivy::query::BooleanQuery::new(vec![
+            (
+                tantivy::query::Occur::Must,
+                Box::new(tantivy::query::TermQuery::new(
+                    Term::from_field_text(self.f.extract_key, key),
+                    tantivy::schema::IndexRecordOption::Basic,
+                )) as Box<dyn tantivy::query::Query>,
+            ),
+            (
+                tantivy::query::Occur::Must,
+                Box::new(tantivy::query::TermQuery::new(
+                    Term::from_field_u64(self.f.live, 1),
+                    tantivy::schema::IndexRecordOption::Basic,
+                )),
+            ),
+        ]);
+        let Some(a) = searcher
+            .search(&q, &tantivy::collector::DocSetCollector)?
+            .into_iter()
+            .next()
+        else {
+            return Ok(None);
+        };
+        let d = searcher.doc::<TantivyDocument>(a)?;
+        let f = self.f;
+        let get_str = |field| {
+            d.get_first(field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned()
+        };
+        let get_bytes = |field| {
+            d.get_first(field)
+                .and_then(|v| v.as_bytes())
+                .unwrap_or(b"[]")
+                .to_vec()
+        };
+        Ok(Some(crate::reader::DocView {
+            file_id: d.get_first(f.file_id).and_then(|v| v.as_u64()).unwrap_or(0),
+            op_seq: d.get_first(f.op_seq).and_then(|v| v.as_u64()).unwrap_or(0),
+            revision: d
+                .get_first(f.revision)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            name: get_str(f.name),
+            dir: get_str(f.dir),
+            mtime: d.get_first(f.mtime).and_then(|v| v.as_i64()).unwrap_or(0),
+            size: d.get_first(f.size).and_then(|v| v.as_i64()).unwrap_or(0),
+            text: get_str(f.text),
+            anchors: serde_json::from_slice(&get_bytes(f.anchors)).unwrap_or_default(),
+            pages: serde_json::from_slice(&get_bytes(f.pages)).unwrap_or_default(),
+            state: crate::doc::ExtractState::from_code(
+                d.get_first(f.state).and_then(|v| v.as_u64()).unwrap_or(0),
+            ),
+        }))
+    }
+
     /// Reclaims files no longer referenced by any commit (§6.2: disk space is reclaimed later
     /// than query-level deletion, and only once old searchers are gone).
     pub fn garbage_collect(&mut self) -> Result<()> {

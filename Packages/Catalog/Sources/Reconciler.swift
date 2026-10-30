@@ -489,7 +489,8 @@ final class Reconciler {
             refreshAllContent = false
         }
         guard inTransaction else { return }
-        var counter = try opCounter ?? catalog.opSeqCounter()
+        // Re-read every time: IndexService also bumps op_seq (extractor upgrades, rebuilds).
+        var counter = try catalog.opSeqCounter()
         let start = counter
         var dirPaths: [Int64: String] = [:]
         func dirPath(_ id: Int64) throws -> String? {

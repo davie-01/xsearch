@@ -1,7 +1,7 @@
 # XSearch 架构设计
 
-> 版本：v0.8（2026-10-30）
-> 状态：M0 完成（[M0 报告](m0/RESULTS.md)）；**M1 代码与自动化测试完成，界面待人工验收**（[M1 进度](m1/STATUS.md)）。
+> 版本：v0.9（2026-10-30）
+> 状态：M0 完成（[M0 报告](m0/RESULTS.md)）；M1 完成（[M1 进度](m1/STATUS.md)）；**M2 内容最小闭环完成**（[M2 进度](m2/STATUS.md)）。
 > 平台：macOS 26 及以上，Apple Silicon（arm64）
 > 相关文档：`design/UI-SPEC.md`（界面与交互规范，v1.1）、`design/design-tokens.json`（设计变量）、`design/prototype/`（原型源文件）；`XSearch-architecture-review-v0.3.md`（评审意见）
 
@@ -583,6 +583,7 @@ XSearch/
 
 | 版本 | 变更 |
 |---|---|
+| v0.9 | M2 实现：xs-index/xs-parsers/xs-ffi（UniFFI）；ExtractionWorker 为可强杀的辅助进程；IndexService 暂在进程内；内容任务由对账器同事务写入、op_seq 全局递增；提取缓存键为 SHA-256 + 提取器版本 + 配置；重建内容索引为新实例追平后切换 |
 | v0.8 | M1 实现：Swift Package（XSearchCore / NameEngine / Catalog）+ AppKit 应用；文件名键通过 C ABI 使用 Rust 实现（D12 延伸到名称）；9.2 节补充 M1 对账规则（目录 inode 变化即新目录、fsgetpath 追踪移动、迭代解析、失败批次兜底）；增量层改为按“代号”rebase，快照只记录已完整提交的序号；M1 中空格按 AND；暂用 SwiftPM + 打包脚本代替 XcodeGen |
 | v0.7.4 | 落实 M0-B 全部对比：文件名采用目录块 + 名称驻留 + 后台合并的增量层，不用字符类位图；布隆按实际解压量复核后仍默认关闭；正文保持 Zstd 16 KB 块并启用块缓存；记录 XPC 往返与冷启动开销，IndexService 启动时预热；Vision 小实验结论写入第 14 节；界面规范不变 |
 | v0.7.3 | 去掉拼音搜索（D13）：删除拼音别名区、拼音排序档位、拼音语法开关和查询集中的拼音项；应用启动只匹配 bundle 名和本地化名 |

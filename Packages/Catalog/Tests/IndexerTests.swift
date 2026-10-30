@@ -212,3 +212,53 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(verdict("outside.txt", "内容范围") == .problem)
     #expect(p.names.diagnose(p.box.p("missing.txt")).first?.label == "文件")
 }
+
+@Test func identicalContentReusesExtraction() throws {
+    let p = try Pipeline("cache")
+    defer { p.stop() }
+    try p.box.write("docs/a.txt", "缓存复用 独有内容 kappa")
+    try p.start()
+    #expect(p.settle())
+    #expect(p.indexer.cacheHits == 0)
+    try FileManager.default.copyItem(atPath: p.box.p("docs/a.txt"), toPath: p.box.p("docs/copy.txt"))
+    try p.box.mkdir("docs/sub")
+    try p.box.mv("docs/a.txt", "docs/sub/a.txt")
+    #expect(p.until { try p.search("kappa") == ["copy.txt", "a.txt"] })
+    #expect(p.indexer.cacheHits >= 2, "copy and move served from the cache: \(p.indexer.cacheHits)")
+}
+
+@Test func rebuildSwitchesInstanceAfterCatchingUp() throws {
+    let p = try Pipeline("rebuild")
+    defer { p.stop() }
+    for i in 1...5 { try p.box.write("docs/r\(i).txt", "重建 文件\(i) lambda\(i)") }
+    try p.start()
+    #expect(p.settle())
+    let old = p.indexer.indexURL
+    try p.indexer.rebuildContentIndex()
+    #expect(p.indexer.isRebuilding)
+    #expect(try p.search("lambda3") == ["r3.txt"], "readers keep the old instance meanwhile")
+    #expect(p.until { !p.indexer.isRebuilding })
+    #expect(p.indexer.indexURL != old)
+    #expect(!FileManager.default.fileExists(atPath: old.path), "old instance removed")
+    for i in 1...5 { #expect(try p.search("lambda\(i)") == ["r\(i).txt"]) }
+}
+
+@Test func extractorUpgradeReindexesOnlyThatType() throws {
+    let p = try Pipeline("upgrade")
+    defer { p.stop() }
+    try p.box.write("docs/t.txt", "文本 mu")
+    writePDF(p.box.p("docs/d.pdf"), "PDF nu")
+    try p.start()
+    #expect(p.settle())
+    p.indexer.stop()
+    // Pretend the text extractor was older when these files were indexed.
+    let catalog = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    var versions = ContentIndexer.extractorFingerprint()
+    versions["text"] = 0
+    try catalog.setMeta("content_extractors", String(decoding: try JSONEncoder().encode(versions), as: UTF8.self))
+    try p.restartIndexer()
+    let tasks = p.names.contentTasks().compactMap { $0.path.map { ($0 as NSString).lastPathComponent } }
+    #expect(tasks == ["t.txt"], "\(tasks)")
+    #expect(p.settle())
+    #expect(try p.search("mu") == ["t.txt"] && p.search("nu") == ["d.pdf"])
+}

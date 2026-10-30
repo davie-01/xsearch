@@ -1,4 +1,5 @@
 import ContentEngine
+import CryptoKit
 import Extraction
 import Foundation
 import os
@@ -61,6 +62,17 @@ public final class ContentIndexer: @unchecked Sendable {
     var fault: ((Fault) -> Bool)?
     var workerFault: ((String) -> String?)?
     var afterExtract: ((String) -> Void)?
+    /// Extractions served from the cache (tests, diagnostics).
+    private(set) var cacheHits = 0
+    private let lock = NSLock()
+
+    static func digest(_ path: String) -> String? {
+        guard let h = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? h.close() }
+        var sha = SHA256()
+        while let chunk = try? h.read(upToCount: 1 << 20), !chunk.isEmpty { sha.update(data: chunk) }
+        return sha.finalize().map { String(format: "%02x", $0) }.joined()
+    }
 
     public init(directory: URL, workerExecutable: URL, workers: Int = 2, environment: [String: String] = [:]) {
         self.directory = directory
@@ -71,8 +83,14 @@ public final class ContentIndexer: @unchecked Sendable {
 
     public var status: Status { state.withLock { $0 } }
 
-    /// Directory of the active index instance (readers open this).
+    /// Instance being rebuilt (written to) while readers stay on `instanceId` until it catches up.
+    private var rebuildId: String?
+
+    /// Directory readers open: the active instance (also during a rebuild).
     public var indexURL: URL { directory.appendingPathComponent("content").appendingPathComponent(instanceId) }
+    /// Directory the writer uses: the rebuild instance while one is running.
+    var writeURL: URL { directory.appendingPathComponent("content").appendingPathComponent(rebuildId ?? instanceId) }
+    public var isRebuilding: Bool { queue.sync { rebuildId != nil } }
 
     // MARK: Lifecycle
 
@@ -82,8 +100,10 @@ public final class ContentIndexer: @unchecked Sendable {
             self.catalog = catalog
             if try catalog.meta("content_instance") == nil { try catalog.setMeta("content_instance", UUID().uuidString) }
             instanceId = try catalog.meta("content_instance")!
+            rebuildId = try catalog.meta("content_rebuild_instance")
             try openWriter()
             try recover()
+            try reindexUpgradedExtractors()
             stopped = false
             state.withLock { $0.running = true }
             let t = DispatchSource.makeTimerSource(queue: queue)
@@ -121,13 +141,83 @@ public final class ContentIndexer: @unchecked Sendable {
     }
 
     private func openWriter() throws {
-        try FileManager.default.createDirectory(at: indexURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let w = try ContentIndexWriter.open(path: indexURL.path, newInstanceId: instanceId)
+        try FileManager.default.createDirectory(at: writeURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let w = try ContentIndexWriter.open(path: writeURL.path, newInstanceId: rebuildId ?? instanceId)
         writer = w
         if try w.lastCommit() == nil { try w.commit(batchId: 0) }  // readers can open at once
         committedSeq = try w.appliedSeqs()
         lastBatch = try w.lastCommit()?.batchId ?? 0
         state.withLock { $0.committedBatches = lastBatch }
+    }
+
+    // MARK: Versions and rebuild
+
+    static func extractorFingerprint() -> [String: UInt64] {
+        Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
+    }
+
+    /// Bumps op_seq and queues an index task for content files whose name passes `filter`.
+    private func requeue(where filter: (String) -> Bool) throws -> Int {
+        guard let catalog else { return 0 }
+        return try catalog.db.transaction {
+            let s = try catalog.db.prepare("SELECT id, name, mtime_ns FROM files WHERE deleted = 0 AND in_content = 1")
+            var rows: [(Int64, String, Int64)] = []
+            while try s.step() { rows.append((s.int(0), s.text(1), s.int(2))) }
+            var counter = try catalog.opSeqCounter()
+            var n = 0
+            for (id, name, mtime) in rows where filter(name) {
+                counter += 1
+                try catalog.setContent(id, inContent: true, opSeq: counter)
+                try catalog.enqueue(id, opSeq: counter, kind: .index, priority: mtime / 1_000_000_000)
+                n += 1
+            }
+            try catalog.setOpSeqCounter(counter)
+            return n
+        }
+    }
+
+    /// §9.1 extractor_ver: when an extractor changes, only files of its type are re-extracted.
+    private func reindexUpgradedExtractors() throws {
+        guard let catalog else { return }
+        let current = Self.extractorFingerprint()
+        let stored = try catalog.meta("content_extractors").flatMap { try? JSONDecoder().decode([String: UInt64].self, from: Data($0.utf8)) }
+        if let stored {
+            let changed = Set(current.filter { stored[$0.key] != $0.value }.keys)
+            if !changed.isEmpty {
+                _ = try requeue { name in ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false }
+            }
+        }
+        try catalog.setMeta("content_extractors", String(decoding: try JSONEncoder().encode(current), as: UTF8.self))
+    }
+
+    /// Rebuilds the content index into a new instance (§9.3 step 7, simplified): the writer moves
+    /// to the new instance and every content file is re-queued; readers keep the old instance
+    /// until the new one has caught up, then the active instance switches and the old
+    /// directory is deleted (disk space reclaimed, §6.2).
+    public func rebuildContentIndex() throws {
+        try queue.sync {
+            guard let catalog, rebuildId == nil else { return }
+            let id = UUID().uuidString
+            try catalog.setMeta("content_rebuild_instance", id)
+            rebuildId = id
+            writer = nil
+            try openWriter()
+            _ = try requeue { _ in true }
+            try refreshCounts()
+        }
+    }
+
+    /// When no task is left, a running rebuild becomes the active instance.
+    private func finishRebuildIfCaughtUp() throws {
+        guard let catalog, let id = rebuildId, try readyCount() == 0, status.pending == 0 else { return }
+        let old = indexURL
+        try catalog.db.transaction {
+            try catalog.setMeta("content_instance", id)
+            try catalog.setMeta("content_rebuild_instance", nil)
+        }
+        instanceId = id
+        rebuildId = nil
+        try? FileManager.default.removeItem(at: old)
     }
 
     /// Startup: resolve the unconfirmed batch, release leases of the previous process.
@@ -187,6 +277,7 @@ public final class ContentIndexer: @unchecked Sendable {
                 try process(tasks)
             }
             try refreshCounts()
+            try finishRebuildIfCaughtUp()
         } catch is Crash {
             crash()
         } catch {
@@ -274,6 +365,18 @@ public final class ContentIndexer: @unchecked Sendable {
     private func extract(_ p: Prepared, worker: ExtractionWorker) -> Staged {
         // Before: the file must still be what the catalog recorded for this op.
         guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
+        let dir = (p.path as NSString).deletingLastPathComponent
+        let type = ContentType.of(name: p.info.name)
+        // §10 cache key: strong digest + extractor version + config. Same key → reuse the stored
+        // extraction (moves, renames, copies) instead of parsing again.
+        let key = Self.digest(p.path).map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes)" } ?? ""
+        if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
+            lock.withLock { cacheHits += 1 }
+            return .put(ContentInput(fileId: UInt64(p.task.fileId), opSeq: UInt64(p.task.opSeq), revision: UInt64(bitPattern: p.version.mtimeNs),
+                                     extractorVer: type.map(Extractor.version) ?? 0, scopeIds: [1], dir: dir, name: p.info.name,
+                                     size: p.version.size, mtime: p.version.mtimeNs / 1_000_000_000, text: cached.text,
+                                     anchorsJson: cached.anchorsJson, pagesJson: cached.pagesJson, state: cached.state, extractKey: key))
+        }
         let timeout = baseTimeout + Double(p.version.size) / Double(1 << 20) * 2
         let outcome = worker.extract(path: p.path, limits: limits, timeout: timeout, fault: workerFault?(p.path))
         afterExtract?(p.path)
@@ -281,11 +384,10 @@ public final class ContentIndexer: @unchecked Sendable {
         guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
         switch outcome {
         case .extracted(let r):
-            let dir = (p.path as NSString).deletingLastPathComponent
             return .put(ContentInput(fileId: UInt64(p.task.fileId), opSeq: UInt64(p.task.opSeq), revision: UInt64(bitPattern: p.version.mtimeNs),
                                      extractorVer: r.extractorVersion, scopeIds: [1], dir: dir, name: p.info.name,
                                      size: p.version.size, mtime: p.version.mtimeNs / 1_000_000_000, text: r.text,
-                                     anchorsJson: r.anchorsJSON, pagesJson: r.pagesJSON, state: ExtractStateKind(code: r.state), extractKey: ""))
+                                     anchorsJson: r.anchorsJSON, pagesJson: r.pagesJSON, state: ExtractStateKind(code: r.state), extractKey: key))
         case .failed(let message):
             return .failed(message)
         case .timedOut, .crashed:
