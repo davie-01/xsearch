@@ -4,9 +4,9 @@ import XSearchCore
 
 /// Archives (M4-2): Rust unpacks the members of extractable types into a scratch folder, each
 /// member goes through the ordinary extractors (PDF and .doc are Swift-only), and the texts
-/// are joined in archive order as one document. Every member starts with a part anchor named
-/// after its path; its own anchors become "名称 · 第 3 页" parts. One level deep: archives
-/// inside archives are skipped.
+/// are joined in archive order as one document. Every member starts with a `member` anchor
+/// (search returns one hit per matching member) followed by its own anchors, shifted. One
+/// level deep: archives inside archives are skipped.
 extension Extractor {
     public static var archiveVersion: UInt64 { engineVersions()["extractor.archive"].flatMap(UInt64.init) ?? 1 }
 
@@ -37,11 +37,14 @@ extension Extractor {
             guard let r = try? extract(path: m.extractedPath, limits: limits) else { failed += 1; continue }
             try? FileManager.default.removeItem(atPath: m.extractedPath)
             if r.text.isEmpty { continue }
-            let short = (m.name as NSString).lastPathComponent
-            anchors.append(["start": scalars, "kind": "part", "name": m.name])
+            // A member marker (search splits the document into one hit per member), then the
+            // member's own anchors, shifted, with their kinds kept (page, paragraph, sheet…).
+            anchors.append(["start": scalars, "kind": "member", "name": m.name])
             for a in (try? JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8)) as? [[String: Any]]) ?? [] {
-                guard let start = a["start"] as? Int, let label = anchorLabel(a) else { continue }
-                anchors.append(["start": scalars + start, "kind": "part", "name": "\(short) · \(label)"])
+                guard let start = a["start"] as? Int else { continue }
+                var shifted = a
+                shifted["start"] = scalars + start
+                anchors.append(shifted)
             }
             text += r.text
             scalars += r.text.unicodeScalars.count
@@ -52,19 +55,5 @@ extension Extractor {
         let partial = failed > 0 || timedOut || listing.truncated || listing.encrypted > 0 || listing.skippedTooLarge > 0
         return ExtractionResult(text: text, anchorsJSON: json(anchors), pagesJSON: "[]", state: partial ? "partial" : "complete",
                                 warnings: warnings, method: "archive", extractorVersion: archiveVersion)
-    }
-
-    /// Gutter-style label of a member's anchor (the leading anchor at 0 adds nothing).
-    static func anchorLabel(_ a: [String: Any]) -> String? {
-        switch a["kind"] as? String {
-        case "page": (a["page"] as? Int).map { "第 \($0) 页" }
-        case "paragraph": (a["index"] as? Int).map { "段 \($0)" }
-        case "line": (a["line"] as? Int).map { "行 \($0)" }
-        case "cell": "表 \(a["table"] as? Int ?? 0)·\(a["cell"] as? String ?? "")"
-        case "sheet": "\(a["sheet"] as? String ?? "")!\(a["cell"] as? String ?? "")"
-        case "slide": (a["slide"] as? Int).map { "幻灯片 \($0)" }
-        case "part": a["name"] as? String
-        default: nil
-        }
     }
 }

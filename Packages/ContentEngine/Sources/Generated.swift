@@ -1732,10 +1732,18 @@ public struct ContentHit {
     public var hitCount: UInt32
     public var snippet: String
     public var snippetHighlights: [Utf16Range]
+    /**
+     * Archive member path (empty for ordinary files) and where its text starts (scalars).
+     */
+    public var member: String
+    public var memberStart: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(fileId: UInt64, name: String, dir: String, mtime: Int64, size: Int64, state: ExtractStateKind, hitCount: UInt32, snippet: String, snippetHighlights: [Utf16Range]) {
+    public init(fileId: UInt64, name: String, dir: String, mtime: Int64, size: Int64, state: ExtractStateKind, hitCount: UInt32, snippet: String, snippetHighlights: [Utf16Range], 
+        /**
+         * Archive member path (empty for ordinary files) and where its text starts (scalars).
+         */member: String, memberStart: UInt32) {
         self.fileId = fileId
         self.name = name
         self.dir = dir
@@ -1745,6 +1753,8 @@ public struct ContentHit {
         self.hitCount = hitCount
         self.snippet = snippet
         self.snippetHighlights = snippetHighlights
+        self.member = member
+        self.memberStart = memberStart
     }
 }
 
@@ -1782,6 +1792,12 @@ extension ContentHit: Equatable, Hashable {
         if lhs.snippetHighlights != rhs.snippetHighlights {
             return false
         }
+        if lhs.member != rhs.member {
+            return false
+        }
+        if lhs.memberStart != rhs.memberStart {
+            return false
+        }
         return true
     }
 
@@ -1795,6 +1811,8 @@ extension ContentHit: Equatable, Hashable {
         hasher.combine(hitCount)
         hasher.combine(snippet)
         hasher.combine(snippetHighlights)
+        hasher.combine(member)
+        hasher.combine(memberStart)
     }
 }
 
@@ -1815,7 +1833,9 @@ public struct FfiConverterTypeContentHit: FfiConverterRustBuffer {
                 state: FfiConverterTypeExtractStateKind.read(from: &buf), 
                 hitCount: FfiConverterUInt32.read(from: &buf), 
                 snippet: FfiConverterString.read(from: &buf), 
-                snippetHighlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf)
+                snippetHighlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf), 
+                member: FfiConverterString.read(from: &buf), 
+                memberStart: FfiConverterUInt32.read(from: &buf)
         )
     }
 
@@ -1829,6 +1849,8 @@ public struct FfiConverterTypeContentHit: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.hitCount, into: &buf)
         FfiConverterString.write(value.snippet, into: &buf)
         FfiConverterSequenceTypeUtf16Range.write(value.snippetHighlights, into: &buf)
+        FfiConverterString.write(value.member, into: &buf)
+        FfiConverterUInt32.write(value.memberStart, into: &buf)
     }
 }
 
@@ -3059,6 +3081,19 @@ public func engineVersions() -> [String: String]  {
     )
 })
 }
+/**
+ * Unpacks one archive member into `dest` for opening; returns its path.
+ */
+public func extractArchiveMember(path: String, member: String, dest: String, maxMemberBytes: UInt64)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_archive_member(
+        FfiConverterString.lower(path),
+        FfiConverterString.lower(member),
+        FfiConverterString.lower(dest),
+        FfiConverterUInt64.lower(maxMemberBytes),$0
+    )
+})
+}
 public func extractDocx(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
     return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
     uniffi_xs_ffi_fn_func_extract_docx(
@@ -3150,6 +3185,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_xs_ffi_checksum_func_engine_versions() != 30013) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_archive_member() != 22804) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_docx() != 40192) {

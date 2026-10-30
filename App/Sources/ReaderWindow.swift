@@ -146,17 +146,18 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     func show(_ hit: ContentHit, expression: String, startAt: Int = 0) {
         token += 1
         let token = self.token
-        path = hit.dir + "/" + hit.name
-        window?.title = hit.name
-        titleLabel.stringValue = hit.name
-        pathLabel.stringValue = PathUtil.abbreviate(hit.dir, home: NSHomeDirectory())
+        path = hit.path
+        shownHit = hit
+        window?.title = hit.displayName
+        titleLabel.stringValue = hit.displayName
+        pathLabel.stringValue = hit.displayLocation
         rows = []
         table.reloadData()
         countLabel.stringValue = "正在载入…"
         showWindow(nil)
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
-        searcher.preview(fileId: hit.fileId, expression: expression) { [weak self] data in
+        searcher.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
             guard let self, token == self.token else { return }
             guard let data else {
                 self.countLabel.stringValue = "索引中已没有这个文件"
@@ -286,7 +287,17 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
 
     // MARK: Actions
 
+    private var shownHit: ContentHit?
+
     @objc private func openDefault() {
+        if let hit = shownHit, hit.isMember {
+            if let message = MemberOpener.open(hit), let window {
+                let alert = NSAlert()
+                alert.messageText = message
+                alert.beginSheetModal(for: window)
+            }
+            return
+        }
         onOpenFile?(path, nil)
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }

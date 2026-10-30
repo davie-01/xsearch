@@ -29,6 +29,9 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         var isFolder: Bool
         var fileId: Int64?
         var hit: ContentHit?
+        /// Unique per row (archive members share the archive's path).
+        var key: String { hit?.key ?? path }
+        var isMember: Bool { hit?.isMember == true }
     }
 
     private let session: SearchSession
@@ -340,8 +343,9 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         guard mode == .content else { return }
         expression = out.query.expression
         let new = out.hits.map { h in
-            Row(name: h.name, path: h.dir + "/" + h.name, dir: h.dir, size: h.size, mtime: h.mtime, hits: Int(h.hitCount),
-                kind: FileKind.of(extension: NameKey.key((h.name as NSString).pathExtension), isDirectory: false, isApp: false),
+            // A member's size is unknown here (the archive's would mislead): shown as "—".
+            Row(name: h.displayName, path: h.path, dir: h.isMember ? h.displayLocation : h.dir, size: h.isMember ? -1 : h.size, mtime: h.mtime,
+                hits: Int(h.hitCount), kind: FileKind.of(extension: NameKey.key((h.displayName as NSString).pathExtension), isDirectory: false, isApp: false),
                 isFolder: false, fileId: Int64(h.fileId), hit: h)
         }
         ranked = out.append ? ranked + new : new
@@ -365,7 +369,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     /// Engine ranking unless a column header was clicked; a second click reverses.
     private func resort(keepSelection: Bool) {
-        let selected = Set(table.selectedRowIndexes.map { rows[$0].path })
+        let selected = Set(table.selectedRowIndexes.map { rows[$0].key })
         rows = ranked
         if let d = table.sortDescriptors.first, let key = d.key {
             let asc = d.ascending
@@ -382,7 +386,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         }
         table.reloadData()
         if keepSelection {
-            table.selectRowIndexes(IndexSet(rows.indices.filter { selected.contains(rows[$0].path) }), byExtendingSelection: false)
+            table.selectRowIndexes(IndexSet(rows.indices.filter { selected.contains(rows[$0].key) }), byExtendingSelection: false)
         } else if !rows.isEmpty {
             table.selectRowIndexes([0], byExtendingSelection: false)
             table.scrollRowToVisible(0)
@@ -402,10 +406,10 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         switch id {
         case "name":
             cell.textField?.stringValue = r.name
-            cell.imageView?.image = NSWorkspace.shared.icon(forFile: r.path)
+            cell.imageView?.image = r.hit?.icon ?? NSWorkspace.shared.icon(forFile: r.path)
         case "dir": cell.textField?.stringValue = PathUtil.abbreviate(r.dir, home: NSHomeDirectory())
         case "hits": cell.textField?.stringValue = r.hits.map(String.init) ?? ""
-        case "size": cell.textField?.stringValue = r.isFolder ? "—" : ByteCountFormatter.string(fromByteCount: r.size, countStyle: .file)
+        case "size": cell.textField?.stringValue = r.isFolder || r.size < 0 ? "—" : ByteCountFormatter.string(fromByteCount: r.size, countStyle: .file)
         default: cell.textField?.stringValue = r.mtime > 0 ? Self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(r.mtime))) : ""
         }
         return cell
@@ -451,7 +455,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     /// Multi-select drag out as file URLs.
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
-        URL(fileURLWithPath: rows[row].path) as NSURL
+        rows[row].isMember ? nil : URL(fileURLWithPath: rows[row].path) as NSURL
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -470,7 +474,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
             quickLook.isHidden = true
             textPreview.isHidden = false
             let token = previewToken
-            content.preview(fileId: hit.fileId, expression: expression) { [weak self] data in
+            content.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
                 guard let self, token == self.previewToken else { return }
                 if let data { self.textPreview.show(data, path: row.path) } else { self.textPreview.clear() }
             }
@@ -492,6 +496,13 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private func openSelected(reveal: Bool) {
         let urls = selectedRows.map { URL(fileURLWithPath: $0.path) }.filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !urls.isEmpty else { return }
+        // Archive members are unpacked and opened one by one; ⌘↵ shows the archive.
+        if !reveal && selectedRows.contains(where: \.isMember) {
+            for r in selectedRows {
+                if let h = r.hit, h.isMember { _ = MemberOpener.open(h) } else { NSWorkspace.shared.open(URL(fileURLWithPath: r.path)) }
+            }
+            return
+        }
         for r in selectedRows { usage?.recordOpen(path: r.path, fileId: r.fileId) }
         // One content hit: honour 打开方式 at the previewed occurrence.
         if !reveal, selectedRows.count == 1, selectedRows[0].hit != nil {
@@ -537,13 +548,21 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     private func toggleFavorites() {
         guard let usage else { return }
-        for r in selectedRows { usage.toggleFavorite(path: r.path, fileId: r.fileId) }
+        for r in selectedRows where !r.isMember { usage.toggleFavorite(path: r.path, fileId: r.fileId) }
     }
 
     /// ⌘⌫ with the table focused (so ⌘⌫ in the search field still edits text); asks first.
     private func trashSelected() {
-        let targets = selectedRows
-        guard !targets.isEmpty, let window else { return }
+        let targets = selectedRows.filter { !$0.isMember }
+        guard let window else { return }
+        if targets.isEmpty {
+            if !selectedRows.isEmpty {
+                let a = NSAlert()
+                a.messageText = MemberOpener.notAlone
+                a.beginSheetModal(for: window)
+            }
+            return
+        }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = targets.count == 1 ? "将“\(targets[0].name)”移到废纸篓？" : "将选中的 \(targets.count) 项移到废纸篓？"

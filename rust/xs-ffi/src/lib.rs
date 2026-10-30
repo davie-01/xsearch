@@ -128,6 +128,9 @@ pub struct ContentHit {
     pub hit_count: u32,
     pub snippet: String,
     pub snippet_highlights: Vec<Utf16Range>,
+    /// Archive member path (empty for ordinary files) and where its text starts (scalars).
+    pub member: String,
+    pub member_start: u32,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -316,6 +319,8 @@ impl ContentSearch {
                     hit_count: h.hit_count,
                     snippet: h.snippet,
                     snippet_highlights: h.snippet_highlights.into_iter().map(range).collect(),
+                    member: h.member,
+                    member_start: h.member_start,
                 })
                 .collect(),
             candidates: b.candidates as u64,
@@ -639,6 +644,19 @@ pub fn unpack_archive(
         truncated: u.truncated,
         warnings: u.warnings,
     })
+}
+
+/// Unpacks one archive member into `dest` for opening; returns its path.
+#[uniffi::export]
+pub fn extract_archive_member(path: String, member: String, dest: String, max_member_bytes: u64) -> Result<String, EngineError> {
+    let wanted = |name: &str| name == member;
+    let limits = xs_parsers::archive::ArchiveLimits { max_member_bytes, max_total_bytes: max_member_bytes, max_members: 1 };
+    let u = xs_parsers::archive::unpack(Path::new(&path), Path::new(&dest), &wanted, limits)?;
+    let m = u.members.into_iter().next().ok_or_else(|| EngineError::Index { message: "member not found".into() })?;
+    // Keep the member's own file name so apps show it.
+    let named = Path::new(&dest).join(Path::new(&m.name).file_name().unwrap_or_default());
+    std::fs::rename(&m.extracted, &named).map_err(|e| EngineError::Index { message: e.to_string() })?;
+    Ok(named.to_string_lossy().into_owned())
 }
 
 /// Engine versions, for diagnostics and rebuild decisions.

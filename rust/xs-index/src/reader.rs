@@ -1,5 +1,5 @@
 use crate::{
-    doc::{Anchor, ExtractState, PageState},
+    doc::{Anchor, AnchorKind, ExtractState, PageState},
     schema::{Fields, dir_term, open_existing},
 };
 use anyhow::Result;
@@ -59,6 +59,10 @@ pub struct Hit {
     pub snippet: String,
     /// UTF-16 ranges inside `snippet` (NSString / NSTextView offsets).
     pub snippet_highlights: Vec<Range<u32>>,
+    /// Archive member path, empty for ordinary files.
+    pub member: String,
+    /// Scalar offset where the member's text starts in the stored text.
+    pub member_start: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -484,6 +488,11 @@ impl SearchSession {
             self.next += 1;
             let d = self.searcher.doc::<TantivyDocument>(addr)?;
             let text = d.get_first(f.text).and_then(|v| v.as_str()).unwrap_or("");
+            let anchors = bytes_of(&d, f.anchors);
+            if anchors.windows(8).any(|w| w == b"\"member\"") {
+                self.member_hits(&d, text, anchors, &mut hits);
+                continue;
+            }
             let norm = normalize_text(text, self.mode);
             if !self.compiled.matches(&norm) {
                 continue;
@@ -503,6 +512,8 @@ impl SearchSession {
                 hit_count,
                 snippet,
                 snippet_highlights,
+                member: String::new(),
+                member_start: 0,
             });
         }
         Ok(Batch {
@@ -511,6 +522,57 @@ impl SearchSession {
             verified: self.next,
             done: self.next >= self.candidates.len(),
         })
+    }
+}
+
+impl SearchSession {
+    /// An archive document: each member is matched on its own text and becomes its own hit,
+    /// so a query matches when one member satisfies it (not terms spread over members).
+    fn member_hits(&self, d: &TantivyDocument, text: &str, anchors: &[u8], hits: &mut Vec<Hit>) {
+        let f = self.f;
+        let parsed: Vec<Anchor> = serde_json::from_slice(anchors).unwrap_or_default();
+        let members: Vec<(u32, String)> = parsed
+            .into_iter()
+            .filter_map(|a| match a.kind {
+                AnchorKind::Member { name } => Some((a.start, name)),
+                _ => None,
+            })
+            .collect();
+        // Byte offset of each member start, and of the end of the text.
+        let mut wanted: Vec<u32> = members.iter().map(|m| m.0).collect();
+        wanted.sort_unstable();
+        let mut byte_at = std::collections::HashMap::new();
+        let mut k = 0;
+        for (scalar, (b, _)) in text.char_indices().enumerate() {
+            while k < wanted.len() && wanted[k] as usize <= scalar {
+                byte_at.insert(wanted[k], b);
+                k += 1;
+            }
+        }
+        for (i, (start, name)) in members.iter().enumerate() {
+            let b0 = byte_at.get(start).copied().unwrap_or(text.len());
+            let b1 = members.get(i + 1).and_then(|n| byte_at.get(&n.0).copied()).unwrap_or(text.len()).max(b0);
+            let segment = &text[b0..b1];
+            let norm = normalize_text(segment, self.mode);
+            if !self.compiled.matches(&norm) {
+                continue;
+            }
+            let (hit_count, first_end) = count_hits(&norm, &self.positives);
+            let (snippet, snippet_highlights) = snippet(segment, self.mode, &self.positives, first_end);
+            hits.push(Hit {
+                file_id: u64_of(d, f.file_id),
+                name: str_of(d, f.name),
+                dir: str_of(d, f.dir),
+                mtime: i64_of(d, f.mtime),
+                size: i64_of(d, f.size),
+                state: ExtractState::from_code(u64_of(d, f.state)),
+                hit_count,
+                snippet,
+                snippet_highlights,
+                member: name.clone(),
+                member_start: *start,
+            });
+        }
     }
 }
 
@@ -695,6 +757,11 @@ fn snippet(
     }
     if let Some(s) = open {
         highlights.push(s..u16len);
+    }
+    // Trailing whitespace (a line or member ending inside the window) carries no hit.
+    let trimmed = out.trim_end().len();
+    if trimmed < out.len() && highlights.last().is_none_or(|h| h.end as usize <= out[..trimmed].encode_utf16().count()) {
+        out.truncate(trimmed);
     }
     if chars.next().is_some() {
         out.push('…');

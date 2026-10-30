@@ -400,3 +400,40 @@ fn text_matcher_agrees_with_indexed_search() {
     }
     assert!(TextMatcher::new(&parse("不存在").unwrap(), Mode::Loose).check(text).is_none());
 }
+
+#[test]
+fn archive_members_are_separate_hits() {
+    use xs_index::{Anchor, AnchorKind};
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    // Two members: "合同" in both, "金额" only in the second; "附件" spans members.
+    let text = "合同 附\n第二份 合同 金额 件\n";
+    let mut d = doc(1, text);
+    d.anchors = vec![
+        Anchor { start: 0, kind: AnchorKind::Member { name: "a/一.txt".into() } },
+        Anchor { start: 5, kind: AnchorKind::Member { name: "b/二.docx".into() } },
+        Anchor { start: 9, kind: AnchorKind::Paragraph { index: 1 } },
+    ];
+    w.put(&d).unwrap();
+    w.put(&doc(2, "普通文件 合同")).unwrap();
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    let hits = |q: &str| {
+        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] }).unwrap();
+        let mut v: Vec<(u64, String, u32, String)> = s
+            .next(Duration::from_secs(5), 100, &AtomicBool::new(false))
+            .unwrap()
+            .hits
+            .into_iter()
+            .map(|h| (h.file_id, h.member, h.member_start, h.snippet))
+            .collect();
+        v.sort();
+        v
+    };
+    let both = hits("合同");
+    assert_eq!(both.iter().map(|h| (h.0, h.1.as_str(), h.2)).collect::<Vec<_>>(), vec![(1, "a/一.txt", 0), (1, "b/二.docx", 5), (2, "", 0)]);
+    assert_eq!(both[1].3, "第二份 合同 金额 件");
+    assert_eq!(hits("合同 金额").iter().map(|h| h.1.as_str()).collect::<Vec<_>>(), vec!["b/二.docx"]);
+    // Terms in different members do not make a hit.
+    assert!(hits("附 件").is_empty());
+}

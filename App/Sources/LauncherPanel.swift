@@ -731,6 +731,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let url = URL(fileURLWithPath: path)
         if reveal {
             NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else if hit.isMember {
+            if let message = MemberOpener.open(hit) { Self.inform(message) }
         } else if let message = Opener.open(path: path, line: line, page: page) {
             Self.inform(message)
         }
@@ -827,7 +829,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         return (item.path, item.fileId)
     }
 
+    /// A selected archive member: the file on disk is the whole archive.
+    private var memberSelected: Bool { mode == .content && contentPane.selected?.isMember == true }
+
     private func toggleFavorite() {
+        if memberSelected { toast(MemberOpener.notAlone); return }
         guard let t = currentTarget(), let usage else { return }
         let on = usage.toggleFavorite(path: t.path, fileId: t.fileId)
         toast(on ? "已加入收藏" : "已取消收藏")
@@ -837,6 +843,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     /// Asks first (UI-SPEC §5.2): the confirmation sits in the notice area, so the panel keeps
     /// focus; ⌘⌫ again or the button confirms, anything else cancels.
     private func trashSelected() {
+        if memberSelected { toast(MemberOpener.notAlone); return }
         guard let t = currentTarget() else { return }
         if pendingTrash == t.path {
             confirmTrash()
@@ -928,7 +935,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         case ([.command, .shift], "c", _), ([.command, .shift], "C", _):
             if mode == .content, let h = contentPane.selected {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(h.dir + "/" + h.name, forType: .string)
+                NSPasteboard.general.setString(h.key, forType: .string)
                 toast("已复制路径")
             } else {
                 activate(.copyPath)

@@ -160,9 +160,9 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     let r = try Extractor.extract(path: zipPath, limits: ExtractionLimits())
     #expect(r.method == "archive" && r.state == "complete")
     #expect(r.text.contains("合同编号 HT-01"))
-    let anchors = try JSONDecoder().decode([AnchorJSON].self, from: Data(r.anchorsJSON.utf8))
-    #expect(anchors.allSatisfy { $0.kind == "part" })
-    let names = ((try JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8))) as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-    #expect(names.contains("资料/结构.docx") && names.contains("说明.txt") && names.contains("结构.docx · 段 1"))
-    #expect(!names.contains { $0.contains("图.png") })
+    let anchors = ((try JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8))) as? [[String: Any]] ?? [])
+    let members = anchors.filter { $0["kind"] as? String == "member" }.compactMap { $0["name"] as? String }
+    #expect(Set(members) == ["资料/结构.docx", "说明.txt"])
+    // The docx member's paragraphs keep their kind, shifted into the joined text.
+    #expect(anchors.contains { $0["kind"] as? String == "paragraph" })
 }

@@ -70,6 +70,11 @@ pub enum AnchorKind {
     Slide {
         slide: u32,
     },
+    /// Start of an archive member (path inside the archive). Search splits such documents into
+    /// one hit per matching member (M4 backlog: archive members as their own results).
+    Member {
+        name: String,
+    },
     OcrBox {
         page: u32,
         x: f32,

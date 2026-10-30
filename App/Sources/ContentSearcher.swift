@@ -177,7 +177,7 @@ final class ContentSearcher: @unchecked Sendable {
                     let url = URL(fileURLWithPath: f.path)
                     pending.append(ContentHit(fileId: UInt64(f.fileId), name: url.lastPathComponent, dir: url.deletingLastPathComponent().path,
                                               mtime: f.mtime, size: f.size, state: .complete, hitCount: h.hitCount, snippet: h.snippet,
-                                              snippetHighlights: h.snippetHighlights))
+                                              snippetHighlights: h.snippetHighlights, member: "", memberStart: 0))
                 }
                 let finished = i == files.count - 1
                 if finished || pending.count >= 50 || Date().timeIntervalSince(last) > 0.15 {
@@ -219,7 +219,8 @@ final class ContentSearcher: @unchecked Sendable {
     }
 
     /// Stored text + all hit ranges for the preview (background queue).
-    func preview(fileId: UInt64, expression: String, deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
+    func preview(fileId: UInt64, expression: String, member: String = "", memberStart: UInt32 = 0,
+                 deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
         let mode = self.mode
         previewQueue.async { [weak self] in
             guard let index = self?.openIndex(), let doc = try? index.document(fileId: fileId) else {
@@ -227,8 +228,10 @@ final class ContentSearcher: @unchecked Sendable {
                 return
             }
             let hl = (try? index.highlights(fileId: fileId, query: expression, mode: mode)) ?? []
-            let data = PreviewData(document: doc, highlights: hl)
-            DispatchQueue.main.async { deliver(data) }
+            var data = PreviewData(document: doc, highlights: hl)
+            if !member.isEmpty { data = data.member(member, startingAt: memberStart) }
+            let result = data
+            DispatchQueue.main.async { deliver(result) }
         }
     }
 }

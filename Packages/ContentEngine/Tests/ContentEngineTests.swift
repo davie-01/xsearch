@@ -95,3 +95,38 @@ func input(_ id: UInt64, _ text: String, dir: String = "/Users/t/下载", name: 
     let p = try #require(scan.preview(path: utf8))
     #expect(p.highlights.count == 1 && (p.text as NSString).substring(with: NSRange(location: Int(p.highlights[0].start), length: 2)) == "合同")
 }
+
+@Test func memberSliceKeepsOnlyThatMember() throws {
+    // Members start at scalars 0 and 5; "😀" is one scalar but two UTF-16 units.
+    let text = "😀甲乙\n\n丙丁 戊\n"
+    let anchors = #"[{"start":0,"kind":"member","name":"a.txt"},{"start":5,"kind":"member","name":"b.docx"},{"start":5,"kind":"paragraph","index":1}]"#
+    let hl = [Utf16Range(start: 2, end: 3), Utf16Range(start: 6, end: 8)]
+    let second = memberSlice(text: text, anchorsJson: anchors, highlights: hl, start: 5)
+    #expect(second.text == "丙丁 戊\n")
+    #expect(second.highlights == [Utf16Range(start: 0, end: 2)])
+    let a = try JSONSerialization.jsonObject(with: Data(second.anchorsJson.utf8)) as! [[String: Any]]
+    #expect(a.count == 1 && a[0]["kind"] as? String == "paragraph" && a[0]["start"] as? Int == 0)
+    let first = memberSlice(text: text, anchorsJson: anchors, highlights: hl, start: 0)
+    #expect(first.text == "😀甲乙\n\n" && first.highlights == [Utf16Range(start: 2, end: 3)])
+}
+
+@Test func extractsOneArchiveMemberUnderItsName() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xs-member-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir.appendingPathComponent("src/资料"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try "一".write(to: dir.appendingPathComponent("src/资料/合同.txt"), atomically: true, encoding: .utf8)
+    try "二".write(to: dir.appendingPathComponent("src/其他.txt"), atomically: true, encoding: .utf8)
+    let zip = Process()
+    zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+    zip.currentDirectoryURL = dir.appendingPathComponent("src")
+    zip.arguments = ["-qr", dir.appendingPathComponent("p.zip").path, "资料", "其他.txt"]
+    try zip.run()
+    zip.waitUntilExit()
+    let out = dir.appendingPathComponent("out")
+    try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+    let path = try extractArchiveMember(path: dir.appendingPathComponent("p.zip").path, member: "资料/合同.txt", dest: out.path, maxMemberBytes: 1 << 20)
+    #expect((path as NSString).lastPathComponent == "合同.txt")
+    #expect(try String(contentsOfFile: path, encoding: .utf8) == "一")
+    #expect(try FileManager.default.contentsOfDirectory(atPath: out.path) == ["合同.txt"])
+    #expect(throws: EngineError.self) { try extractArchiveMember(path: dir.appendingPathComponent("p.zip").path, member: "无.txt", dest: out.path, maxMemberBytes: 1 << 20) }
+}

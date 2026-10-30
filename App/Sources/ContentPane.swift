@@ -35,6 +35,7 @@ struct AnchorInfo: Decodable {
         case "line": "行 \(line ?? index ?? 0)"
         case "sheet": "\(sheet ?? "")!\(cell ?? "")"
         case "slide": "幻灯片 \(slide ?? 0)"
+        case "member": ((name ?? "") as NSString).lastPathComponent
         default: ""
         }
     }
@@ -107,16 +108,15 @@ final class ContentHitCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError() }
 
     func configure(_ h: ContentHit, live: Bool = false) {
-        let path = h.dir + "/" + h.name
-        icon.image = NSWorkspace.shared.icon(forFile: path)
-        name.stringValue = h.name
+        icon.image = h.icon
+        name.stringValue = h.displayName
         count.stringValue = "\(h.hitCount) 处"
         let s = NSMutableAttributedString(string: h.snippet, attributes: [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor])
         for r in h.snippetHighlights where Int(r.end) <= (h.snippet as NSString).length {
             s.addAttributes([.backgroundColor: HitColors.hit, .foregroundColor: NSColor.labelColor], range: NSRange(location: Int(r.start), length: Int(r.end - r.start)))
         }
         snippet.attributedStringValue = s
-        meta.stringValue = PathUtil.abbreviate(h.dir, home: NSHomeDirectory()) + " · " + Theme.shortDate(h.mtime)
+        meta.stringValue = h.displayLocation + " · " + Theme.shortDate(h.mtime)
         // UI-SPEC §4.5 status badges.
         let stateBadge: (String, NSColor, NSColor) = switch h.state {
         case .waitingOcr: ("等待 OCR", Theme.warnBackground, Theme.warnText)
@@ -130,7 +130,7 @@ final class ContentHitCell: NSTableCellView {
         badge.isHidden = text.isEmpty
         badge.textColor = fg
         badge.layer?.backgroundColor = bg.cgColor
-        setAccessibilityLabel("\(h.name)，\(h.hitCount) 处，\(h.snippet)")
+        setAccessibilityLabel("\(h.displayName)，\(h.hitCount) 处，\(h.snippet)")
     }
 }
 
@@ -507,7 +507,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     /// Drops a trashed file from the list and selects its neighbour.
     func remove(path: String) {
-        guard let i = hits.firstIndex(where: { $0.dir + "/" + $0.name == path }) else { return }
+        guard let i = hits.firstIndex(where: { $0.path == path && !$0.isMember }) else { return }
         hits.remove(at: i)
         table.reloadData()
         if hits.isEmpty { preview.clear() } else { table.selectRowIndexes([min(i, hits.count - 1)], byExtendingSelection: false) }
@@ -532,7 +532,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         if liveIds.contains(h.fileId) {
             searcher.livePreview(path: path, expression: expression, deliver: show)
         } else {
-            searcher.preview(fileId: h.fileId, expression: expression, deliver: show)
+            searcher.preview(fileId: h.fileId, expression: expression, member: h.member, memberStart: h.memberStart, deliver: show)
         }
     }
 
