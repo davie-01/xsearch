@@ -33,6 +33,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return f
     }
 
+    /// An agent app (LSUIElement) shows no menu bar, but key equivalents such as ⌘W, ⌘C and
+    /// ⌘V are still dispatched through `NSApp.mainMenu`: without one, normal windows (full
+    /// window, reader, settings) cannot be closed with ⌘W and text fields cannot copy or paste.
+    private func installKeyMenu() {
+        let main = NSMenu()
+        func submenu(_ title: String, _ items: [(String, Selector?, String, NSEvent.ModifierFlags)]) {
+            let menu = NSMenu(title: title)
+            for (t, action, key, mods) in items {
+                let item = NSMenuItem(title: t, action: action, keyEquivalent: key)
+                item.keyEquivalentModifierMask = mods
+                menu.addItem(item)
+            }
+            let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            holder.submenu = menu
+            main.addItem(holder)
+        }
+        submenu("XSearch", [("退出 XSearch", #selector(NSApplication.terminate(_:)), "q", .command)])
+        submenu("编辑", [
+            ("撤销", Selector(("undo:")), "z", .command), ("重做", Selector(("redo:")), "z", [.command, .shift]),
+            ("剪切", #selector(NSText.cut(_:)), "x", .command), ("拷贝", #selector(NSText.copy(_:)), "c", .command),
+            ("粘贴", #selector(NSText.paste(_:)), "v", .command), ("全选", #selector(NSText.selectAll(_:)), "a", .command),
+        ])
+        submenu("窗口", [
+            ("关闭", #selector(NSWindow.performClose(_:)), "w", .command),
+            ("最小化", #selector(NSWindow.performMiniaturize(_:)), "m", .command),
+        ])
+        NSApp.mainMenu = main
+    }
+
     /// Callbacks shared by every launcher instance (startup and index rebuild).
     private func wireLauncher() {
         launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
@@ -108,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         buildStatusItem()
+        installKeyMenu()
         hotKey = HotKey { [weak self] in self?.launcher.toggle() }
         registerHotKey(Preferences.shared.hotKey)
         // Development: show the launcher with a query (screenshots, UI checks).
