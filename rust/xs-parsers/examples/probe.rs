@@ -1,6 +1,6 @@
 //! Prints extraction statistics (no document text) for each path: `cargo run --example probe -- FILE...`.
 use std::{path::Path, time::Instant};
-use xs_parsers::{Limits, office};
+use xs_parsers::{Limits, office, web};
 
 fn main() {
     for arg in std::env::args().skip(1) {
@@ -11,15 +11,18 @@ fn main() {
             "xlsx" | "xlsm" | "xls" | "ods" => office::spreadsheet(p, Limits::default()),
             "pptx" | "pptm" => office::pptx(p, Limits::default()),
             "ofd" => office::ofd(p, Limits::default()),
+            "html" | "htm" | "xhtml" => web::html(p, Limits::default()),
+            "epub" => web::epub(p, Limits::default()),
             _ => continue,
         };
         match r {
             Ok(e) => println!(
-                "{ext}\tchars={}\tanchors={}\tstate={:?}\twarnings={}\t{:?}",
+                "{ext}\tchars={}\tanchors={}\tstate={:?}\twarnings={}\tmethod={}\t{:?}",
                 e.text.chars().count(),
                 e.anchors.len(),
                 e.state,
                 e.warnings.len(),
+                e.method,
                 t.elapsed()
             ),
             Err(err) => println!("{ext}\terror={err:#}"),

@@ -2505,6 +2505,22 @@ public func extractDocx(path: String, maxUnpackedBytes: UInt64)throws  -> Extrac
     )
 })
 }
+public func extractEpub(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_epub(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+public func extractHtml(path: String, maxFileBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_html(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxFileBytes),$0
+    )
+})
+}
 public func extractOfd(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
     return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
     uniffi_xs_ffi_fn_func_extract_ofd(
@@ -2560,6 +2576,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_docx() != 40192) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_epub() != 4575) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_html() != 58647) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_ofd() != 33112) {

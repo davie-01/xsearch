@@ -10,25 +10,25 @@ pub const SHEET_EXTRACTOR_VERSION: u64 = 1;
 pub const PPTX_EXTRACTOR_VERSION: u64 = 1;
 pub const OFD_EXTRACTOR_VERSION: u64 = 2;
 
-struct Out {
-    text: String,
-    chars: usize,
-    anchors: Vec<Anchor>,
-    partial: bool,
-    warnings: Vec<String>,
+pub(crate) struct Out {
+    pub(crate) text: String,
+    pub(crate) chars: usize,
+    pub(crate) anchors: Vec<Anchor>,
+    pub(crate) partial: bool,
+    pub(crate) warnings: Vec<String>,
     max_chars: usize,
 }
 
 impl Out {
-    fn new(limits: Limits) -> Self {
+    pub(crate) fn new(limits: Limits) -> Self {
         // Unpacked byte budget doubles as a text budget (scalars ≤ bytes).
         Self { text: String::new(), chars: 0, anchors: vec![], partial: false, warnings: vec![], max_chars: limits.max_unpacked_bytes as usize }
     }
-    fn anchor(&mut self, kind: AnchorKind) {
+    pub(crate) fn anchor(&mut self, kind: AnchorKind) {
         self.anchors.push(Anchor { start: self.chars as u32, kind });
     }
     /// Returns false once the text budget is exhausted.
-    fn push(&mut self, s: &str) -> bool {
+    pub(crate) fn push(&mut self, s: &str) -> bool {
         if self.chars >= self.max_chars {
             if !self.partial {
                 self.partial = true;
@@ -40,7 +40,7 @@ impl Out {
         self.chars += s.chars().count();
         true
     }
-    fn done(self, method: &str) -> Extraction {
+    pub(crate) fn done(self, method: &str) -> Extraction {
         Extraction {
             text: self.text,
             anchors: self.anchors,
@@ -96,7 +96,7 @@ pub fn spreadsheet(path: &Path, limits: Limits) -> Result<Extraction> {
     Ok(out.done("sheet"))
 }
 
-fn zip_text(zip: &mut zip::ZipArchive<File>, name: &str, limits: Limits, used: &mut u64) -> Result<String> {
+pub(crate) fn zip_text<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, name: &str, limits: Limits, used: &mut u64) -> Result<String> {
     let mut f = zip.by_name(name)?;
     *used += f.size();
     if *used > limits.max_unpacked_bytes {
@@ -180,7 +180,7 @@ fn local(n: &Node, name: &str) -> bool {
     n.is_element() && n.tag_name().name() == name
 }
 
-fn join(base: &str, rel: &str) -> String {
+pub(crate) fn join(base: &str, rel: &str) -> String {
     let rel = rel.trim_start_matches('/');
     let mut parts: Vec<&str> = base.split('/').filter(|s| !s.is_empty()).collect();
     for seg in rel.split('/') {
@@ -262,4 +262,45 @@ pub fn ofd(path: &Path, limits: Limits) -> Result<Extraction> {
         }
     }
     Ok(e)
+}
+
+/// Archive reader: memory-backed when the file needed repair.
+pub(crate) type AnyZip = zip::ZipArchive<Box<dyn ReadSeek>>;
+pub(crate) trait ReadSeek: Read + std::io::Seek {}
+impl<T: Read + std::io::Seek> ReadSeek for T {}
+
+/// Opens a zip; when the end-of-central-directory record claims the wrong number of entries
+/// (seen in real ePubs from buggy writers; Python accepts them, the zip crate does not), the
+/// file is read into memory with the count corrected from the actual central directory.
+pub(crate) fn open_zip(path: &Path, limits: Limits) -> Result<AnyZip> {
+    let first = zip::ZipArchive::new(Box::new(File::open(path)?) as Box<dyn ReadSeek>);
+    let Err(err) = first else { return Ok(first?) };
+    let size = std::fs::metadata(path)?.len();
+    if size > limits.max_unpacked_bytes.max(limits.max_file_bytes) {
+        return Err(err.into());
+    }
+    let mut data = std::fs::read(path)?;
+    let Some(eocd) = data.windows(4).rposition(|w| w == b"PK\x05\x06") else { return Err(err.into()) };
+    if eocd + 22 > data.len() {
+        return Err(err.into());
+    }
+    let u32_at = |d: &[u8], o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as usize;
+    let (cd_size, cd_off) = (u32_at(&data, eocd + 12), u32_at(&data, eocd + 16));
+    if cd_off + cd_size > eocd {
+        return Err(err.into());
+    }
+    // Walk the central directory headers that really exist.
+    let mut count = 0u16;
+    let mut at = cd_off;
+    while at + 46 <= cd_off + cd_size && data[at..at + 4] == *b"PK\x01\x02" {
+        let len = |o: usize| u16::from_le_bytes([data[at + o], data[at + o + 1]]) as usize;
+        at += 46 + len(28) + len(30) + len(32);
+        count += 1;
+    }
+    if count == 0 {
+        return Err(err.into());
+    }
+    data[eocd + 8..eocd + 10].copy_from_slice(&count.to_le_bytes());
+    data[eocd + 10..eocd + 12].copy_from_slice(&count.to_le_bytes());
+    Ok(zip::ZipArchive::new(Box::new(std::io::Cursor::new(data)) as Box<dyn ReadSeek>)?)
 }

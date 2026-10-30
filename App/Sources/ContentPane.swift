@@ -23,6 +23,7 @@ struct AnchorInfo: Decodable {
     var name: String?
     var sheet: String?
     var slide: Int?
+    var line: Int?
 
     /// Gutter label: p.14 / 段 13 / 表 2·B3 / 页眉.
     var gutter: String {
@@ -31,7 +32,7 @@ struct AnchorInfo: Decodable {
         case "paragraph": "段 \(index ?? 0)"
         case "cell": "表 \(table ?? 0)·\(cell ?? "")"
         case "part": name ?? ""
-        case "line": "行 \(index ?? 0)"
+        case "line": "行 \(line ?? index ?? 0)"
         case "sheet": "\(sheet ?? "")!\(cell ?? "")"
         case "slide": "幻灯片 \(slide ?? 0)"
         default: ""

@@ -373,7 +373,7 @@ Scope
 | XLSX / XLS | M3 | Rust `calamine`（同时支持新旧两种格式） | 显示值；公式、隐藏工作表、批注可选 | 工作表 + 单元格地址 |
 | PPTX | M3 | Rust | 幻灯片文字、表格；备注可选 | 幻灯片编号 + 文本块 |
 | OFD | M3 | Rust（zip + XML，解析 `TextCode`） | 逐页文字 | 页 + 坐标（可以在页面上高亮） |
-| RTF / HTML / ePub | M4 | textutil / Rust | 正文 | 段落 |
+| RTF / HTML / ePub | M4 ✅ | RTF：NSAttributedString（失败时用 textutil）；HTML / ePub：Rust 容错扫描 | 正文 | 段落；ePub 另按章节 |
 | WPS（.wps） | M4 | 先用 .doc 的提取路线试；不行再调研 | 正文 | 段落 |
 | 旧版 PPT | M4 | 调研后再定 | | |
 | zip / 7z / tar 包内文件 | M4 | Rust，带“容器链”的虚拟路径 | 包内的子文件 | 子文件内的锚点 |

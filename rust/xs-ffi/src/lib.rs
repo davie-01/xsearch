@@ -526,6 +526,18 @@ pub fn extract_ofd(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOu
     Ok(output(e, xs_parsers::office::OFD_EXTRACTOR_VERSION))
 }
 
+#[uniffi::export]
+pub fn extract_html(path: String, max_file_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::web::html(Path::new(&path), limits(max_file_bytes, max_file_bytes))?;
+    Ok(output(e, xs_parsers::web::HTML_EXTRACTOR_VERSION))
+}
+
+#[uniffi::export]
+pub fn extract_epub(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::web::epub(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, xs_parsers::web::EPUB_EXTRACTOR_VERSION))
+}
+
 /// Engine versions, for diagnostics and rebuild decisions.
 #[uniffi::export]
 pub fn engine_versions() -> HashMap<String, String> {
@@ -546,5 +558,7 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.sheet".to_owned(), xs_parsers::office::SHEET_EXTRACTOR_VERSION.to_string()),
         ("extractor.slide".to_owned(), xs_parsers::office::PPTX_EXTRACTOR_VERSION.to_string()),
         ("extractor.ofd".to_owned(), xs_parsers::office::OFD_EXTRACTOR_VERSION.to_string()),
+        ("extractor.web".to_owned(), xs_parsers::web::HTML_EXTRACTOR_VERSION.to_string()),
+        ("extractor.ebook".to_owned(), xs_parsers::web::EPUB_EXTRACTOR_VERSION.to_string()),
     ])
 }

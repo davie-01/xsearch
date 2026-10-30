@@ -392,6 +392,16 @@ RustBuffer uniffi_xs_ffi_fn_func_engine_versions(RustCallStatus *_Nonnull out_st
 RustBuffer uniffi_xs_ffi_fn_func_extract_docx(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EPUB
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EPUB
+RustBuffer uniffi_xs_ffi_fn_func_extract_epub(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_HTML
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_HTML
+RustBuffer uniffi_xs_ffi_fn_func_extract_html(RustBuffer path, uint64_t max_file_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_OFD
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_OFD
 RustBuffer uniffi_xs_ffi_fn_func_extract_ofd(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
@@ -701,6 +711,18 @@ uint16_t uniffi_xs_ffi_checksum_func_engine_versions(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_DOCX
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_DOCX
 uint16_t uniffi_xs_ffi_checksum_func_extract_docx(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_EPUB
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_EPUB
+uint16_t uniffi_xs_ffi_checksum_func_extract_epub(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_HTML
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_HTML
+uint16_t uniffi_xs_ffi_checksum_func_extract_html(void
     
 );
 #endif

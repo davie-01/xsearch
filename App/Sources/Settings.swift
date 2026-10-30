@@ -446,13 +446,13 @@ struct ContentCard: View {
             Divider()
             Text("提取的文件类型").font(.system(size: 13, weight: .medium))
             HStack(spacing: 18) {
-                ForEach([(ContentType.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD")], id: \.0) { type, label in
+                ForEach([(ContentType.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, "网页 HTML"), (.ebook, "ePub"), (.rtf, "RTF")], id: \.0) { type, label in
                     Toggle(label, isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
                         if on { model.content.types.insert(type) } else { model.content.types.remove(type) }
                         model.commitContent()
                     }))
                 }
-                Text("WPS、图片 OCR 在后续版本提供").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text("压缩包、WPS 在后续版本提供；图片 OCR 在 M6").font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
             HStack {
                 Text("单文件上限").font(.system(size: 13))

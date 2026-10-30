@@ -139,3 +139,15 @@ import Testing
     #expect(off.expression == #""合同 金额"\~5 "regex:\\d+" "-草稿" "(a|b)" "x y""#)
     #expect(ContentQuery.parse("size:huh", home: "/").chips == [.init(label: "size:huh", valid: false)])
 }
+
+@Test func contentScopeEnablesTypesAddedLater() throws {
+    // Saved by M2 with PDF switched off: later types (sheet, slide, ofd, …) come up enabled.
+    let old = #"{"folders":["~/Downloads"],"excludes":[],"types":["text","docx","doc"],"maxFileBytes":1024}"#
+    let s = try JSONDecoder().decode(ContentScope.self, from: Data(old.utf8))
+    #expect(!s.types.contains(.pdf) && s.types.contains(.sheet) && s.types.contains(.ofd) && s.maxFileBytes == 1024)
+    // A round trip keeps the user's choice, including types switched off after this version.
+    var now = s
+    now.types.remove(.sheet)
+    let again = try JSONDecoder().decode(ContentScope.self, from: JSONEncoder().encode(now))
+    #expect(again == now)
+}

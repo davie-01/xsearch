@@ -126,3 +126,17 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(r.method == "pptx" && r.text.contains("季度汇报 预算"))
     #expect(r.anchorsJSON.contains(#""kind":"slide""#) && r.anchorsJSON.contains(#""slide":1"#))
 }
+
+@Test func rtfAndHtmlDispatch() throws {
+    let rtf = tmp("memo.rtf")
+    let source = NSAttributedString(string: "备忘录\n\n合同金额 100 万元\n")
+    let data = try source.data(from: NSRange(location: 0, length: source.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+    try data.write(to: URL(fileURLWithPath: rtf))
+    let r = try Extractor.extract(path: rtf, limits: ExtractionLimits())
+    #expect(r.method == "rtf" && r.text.contains("合同金额 100 万元") && r.anchorsJSON.contains("paragraph"))
+    let html = tmp("page.HTML")
+    try "<html><script>var a=1</script><body><h1>标题</h1><p>正文 &amp; 附件</p></body></html>".write(toFile: html, atomically: true, encoding: .utf8)
+    let h = try Extractor.extract(path: html, limits: ExtractionLimits())
+    #expect(h.method == "html/utf-8" && h.text == "标题\n正文 & 附件\n")
+    #expect(ExtractionKind.of(name: "a.css") == .text && ExtractionKind.of(name: "b.epub") == .ebook)
+}

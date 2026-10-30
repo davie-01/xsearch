@@ -54,6 +54,7 @@ extension ContentType {
 public enum Extractor {
     public static let pdfVersion: UInt64 = 1
     public static let docVersion: UInt64 = 1
+    public static let rtfVersion: UInt64 = 1
 
     /// Current extractor version per type (Rust ones come from the engine).
     public static func version(of type: ContentType) -> UInt64 {
@@ -65,6 +66,9 @@ public enum Extractor {
         case .sheet: engineVersions()["extractor.sheet"].flatMap(UInt64.init) ?? 1
         case .slide: engineVersions()["extractor.slide"].flatMap(UInt64.init) ?? 1
         case .ofd: engineVersions()["extractor.ofd"].flatMap(UInt64.init) ?? 1
+        case .web: engineVersions()["extractor.web"].flatMap(UInt64.init) ?? 1
+        case .ebook: engineVersions()["extractor.ebook"].flatMap(UInt64.init) ?? 1
+        case .rtf: rtfVersion
         }
     }
 
@@ -82,6 +86,15 @@ public enum Extractor {
         case .doc:
             try checkSize(path, limits)
             return try doc(path)
+        case .rtf:
+            try checkSize(path, limits)
+            return try attributed(path, type: .rtf, method: "rtf", version: rtfVersion)
+        case .web:
+            try checkSize(path, limits)
+            return try rust { try extractHtml(path: path, maxFileBytes: limits.maxFileBytes) }
+        case .ebook:
+            // An Apple Books ePub can be a folder: its size is the sum of its files.
+            return try rust { try extractEpub(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
         case .sheet:
             try checkSize(path, limits)
             return try rust { try extractSpreadsheet(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
@@ -151,11 +164,15 @@ public enum Extractor {
     /// Legacy Word: NSAttributedString first (M0: identical to textutil on all real samples),
     /// textutil as fallback. One paragraph anchor per non-empty line.
     static func doc(_ path: String) throws -> ExtractionResult {
-        var method = "nsattributedstring"
+        try attributed(path, type: .docFormat, method: "nsattributedstring", version: docVersion)
+    }
+
+    /// AppKit's readers (.doc, RTF), textutil as fallback; a paragraph anchor per non-empty line.
+    static func attributed(_ path: String, type: NSAttributedString.DocumentType, method preferred: String, version: UInt64) throws -> ExtractionResult {
+        var method = preferred
         var text: String
         do {
-            text = try NSAttributedString(url: URL(fileURLWithPath: path), options: [.documentType: NSAttributedString.DocumentType.docFormat],
-                                          documentAttributes: nil).string
+            text = try NSAttributedString(url: URL(fileURLWithPath: path), options: [.documentType: type], documentAttributes: nil).string
         } catch {
             method = "textutil"
             text = try textutil(path)
@@ -170,7 +187,7 @@ public enum Extractor {
             scalars += line.unicodeScalars.count + 1
         }
         return ExtractionResult(text: text, anchorsJSON: json(anchors), pagesJSON: "[]", state: "complete",
-                                warnings: [], method: method, extractorVersion: docVersion)
+                                warnings: [], method: method, extractorVersion: version)
     }
 
     static func textutil(_ path: String) throws -> String {

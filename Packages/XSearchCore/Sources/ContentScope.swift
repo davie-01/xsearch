@@ -17,6 +17,29 @@ public struct ContentScope: Codable, Sendable, Equatable {
 
     public static let `default` = ContentScope(folders: ["~/Downloads"])
 
+    // Types added after the scope was saved start enabled: the saved set lists what the user
+    // chose among the types known then (`knownTypes`; absent = the M2 set).
+    private enum CodingKeys: String, CodingKey { case folders, excludes, types, maxFileBytes, knownTypes }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folders = try c.decode([String].self, forKey: .folders)
+        excludes = try c.decodeIfPresent([String].self, forKey: .excludes) ?? []
+        maxFileBytes = try c.decodeIfPresent(UInt64.self, forKey: .maxFileBytes) ?? 100 << 20
+        let saved = Set((try c.decodeIfPresent([String].self, forKey: .types) ?? []).compactMap(ContentType.init(rawValue:)))
+        let known = Set((try c.decodeIfPresent([String].self, forKey: .knownTypes) ?? ["text", "docx", "pdf", "doc"]).compactMap(ContentType.init(rawValue:)))
+        types = saved.union(Set(ContentType.allCases).subtracting(known))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(folders, forKey: .folders)
+        try c.encode(excludes, forKey: .excludes)
+        try c.encode(types.map(\.rawValue).sorted(), forKey: .types)
+        try c.encode(maxFileBytes, forKey: .maxFileBytes)
+        try c.encode(ContentType.allCases.map(\.rawValue), forKey: .knownTypes)
+    }
+
     public func roots(home: String) -> [String] {
         let paths = Set(folders.map { PathUtil.standardize(expand($0, home: home)) }).sorted()
         return paths.filter { p in !paths.contains { $0 != p && PathUtil.isWithin(p, $0) } }
@@ -29,9 +52,10 @@ public struct ContentScope: Codable, Sendable, Equatable {
     }
 }
 
-/// Content types (D7: .doc/.docx in M2; spreadsheets, slides and OFD in M3; WPS M4, OCR M6).
+/// Content types (D7: .doc/.docx in M2; spreadsheets, slides and OFD in M3; HTML, ePub, RTF
+/// and WPS in M4; OCR M6).
 public enum ContentType: String, Codable, Sendable, CaseIterable {
-    case text, docx, pdf, doc, sheet, slide, ofd
+    case text, docx, pdf, doc, sheet, slide, ofd, web, ebook, rtf
 
     public var extensions: Set<String> {
         switch self {
@@ -41,10 +65,13 @@ public enum ContentType: String, Codable, Sendable, CaseIterable {
         case .sheet: ["xlsx", "xlsm", "xls", "ods"]
         case .slide: ["pptx", "pptm"]
         case .ofd: ["ofd"]
+        case .web: ["html", "htm", "xhtml", "shtml"]
+        case .ebook: ["epub"]
+        case .rtf: ["rtf"]
         case .text: [
             "txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini", "conf", "cfg",
             "swift", "rs", "c", "h", "m", "mm", "cc", "cpp", "hpp", "py", "js", "mjs", "ts", "tsx", "jsx", "go", "java", "kt",
-            "rb", "php", "sh", "zsh", "bash", "fish", "html", "htm", "css", "scss", "sql", "lua", "r", "pl", "vue", "svelte",
+            "rb", "php", "sh", "zsh", "bash", "fish", "css", "scss", "sql", "lua", "r", "pl", "vue", "svelte",
         ]
         }
     }
