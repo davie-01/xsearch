@@ -1,0 +1,52 @@
+{
+  "$schema-note": "XSearch 设计变量 v1.0（2026-10-29）。浅色外观；深色外观见 UI-SPEC.md 2.3。实现时优先使用系统语义色，这里的值用于自绘部分和对照。",
+  "color": {
+    "text": { "primary": "#1D1D1F", "secondary": "#3A3A3C", "tertiary": "#6E6E73", "placeholder": "#8A8A8F", "onAccent": "#FFFFFF", "onAccentSecondary": "rgba(255,255,255,0.82)" },
+    "accent": { "default": "#0A5CC2", "pressed": "#08488F", "soft": "#E4EEFB", "softText": "#0A4F9E", "followsSystemAccent": true },
+    "hit": { "default": "#FFE08A", "current": "#FF9F0A", "currentRing": "rgba(255,159,10,0.35)", "mark": "#E8B84A" },
+    "warn": { "bg": "#FFF4DB", "text": "#6B4A00" },
+    "badge": {
+      "warn": { "bg": "#FFF1D6", "text": "#7A4E00" },
+      "info": { "bg": "#E4EEFB", "text": "#0A4F9E" },
+      "neutral": { "bg": "#EFEFF2", "text": "#3A3A3C" }
+    },
+    "success": "#1E7A45",
+    "danger": "#B3261E",
+    "notice": "#C2410C",
+    "separator": "rgba(0,0,0,0.08)",
+    "border": { "control": "#C7C7CC", "subtle": "#D8D8DD", "card": "#E5E5EA" },
+    "surface": { "window": "#FFFFFF", "sidebar": "#F4F4F6", "sidebarAlt": "#FAFAFB", "segmented": "rgba(0,0,0,0.06)", "launcherFallback": "rgba(250,250,252,0.90)" },
+    "switch": { "on": "#34A853", "off": "#D1D1D6" },
+    "fileType": { "pdf": "#C2332B", "word": "#2B5BB8", "excel": "#1E7A45", "ofd": "#8A4FB3", "folder": "#3D7FD6", "app": "#1D1D1F", "other": "#4A4A4F" }
+  },
+  "font": {
+    "family": "-apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif",
+    "pageMock": "'Songti SC', 'STSong', serif",
+    "mono": "'SF Mono', Menlo, monospace",
+    "size": { "launcherInput": 22, "titleLarge": 26, "title": 20, "preview": 14.5, "resultName": 14.5, "body": 13.5, "snippet": 12.5, "meta": 12, "caption": 11.5, "badge": 11.5, "typeChip": 10 },
+    "lineHeight": { "preview": 1.8, "body": 1.6 }
+  },
+  "radius": { "launcher": 18, "window": 14, "card": 12, "row": 9, "control": 7, "chip": 6, "typeChip": 4, "switch": 12 },
+  "space": [2, 4, 6, 8, 10, 12, 14, 16, 18, 24],
+  "shadow": {
+    "launcher": "0 24px 60px rgba(20,30,50,0.28), 0 0 0 0.5px rgba(0,0,0,0.12)",
+    "window": "0 24px 60px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15)",
+    "menu": "0 16px 40px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15)",
+    "currentHit": "0 0 0 2px rgba(255,159,10,0.35)"
+  },
+  "layout": {
+    "launcher": { "nameWidth": 720, "contentWidth": 1120, "contentBodyHeight": 500, "contentListWidth": 420, "maxListHeight": 470, "widthTransitionSec": 0.22, "topOffset": "1/6 屏高" },
+    "fullWindow": { "width": 1360, "height": 830, "sidebar": 236, "preview": 440 },
+    "reader": { "width": 1220, "height": 770, "hitList": 280 },
+    "settings": { "width": 940, "height": 660, "tabBar": 200 },
+    "onboarding": { "width": 780, "height": 530 },
+    "menu": { "width": 320 },
+    "resultRow": { "iconSize": 32, "paddingV": 7, "paddingH": 10 },
+    "switch": { "width": 40, "height": 24, "knob": 20 }
+  },
+  "behavior": {
+    "contentQueryDebounceMs": 80,
+    "nameQueryDebounceMs": 0,
+    "snippetContextChars": { "before": 14, "total": 46 }
+  }
+}

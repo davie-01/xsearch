@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XSearch 阅读窗口</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0A5CC2}a:hover{color:#08488F}
+</style>
+</helmet>
+<div style="width: 1280px; height: 820px; background: #C9D1DB; display: flex; align-items: center; justify-content: center; font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1D1D1F">
+  <div style="width: 1220px; height: 770px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 24px 60px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15); overflow: hidden; display: flex; flex-direction: column">
+    <div style="height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid #E5E5EA; background: #F6F6F8">
+      <div style="display: flex; gap: 8px" aria-hidden="true"><span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span></div>
+      <div style="flex: 1; min-width: 0">
+        <div style="font-size: 13.5px; font-weight: 600">数据共享交换平台技术方案.pdf</div>
+        <div style="font-size: 11.5px; color: #6E6E73">~/Documents/示例项目/技术 · 查询“数据共享” · 宽松模式</div>
+      </div>
+      <span style="font-size: 12.5px; color: #3A3A3C">第 {{curNo}}/{{total}} 处 · 第 {{curPage}} 页</span>
+      <button onClick="{{prev}}" aria-label="上一处" style="font: inherit; width: 30px; height: 28px; border-radius: 7px; border: 1px solid #D8D8DD; background: #FFFFFF; cursor: pointer">↑</button>
+      <button onClick="{{next}}" aria-label="下一处" style="font: inherit; width: 30px; height: 28px; border-radius: 7px; border: 1px solid #D8D8DD; background: #FFFFFF; cursor: pointer">↓</button>
+      <div style="width: 1px; height: 22px; background: #D8D8DD"></div>
+      <span style="font-size: 12px; color: #6E6E73">在外部打开到第 {{curPage}} 页：</span>
+      <button onClick="{{openSkim}}" style="font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 7px; border: 1px solid #D8D8DD; background: #FFFFFF; cursor: pointer">Skim</button>
+      <button onClick="{{openPreview}}" style="font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 7px; border: 1px solid #D8D8DD; background: #FFFFFF; cursor: pointer">预览</button>
+      <a href="Main.dc.html" style="font-size: 12.5px; text-decoration: none; padding: 6px 10px; border-radius: 7px; background: #EFEFF2; color: #1D1D1F">返回启动器</a>
+    </div>
+
+    <sc-if value="{{hasMsg}}" hint-placeholder-val="{{ false }}">
+      <div style="padding: 8px 16px; background: #FFF4DB; color: #6B4A00; font-size: 12.5px; border-bottom: 1px solid #F1DEB0">{{msg}}</div>
+    </sc-if>
+
+    <div style="flex: 1; display: flex; min-height: 0">
+      <div style="width: 280px; flex-shrink: 0; border-right: 1px solid #E5E5EA; background: #FAFAFB; overflow-y: auto; padding: 10px">
+        <div style="font-size: 11.5px; font-weight: 600; color: #6E6E73; padding: 4px 6px 8px">全部命中（{{total}}）</div>
+        <sc-for list="{{hits}}" as="h" hint-placeholder-count="5">
+          <button onClick="{{h.pick}}" style="display: block; width: 100%; text-align: left; font: inherit; border: 0; cursor: pointer; padding: 8px 10px; border-radius: 8px; margin-bottom: 2px; background: {{h.bg}}; color: {{h.fg}}">
+            <span style="font-size: 11px; font-weight: 600; color: {{h.sub}}">第 {{h.page}} 页</span><br>
+            <span style="font-size: 12.5px; line-height: 1.6">{{h.pre}}<span style="{{h.hl}}">数据共享</span>{{h.post}}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="flex: 1; min-width: 0; background: #E9E9ED; overflow: hidden; display: flex; justify-content: center; padding-top: 24px">
+        <div style="width: 520px; height: 700px; background: #FFFFFF; box-shadow: 0 4px 16px rgba(0,0,0,0.15); position: relative; padding: 52px 56px; box-sizing: border-box; font-family: 'Songti SC', 'STSong', serif; font-size: 13.5px; line-height: 2; color: #1D1D1F">
+          <div style="text-align: center; font-size: 16px; font-weight: 700; margin-bottom: 14px">{{page.title}}</div>
+          <sc-for list="{{page.lines}}" as="l" hint-placeholder-count="6">
+            <div style="text-indent: 2em; margin-bottom: 6px">{{l.pre}}<span style="{{l.hl}}">{{l.hit}}</span>{{l.post}}</div>
+          </sc-for>
+          <div style="position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-size: 11px; color: #6E6E73; font-family: -apple-system, 'PingFang SC', sans-serif">— {{curPage}} —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":820}}'>
+var PAGES = {
+  14: { title: '第三章 总体设计', lines: [
+    ['3.2 ', '数据共享', '交换平台采用“前置交换 + 中心交换”两级架构，各委办局通过前置机接入，实现数据的统一汇聚与按需分发。'],
+    ['平台提供库表交换、文件交换和接口服务三种共享方式，并对', '数据共享', '的全过程进行日志审计。'],
+    ['各接入单位按照数据资源目录登记共享属性，明确无条件共享、有条件共享和不予共享三类数据。', '', ''] ] },
+  15: { title: '3.3 安全设计', lines: [
+    ['', '数据共享', '交换过程中采用国密 SM4 加密传输，接入单位须完成身份认证与授权后方可调用。'],
+    ['平台对接口调用实行限流与审计，异常调用实时告警。', '', ''],
+    ['涉及敏感数据的', '数据共享', '申请须经数据提供部门审批。'] ] }
+};
+var HITS = [[14, 0], [14, 1], [15, 0], [15, 2]];
+var CUR = 'background: #FF9F0A; border-radius: 2px; box-shadow: 0 0 0 2px rgba(255,159,10,0.35)';
+var HIT = 'background: #FFE08A; border-radius: 2px';
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { cur: 0, msg: '' }; }
+  renderVals() {
+    var self = this, cur = ((this.state.cur % HITS.length) + HITS.length) % HITS.length, h = HITS[cur], pg = PAGES[h[0]];
+    var lines = pg.lines.map(function (l, i) { return { pre: l[0], hit: l[1], post: l[2], hl: l[1] ? (i === h[1] ? CUR : HIT) : '' }; });
+    var hits = HITS.map(function (x, i) {
+      var l = PAGES[x[0]].lines[x[1]], on = i === cur;
+      return { page: x[0], pre: l[0].slice(-10), post: l[2].slice(0, 14) + '…', hl: on ? 'font-weight: 700; text-decoration: underline' : HIT,
+        bg: on ? '#0A5CC2' : 'transparent', fg: on ? '#FFFFFF' : '#1D1D1F', sub: on ? 'rgba(255,255,255,0.85)' : '#6E6E73',
+        pick: function () { self.setState({ cur: i, msg: '' }); } };
+    });
+    return { total: HITS.length, curNo: cur + 1, curPage: h[0], page: { title: pg.title, lines: lines }, hits: hits,
+      msg: this.state.msg, hasMsg: !!this.state.msg,
+      prev: function () { self.setState({ cur: self.state.cur - 1 }); },
+      next: function () { self.setState({ cur: self.state.cur + 1 }); },
+      openSkim: function () { self.setState({ msg: '已在 Skim 中打开到第 ' + h[0] + ' 页（Skim 支持直接跳页）。' }); },
+      openPreview: function () { self.setState({ msg: '用“预览”跳到第 ' + h[0] + ' 页需要辅助功能权限（模拟“前往页面”）。未授权时只能打开到第 1 页，可在 设置 › 打开方式 中授权。' }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

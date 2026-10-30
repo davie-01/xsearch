@@ -1,0 +1,22 @@
+[package]
+name = "xs-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tantivy.workspace = true
+unicode-normalization.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
+encoding_rs.workspace = true
+

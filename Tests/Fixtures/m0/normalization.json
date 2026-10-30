@@ -1,0 +1,110 @@
+[
+  {
+    "input": "合同 AI IP café ﬁ ＡＢＣ 𠀀 😀",
+    "mode": "loose"
+  },
+  {
+    "input": "合同 AI IP café ﬁ ＡＢＣ 𠀀 😀",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "合同 AI IP café ﬁ ＡＢＣ 𠀀 😀",
+    "mode": "strict"
+  },
+  {
+    "input": "café\t\nＡ  A",
+    "mode": "loose"
+  },
+  {
+    "input": "café\t\nＡ  A",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "café\t\nＡ  A",
+    "mode": "strict"
+  },
+  {
+    "input": "Straße STRASSE İ i̇",
+    "mode": "loose"
+  },
+  {
+    "input": "Straße STRASSE İ i̇",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "Straße STRASSE İ i̇",
+    "mode": "strict"
+  },
+  {
+    "input": "가 가",
+    "mode": "loose"
+  },
+  {
+    "input": "가 가",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "가 가",
+    "mode": "strict"
+  },
+  {
+    "input": "q̣̇ q̣̇",
+    "mode": "loose"
+  },
+  {
+    "input": "q̣̇ q̣̇",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "q̣̇ q̣̇",
+    "mode": "strict"
+  },
+  {
+    "input": "ab c d　e",
+    "mode": "loose"
+  },
+  {
+    "input": "ab c d　e",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "ab c d　e",
+    "mode": "strict"
+  },
+  {
+    "input": "α xα xy\u0000",
+    "mode": "loose"
+  },
+  {
+    "input": "α xα xy\u0000",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "α xα xy\u0000",
+    "mode": "strict"
+  },
+  {
+    "input": "aaa",
+    "mode": "loose"
+  },
+  {
+    "input": "aaa",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "aaa",
+    "mode": "strict"
+  },
+  {
+    "input": "",
+    "mode": "loose"
+  },
+  {
+    "input": "",
+    "mode": "case_sensitive"
+  },
+  {
+    "input": "",
+    "mode": "strict"
+  }
+]

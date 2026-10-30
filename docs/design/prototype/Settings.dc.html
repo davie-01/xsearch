@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XSearch 设置</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0A5CC2}a:hover{color:#08488F}
+</style>
+</helmet>
+<div style="width: 1000px; height: 720px; background: #C9D1DB; display: flex; align-items: center; justify-content: center; font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1D1D1F">
+  <div style="width: 940px; height: 660px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 24px 60px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15); overflow: hidden; display: flex">
+    <div style="width: 200px; flex-shrink: 0; background: #F4F4F6; border-right: 1px solid #E5E5EA; padding: 16px 10px">
+      <div style="display: flex; gap: 8px; padding: 0 6px 18px" aria-hidden="true"><span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span></div>
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="6">
+        <button onClick="{{t.pick}}" style="display: block; width: 100%; text-align: left; font: inherit; font-size: 13.5px; border: 0; cursor: pointer; padding: 8px 12px; border-radius: 8px; margin-bottom: 2px; background: {{t.bg}}; color: {{t.fg}}">{{t.label}}</button>
+      </sc-for>
+    </div>
+    <div style="flex: 1; min-width: 0; padding: 24px 30px; overflow-y: auto; font-size: 13.5px">
+
+      <sc-if value="{{tabGeneral}}" hint-placeholder-val="{{ false }}">
+        <h2 style="margin: 0 0 18px; font-size: 20px">通用</h2>
+        <div style="display: grid; grid-template-columns: 180px minmax(0, 1fr); row-gap: 18px; column-gap: 16px; align-items: center">
+          <div style="color: #3A3A3C">呼出快捷键</div>
+          <div><button style="font: inherit; padding: 6px 14px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF; font-weight: 600">⌥ Space</button> <span style="color: #6E6E73; font-size: 12.5px; margin-left: 8px">点击后按下新的组合键；与其他应用冲突时会提示</span></div>
+          <div style="color: #3A3A3C">直接搜索内容</div>
+          <div><button style="font: inherit; padding: 6px 14px; border-radius: 7px; border: 1px dashed #C7C7CC; background: #FFFFFF; color: #6E6E73">点击设置</button></div>
+          <div style="color: #3A3A3C">呼出时的模式</div>
+          <div style="display: flex; gap: 16px"><label><input type="radio" name="dm" checked="{{ true }}"> 总是名称模式</label><label><input type="radio" name="dm"> 记住上次的模式</label></div>
+          <sc-for list="{{generalToggles}}" as="g" hint-placeholder-count="2">
+            <div style="color: #3A3A3C">{{g.label}}</div>
+            <div style="display: flex; align-items: center; gap: 10px">
+              <button role="switch" aria-checked="{{g.on}}" aria-label="{{g.label}}" onClick="{{g.toggle}}" style="width: 40px; height: 24px; border-radius: 12px; border: 0; cursor: pointer; position: relative; background: {{g.track}}"><span style="position: absolute; top: 2px; left: {{g.knob}}; width: 20px; height: 20px; border-radius: 10px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0,0,0,0.3)"></span></button>
+              <span style="color: #6E6E73; font-size: 12.5px">{{g.desc}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{tabScope}}" hint-placeholder-val="{{ true }}">
+        <h2 style="margin: 0 0 6px; font-size: 20px">索引范围</h2>
+        <div style="color: #6E6E73; font-size: 12.5px; margin-bottom: 16px">文件名和内容分别设置。同一个文件只扫描、提取一次。</div>
+
+        <div style="border: 1px solid #E5E5EA; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px">
+          <div style="display: flex; align-items: baseline; gap: 10px"><div style="font-weight: 600; font-size: 14.5px">文件名索引</div><div style="color: #6E6E73; font-size: 12px">1,284,551 项 · 内存约 62 MB · 实时更新</div></div>
+          <div style="display: flex; gap: 18px; margin: 10px 0"><label><input type="radio" name="ns" checked="{{nameWhole}}" onChange="{{setNameWhole}}"> 整盘</label><label><input type="radio" name="ns" checked="{{nameFolders}}" onChange="{{setNameFolders}}"> 指定文件夹</label></div>
+          <sc-if value="{{nameFolders}}" hint-placeholder-val="{{ false }}">
+            <div style="font-size: 12.5px; color: #3A3A3C; margin-bottom: 8px">~/Documents　~/Downloads　~/Desktop　<button style="font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid #C7C7CC; background: #FFFFFF">＋ 添加</button></div>
+          </sc-if>
+          <div style="font-size: 12px; color: #6E6E73; margin-bottom: 6px">排除规则</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <sc-for list="{{excludes}}" as="x" hint-placeholder-count="4"><span style="font-size: 12px; padding: 3px 8px; border-radius: 6px; background: #F2F2F5; border: 1px solid #E5E5EA">{{x}}</span></sc-for>
+            <button style="font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px dashed #C7C7CC; background: #FFFFFF">＋ 添加规则</button>
+          </div>
+        </div>
+
+        <div style="border: 1px solid #E5E5EA; border-radius: 12px; padding: 14px 16px">
+          <div style="display: flex; align-items: baseline; gap: 10px"><div style="font-weight: 600; font-size: 14.5px">内容索引</div><div style="color: #6E6E73; font-size: 12px">只提取下面的文件夹；网络盘默认不建内容索引</div></div>
+          <div style="margin-top: 10px; border: 1px solid #EEEEF1; border-radius: 8px; overflow: hidden">
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 80px 80px 140px 60px; font-size: 11.5px; color: #6E6E73; background: #FAFAFB; padding: 6px 10px"><span>文件夹</span><span>文件数</span><span>占用</span><span>状态</span><span></span></div>
+            <sc-for list="{{contentRoots}}" as="r" hint-placeholder-count="2">
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) 80px 80px 140px 60px; font-size: 12.5px; padding: 8px 10px; border-top: 1px solid #EEEEF1; align-items: center">
+                <span>{{r.path}}</span><span>{{r.files}}</span><span>{{r.size}}</span><span style="color: {{r.stColor}}">{{r.status}}</span>
+                <button onClick="{{r.remove}}" style="font: inherit; font-size: 12px; border: 0; background: transparent; color: #B3261E; cursor: pointer">移除</button>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 10px">
+            <button onClick="{{addRoot}}" style="font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF; cursor: pointer">＋ 添加文件夹</button>
+            <span style="flex: 1"></span>
+            <span style="font-size: 12px; color: #6E6E73; align-self: center">待回收空间 18 MB</span>
+            <button style="font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF">立即回收</button>
+          </div>
+          <div style="font-size: 12px; color: #6E6E73; margin: 14px 0 6px">提取的文件类型</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px">
+            <label><input type="checkbox" checked="{{ true }}"> 文本 / 代码</label><label><input type="checkbox" checked="{{ true }}"> PDF</label><label><input type="checkbox" checked="{{ true }}"> Word（doc / docx）</label><label><input type="checkbox" checked="{{ true }}"> Excel</label><label><input type="checkbox" checked="{{ true }}"> PowerPoint</label><label><input type="checkbox" checked="{{ true }}"> OFD</label><label style="color: #8A8A8F"><input type="checkbox" disabled="{{ true }}"> 图片 OCR（后续版本）</label>
+          </div>
+          <div style="font-size: 12.5px; margin-top: 10px">单文件上限 <select style="font: inherit; font-size: 12.5px"><option>100 MB</option><option>50 MB</option><option>200 MB</option></select></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{tabSyntax}}" hint-placeholder-val="{{ false }}">
+        <h2 style="margin: 0 0 6px; font-size: 20px">搜索语法</h2>
+        <div style="color: #6E6E73; font-size: 12.5px; margin-bottom: 16px">关闭后，对应符号按普通字符搜索。in 词 和 dir:、ext: 始终可用。</div>
+        <sc-for list="{{syntax}}" as="g" hint-placeholder-count="5">
+          <div style="display: flex; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid #F0F0F3">
+            <div style="flex: 1">
+              <div style="font-weight: 600">{{g.label}} <span style="font-weight: 400; color: #6E6E73; font-size: 12px">{{g.stage}}</span></div>
+              <div style="font-size: 12.5px; color: #6E6E73; margin-top: 2px"><code style="font-family: 'SF Mono', Menlo, monospace; background: #F2F2F5; padding: 1px 5px; border-radius: 4px; color: #3A3A3C">{{g.example}}</code>　{{g.desc}}</div>
+            </div>
+            <button role="switch" aria-checked="{{g.on}}" aria-label="{{g.label}}" onClick="{{g.toggle}}" style="width: 40px; height: 24px; border-radius: 12px; border: 0; cursor: pointer; position: relative; background: {{g.track}}"><span style="position: absolute; top: 2px; left: {{g.knob}}; width: 20px; height: 20px; border-radius: 10px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0,0,0,0.3)"></span></button>
+          </div>
+        </sc-for>
+        <div style="font-weight: 600; margin: 18px 0 8px">内容匹配模式</div>
+        <sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+          <label style="display: flex; gap: 10px; padding: 6px 0; align-items: baseline"><input type="radio" name="mm" checked="{{m.on}}" onChange="{{m.pick}}"><span><span style="font-weight: 600">{{m.label}}</span>　<span style="color: #6E6E73; font-size: 12.5px">{{m.desc}}</span></span></label>
+        </sc-for>
+      </sc-if>
+
+      <sc-if value="{{tabOpen}}" hint-placeholder-val="{{ false }}">
+        <h2 style="margin: 0 0 18px; font-size: 20px">打开方式</h2>
+        <div style="display: grid; grid-template-columns: 180px minmax(0, 1fr); row-gap: 18px; column-gap: 16px; align-items: center">
+          <div style="color: #3A3A3C">文本 / 代码打开到行</div>
+          <div><select style="font: inherit"><option>Visual Studio Code</option><option>Zed</option><option>Sublime Text</option><option>BBEdit</option></select></div>
+          <div style="color: #3A3A3C">PDF 在外部打开到页</div>
+          <div><select style="font: inherit"><option>XSearch 阅读窗口（推荐）</option><option>Skim</option><option>预览（需要辅助功能权限）</option></select></div>
+          <div style="color: #3A3A3C">辅助功能权限</div>
+          <div><span style="color: #7A4E00">未授权</span>　<button style="font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF">打开系统设置授权</button><div style="color: #6E6E73; font-size: 12px; margin-top: 4px">仅用于让“预览”跳到指定页；不授权不影响其他功能</div></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{tabDiag}}" hint-placeholder-val="{{ false }}">
+        <h2 style="margin: 0 0 6px; font-size: 20px">诊断：为什么搜不到</h2>
+        <div style="color: #6E6E73; font-size: 12.5px; margin-bottom: 14px">输入或把文件拖到这里，逐项检查它在索引中的状态。</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 16px">
+          <label for="dg" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">文件路径</label>
+          <input id="dg" type="text" value="{{diagPath}}" onChange="{{onDiag}}" style="flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid #C7C7CC">
+          <button onClick="{{runDiag}}" style="font: inherit; padding: 7px 16px; border-radius: 8px; border: 0; background: #0A5CC2; color: #FFFFFF; cursor: pointer">检查</button>
+        </div>
+        <sc-for list="{{diag}}" as="d" hint-placeholder-count="6">
+          <div style="display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid #F0F0F3">
+            <span style="width: 20px; height: 20px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #FFFFFF; background: {{d.color}}">{{d.mark}}</span>
+            <div><div style="font-weight: 600">{{d.label}}</div><div style="font-size: 12.5px; color: #3A3A3C; margin-top: 2px">{{d.detail}}</div></div>
+          </div>
+        </sc-for>
+      </sc-if>
+
+      <sc-if value="{{tabPrivacy}}" hint-placeholder-val="{{ false }}">
+        <h2 style="margin: 0 0 18px; font-size: 20px">隐私与数据</h2>
+        <div style="line-height: 1.8; color: #3A3A3C">文件内容和搜索词只在本机处理。索引和提取出的正文保存在<br><code style="font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px">~/Library/Application Support/XSearch</code>（目录 0700，文件 0600），日志中不记录正文和搜索词。</div>
+        <div style="display: flex; gap: 8px; margin: 14px 0 24px">
+          <button style="font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF">重建内容索引</button>
+          <button style="font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF; color: #B3261E">清除全部索引</button>
+          <span style="font-size: 12px; color: #6E6E73; align-self: center">收藏、历史、设置单独保存，不受影响</span>
+        </div>
+        <div style="border: 1px solid #E5E5EA; border-radius: 12px; padding: 14px 16px">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <div style="flex: 1"><div style="font-weight: 600">MCP 接口（供 AI 工具调用）</div><div style="font-size: 12.5px; color: #6E6E73; margin-top: 2px">默认关闭。开启后，只有你逐个授权的客户端能读取搜索结果和正文片段。</div></div>
+            <button role="switch" aria-checked="{{mcpOn}}" aria-label="MCP 接口" onClick="{{toggleMcp}}" style="width: 40px; height: 24px; border-radius: 12px; border: 0; cursor: pointer; position: relative; background: {{mcpTrack}}"><span style="position: absolute; top: 2px; left: {{mcpKnob}}; width: 20px; height: 20px; border-radius: 10px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0,0,0,0.3)"></span></button>
+          </div>
+          <sc-if value="{{mcpOn}}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: #FFF4DB; color: #6B4A00; font-size: 12.5px; line-height: 1.6">结果交给外部客户端后，它如何处理（例如发送给云端模型）不在“只在本机处理”的保证范围内。</div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1000,"height":720}}'>
+var TABS = [['general', '通用'], ['scope', '索引范围'], ['syntax', '搜索语法'], ['open', '打开方式'], ['diag', '诊断'], ['privacy', '隐私与数据']];
+function sw(on) { return { track: on ? '#34A853' : '#D1D1D6', knob: on ? '18px' : '2px' }; }
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = { tab: 'scope', nameWhole: true, roots: [['~/Downloads', '1,204', '186 MB', '已完成', '#1E7A45'], ['~/Documents/示例项目', '598', '74 MB', '处理中 · 剩 12 个', '#7A4E00']],
+      tg: { login: true, update: true, ops: true, wild: false, regex: false, near: false }, mode: 'loose', mcp: false,
+      diagPath: '~/Desktop/年度工作总结.docx', diagRan: true };
+  }
+  renderVals() {
+    var self = this, st = this.state;
+    var flip = function (k) { return function () { var o = Object.assign({}, st.tg); o[k] = !o[k]; self.setState({ tg: o }); }; };
+    var tog = function (k, label, desc, extra) { var s = sw(st.tg[k]); return Object.assign({ label: label, desc: desc, on: st.tg[k], toggle: flip(k), track: s.track, knob: s.knob }, extra || {}); };
+    var modes = [['loose', '宽松（默认）', '忽略大小写、全角半角，连续空白视为一个'], ['case', '区分大小写', '只区分大小写，其他规则同宽松'], ['strict', '严格原文', '按原始字符逐个比较']].map(function (m) {
+      return { label: m[1], desc: m[2], on: st.mode === m[0], pick: function () { self.setState({ mode: m[0] }); } };
+    });
+    var diag = [
+      ['ok', '文件名范围', '在“整盘”范围内，未被排除'],
+      ['bad', '内容范围', '~/Desktop 不在内容索引范围中，所以只能按文件名找到它。可以在“索引范围”中添加 ~/Desktop'],
+      ['ok', '访问权限', '可读取'],
+      ['na', '提取状态', '未提取（不在内容范围）'],
+      ['ok', '最近一次文件名索引', '今天 21:12，和磁盘上的版本一致']
+    ].map(function (d) { return { label: d[1], detail: d[2], mark: d[0] === 'ok' ? '✓' : (d[0] === 'bad' ? '!' : '–'), color: d[0] === 'ok' ? '#1E7A45' : (d[0] === 'bad' ? '#C2410C' : '#8A8A8F') }; });
+    var m = sw(st.mcp);
+    return {
+      tabs: TABS.map(function (t) { var on = st.tab === t[0]; return { label: t[1], bg: on ? '#0A5CC2' : 'transparent', fg: on ? '#FFFFFF' : '#1D1D1F', pick: function () { self.setState({ tab: t[0] }); } }; }),
+      tabGeneral: st.tab === 'general', tabScope: st.tab === 'scope', tabSyntax: st.tab === 'syntax', tabOpen: st.tab === 'open', tabDiag: st.tab === 'diag', tabPrivacy: st.tab === 'privacy',
+      generalToggles: [tog('login', '开机自动启动', '常驻菜单栏才能随时用快捷键呼出'), tog('update', '自动检查更新', '唯一的联网行为，可以关闭')],
+      nameWhole: st.nameWhole, nameFolders: !st.nameWhole,
+      setNameWhole: function () { self.setState({ nameWhole: true }); }, setNameFolders: function () { self.setState({ nameWhole: false }); },
+      excludes: ['**/node_modules/**', '**/.git/**', '应用包内部', '~/Library', '/System'],
+      contentRoots: st.roots.map(function (r, i) { return { path: r[0], files: r[1], size: r[2], status: r[3], stColor: r[4], remove: function () { var a = st.roots.slice(); a.splice(i, 1); self.setState({ roots: a }); } }; }),
+      addRoot: function () { self.setState({ roots: st.roots.concat([['~/Desktop', '—', '—', '排队中', '#6E6E73']]) }); },
+      syntax: [
+        tog('ops', '运算符', '同时包含、或、排除', { stage: '', example: '合同 发票　甲 | 乙　-草稿' }),
+        tog('wild', '通配符', '只用于名称', { stage: '', example: '*.doc　报告?.docx　**/合同/*.pdf' }),
+        tog('regex', '正则', '内容模式下扫描已存储的正文', { stage: '', example: 'regex:^IMG_\\d+' }),
+        tog('near', '邻近查询', '两个词相距 N 个字以内', { stage: '', example: '"示例 验收"~10' })
+      ],
+      modes: modes,
+      diagPath: st.diagPath, onDiag: function (e) { self.setState({ diagPath: e.target.value }); }, runDiag: function () { self.setState({ diagRan: true }); },
+      diag: diag,
+      mcpOn: st.mcp, mcpTrack: m.track, mcpKnob: m.knob, toggleMcp: function () { self.setState({ mcp: !st.mcp }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

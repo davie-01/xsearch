@@ -1,0 +1,47 @@
+import Foundation
+import XSearchCore
+
+/// Settings (§6.4). Stored in UserDefaults; indexes live under Application Support.
+@MainActor
+final class Preferences {
+    static let shared = Preferences()
+    private let defaults = UserDefaults.standard
+
+    enum SummonMode: String { case alwaysName, rememberLast }
+    enum Mode: Int { case name = 0, content = 1 }
+
+    var nameScope: NameScope {
+        get {
+            guard let data = defaults.data(forKey: "nameScope"), let scope = try? JSONDecoder().decode(NameScope.self, from: data) else { return .default }
+            return scope
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "nameScope") }
+    }
+
+    var hotKey: HotKey.Combo {
+        get {
+            guard let data = defaults.data(forKey: "hotKey"), let c = try? JSONDecoder().decode(HotKey.Combo.self, from: data) else { return .optionSpace }
+            return c
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "hotKey") }
+    }
+
+    var summonMode: SummonMode {
+        get { SummonMode(rawValue: defaults.string(forKey: "summonMode") ?? "") ?? .alwaysName }
+        set { defaults.set(newValue.rawValue, forKey: "summonMode") }
+    }
+
+    var lastMode: Mode {
+        get { Mode(rawValue: defaults.integer(forKey: "lastMode")) ?? .name }
+        set { defaults.set(newValue.rawValue, forKey: "lastMode") }
+    }
+
+    /// ~/Library/Application Support/XSearch, mode 0700 (§15).
+    static var dataDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("XSearch", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        chmod(dir.path, 0o700)
+        return dir
+    }
+}

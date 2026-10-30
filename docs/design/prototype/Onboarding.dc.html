@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XSearch 首次启动引导</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0A5CC2}a:hover{color:#08488F}
+</style>
+</helmet>
+<div style="width: 860px; height: 600px; background: #C9D1DB; display: flex; align-items: center; justify-content: center; font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1D1D1F">
+  <div style="width: 780px; height: 530px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 24px 60px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15); display: flex; flex-direction: column; overflow: hidden">
+    <div style="display: flex; gap: 8px; padding: 14px 16px 0" aria-hidden="true"><span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span></div>
+    <div style="display: flex; justify-content: center; gap: 8px; padding: 10px 0 0">
+      <sc-for list="{{dots}}" as="d" hint-placeholder-count="3"><span style="height: 6px; border-radius: 3px; width: {{d.w}}; background: {{d.c}}"></span></sc-for>
+    </div>
+    <div style="flex: 1; padding: 26px 56px 0">
+
+      <sc-if value="{{s1}}" hint-placeholder-val="{{ true }}">
+        <div style="font-size: 12px; color: #6E6E73">第 1 步，共 3 步</div>
+        <h1 style="font-size: 26px; margin: 6px 0 10px">按 ⌥Space 随时搜索</h1>
+        <p style="margin: 0 0 22px; color: #3A3A3C; line-height: 1.7; font-size: 14px">XSearch 常驻菜单栏。按快捷键呼出搜索框：直接输入找应用和文件；输入 <b>in 加空格</b> 再输入文字，就在文件内容里查找。</p>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid #E5E5EA; border-radius: 12px">
+          <div style="flex: 1"><div style="font-weight: 600">呼出快捷键</div><div style="font-size: 12.5px; color: #6E6E73; margin-top: 2px">可以随时在设置中修改</div></div>
+          <button style="font: inherit; padding: 8px 18px; border-radius: 8px; border: 1px solid #C7C7CC; background: #FFFFFF; font-weight: 600; font-size: 15px">⌥ Space</button>
+        </div>
+        <label style="display: flex; gap: 8px; margin-top: 14px; font-size: 13.5px"><input type="checkbox" checked="{{ true }}"> 开机时自动启动 XSearch</label>
+      </sc-if>
+
+      <sc-if value="{{s2}}" hint-placeholder-val="{{ false }}">
+        <div style="font-size: 12px; color: #6E6E73">第 2 步，共 3 步</div>
+        <h1 style="font-size: 26px; margin: 6px 0 10px">在哪些文件夹里搜索内容？</h1>
+        <p style="margin: 0 0 18px; color: #3A3A3C; line-height: 1.7; font-size: 14px">文件名会索引整个磁盘。内容索引需要读取文件，先从“下载”开始，以后可以在 设置 › 索引范围 中添加其他文件夹。</p>
+        <div style="border: 1px solid #E5E5EA; border-radius: 12px; overflow: hidden">
+          <label style="display: flex; align-items: center; gap: 12px; padding: 14px 16px">
+            <input type="checkbox" checked="{{dl}}" onChange="{{toggleDl}}">
+            <div style="flex: 1"><div style="font-weight: 600">下载 <span style="font-weight: 400; color: #6E6E73; font-size: 12px">~/Downloads · 推荐</span></div><div style="font-size: 12.5px; color: #6E6E73; margin-top: 2px">约 1,200 个文件，预计 2 分钟内完成；完成前已处理的文件即可搜索</div></div>
+          </label>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid #F0F0F3; color: #6E6E73; font-size: 13px">
+            <button style="font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; border: 1px solid #C7C7CC; background: #FFFFFF; color: #1D1D1F">＋ 添加其他文件夹</button>
+            <span>暂不添加也可以，之后随时设置</span>
+          </div>
+        </div>
+        <div style="font-size: 12.5px; color: #6E6E73; margin-top: 12px">支持 Word（含旧版 .doc）、PDF、文本和代码；Excel、PowerPoint、OFD 将陆续加入。</div>
+      </sc-if>
+
+      <sc-if value="{{s3}}" hint-placeholder-val="{{ false }}">
+        <div style="font-size: 12px; color: #6E6E73">第 3 步，共 3 步</div>
+        <h1 style="font-size: 26px; margin: 6px 0 10px">访问权限（可选）</h1>
+        <p style="margin: 0 0 18px; color: #3A3A3C; line-height: 1.7; font-size: 14px">不授权也能正常使用：你选择的文件夹和大多数位置都能搜到。只有“邮件”“信息”的附件、部分 ~/Library 等受系统保护的位置需要“完全磁盘访问权限”。遇到这些位置时会再提示你。</p>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid #E5E5EA; border-radius: 12px">
+          <div style="flex: 1"><div style="font-weight: 600">完全磁盘访问权限</div><div style="font-size: 12.5px; margin-top: 2px; color: {{fdaColor}}">{{fdaText}}</div></div>
+          <button onClick="{{grant}}" style="font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 8px; border: 1px solid #C7C7CC; background: #FFFFFF; cursor: pointer">打开系统设置</button>
+        </div>
+        <div style="font-size: 12.5px; color: #6E6E73; margin-top: 14px; line-height: 1.6">文件内容和搜索词只在本机处理，不会上传。</div>
+      </sc-if>
+
+      <sc-if value="{{s4}}" hint-placeholder-val="{{ false }}">
+        <div style="text-align: center; padding-top: 50px">
+          <h1 style="font-size: 26px; margin: 0 0 10px">准备好了</h1>
+          <p style="color: #3A3A3C; font-size: 14px; line-height: 1.8; margin: 0 0 20px">文件名索引正在建立，应用已经可以搜索。<br>内容索引：{{dlSummary}}</p>
+          <a href="Main.dc.html" style="display: inline-block; text-decoration: none; padding: 10px 22px; border-radius: 10px; background: #0A5CC2; color: #FFFFFF; font-size: 14px">按 ⌥Space 试一下</a>
+        </div>
+      </sc-if>
+    </div>
+    <div style="display: flex; justify-content: space-between; padding: 18px 24px; border-top: 1px solid #F0F0F3">
+      <button onClick="{{back}}" style="font: inherit; font-size: 13.5px; padding: 7px 16px; border-radius: 8px; border: 1px solid #C7C7CC; background: #FFFFFF; cursor: pointer; visibility: {{backVis}}">上一步</button>
+      <button onClick="{{next}}" style="font: inherit; font-size: 13.5px; padding: 7px 20px; border-radius: 8px; border: 0; background: #0A5CC2; color: #FFFFFF; cursor: pointer; visibility: {{nextVis}}">{{nextLabel}}</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":860,"height":600}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { step: 1, dl: true, fda: false }; }
+  renderVals() {
+    var self = this, s = this.state.step;
+    return {
+      s1: s === 1, s2: s === 2, s3: s === 3, s4: s === 4,
+      dots: [1, 2, 3].map(function (i) { return { w: i === Math.min(s, 3) ? '22px' : '6px', c: i <= s ? '#0A5CC2' : '#D1D1D6' }; }),
+      dl: this.state.dl, toggleDl: function () { self.setState({ dl: !self.state.dl }); },
+      dlSummary: this.state.dl ? '正在处理“下载”文件夹，可在菜单栏查看进度。' : '尚未选择文件夹，可在设置中添加。',
+      fdaText: this.state.fda ? '已授权' : '未授权 · 不影响基本使用', fdaColor: this.state.fda ? '#1E7A45' : '#6E6E73',
+      grant: function () { self.setState({ fda: true }); },
+      back: function () { self.setState({ step: Math.max(1, s - 1) }); },
+      next: function () { self.setState({ step: Math.min(4, s + 1) }); },
+      backVis: s > 1 && s < 4 ? 'visible' : 'hidden', nextVis: s < 4 ? 'visible' : 'hidden',
+      nextLabel: s === 3 ? (this.state.fda ? '完成' : '跳过，完成') : '继续'
+    };
+  }
+}
+</script>
+</body>
+</html>

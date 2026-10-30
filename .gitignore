@@ -1,0 +1,6 @@
+.tools/
+target/
+work/
+.DS_Store
+*.xcuserstate
+

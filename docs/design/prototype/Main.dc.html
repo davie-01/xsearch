@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XSearch 启动器</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0A5CC2}a:hover{color:#08488F}
+input::placeholder{color:#8A8A8F}
+</style>
+</helmet>
+<div style="width: 1280px; height: 820px; position: relative; overflow: hidden; background: #C9D1DB; font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1D1D1F">
+  <div style="position: absolute; left: 0; top: 0; right: 0; height: 28px; background: rgba(255,255,255,0.55); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; box-sizing: border-box; font-size: 13px">
+    <div style="display: flex; gap: 18px; align-items: center"><span style="font-weight: 600">WPS Office</span><span>文件</span><span>编辑</span><span>视图</span></div>
+    <div style="display: flex; gap: 14px; align-items: center">
+      <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 5px; background: rgba(0,0,0,0.08)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1D1D1F" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path></svg>
+        <span style="font-size: 11px">XSearch</span>
+      </span>
+      <span>10月29日 周四 21:30</span>
+    </div>
+  </div>
+  <div style="position: absolute; left: 120px; top: 90px; width: 760px; height: 560px; border-radius: 12px; background: rgba(255,255,255,0.45); box-shadow: 0 10px 30px rgba(0,0,0,0.10)"></div>
+  <div style="position: absolute; left: 520px; top: 200px; width: 640px; height: 480px; border-radius: 12px; background: rgba(255,255,255,0.35)"></div>
+
+  <sc-if value="{{closed}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; right: 0; top: 360px; display: flex; justify-content: center">
+      <button onClick="{{reopen}}" style="font: inherit; font-size: 15px; padding: 12px 22px; border-radius: 22px; border: 1px solid rgba(0,0,0,0.12); background: rgba(255,255,255,0.9); color: #1D1D1F; cursor: pointer">面板已关闭，焦点已还给原应用。点此模拟按 ⌥Space 重新呼出</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{open}}" hint-placeholder-val="{{ true }}">
+  <div style="position: absolute; left: 0; right: 0; top: 96px; display: flex; justify-content: center">
+    <div style="width: {{panelWidth}}; border-radius: 18px; background: rgba(250,250,252,0.90); backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); border: 1px solid rgba(255,255,255,0.7); box-shadow: 0 24px 60px rgba(20,30,50,0.28), 0 0 0 0.5px rgba(0,0,0,0.12); overflow: hidden; transition: width 0.22s ease">
+
+      <div style="display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px 18px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6E6E73" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path></svg>
+        <sc-if value="{{chipIn}}" hint-placeholder-val="{{ true }}">
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 8px; background: #E4EEFB; color: #0A4F9E; font-size: 13px; font-weight: 600; white-space: nowrap">内容
+            <button onClick="{{removeIn}}" aria-label="移除内容前缀" style="border: 0; background: transparent; color: #0A4F9E; cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1">×</button>
+          </span>
+        </sc-if>
+        <label for="xs-q" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">搜索</label>
+        <input id="xs-q" type="text" value="{{query}}" onChange="{{onQuery}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autoFocus="{{ true }}" autoComplete="off" style="flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: inherit; font-size: 22px; color: #1D1D1F; padding: 4px 0">
+        <div role="tablist" aria-label="搜索模式" style="display: flex; padding: 3px; border-radius: 9px; background: rgba(0,0,0,0.06); gap: 2px; flex-shrink: 0">
+          <button role="tab" aria-selected="{{isName}}" onClick="{{setName}}" style="font: inherit; font-size: 13px; border: 0; border-radius: 7px; padding: 5px 10px; cursor: pointer; background: {{nameTabBg}}; color: {{nameTabFg}}; box-shadow: {{nameTabShadow}}">名称 <span style="color: #8A8A8F; font-size: 11px">⌘1</span></button>
+          <button role="tab" aria-selected="{{isContent}}" onClick="{{setContent}}" style="font: inherit; font-size: 13px; border: 0; border-radius: 7px; padding: 5px 10px; cursor: pointer; background: {{contentTabBg}}; color: {{contentTabFg}}; box-shadow: {{contentTabShadow}}">内容 <span style="color: #8A8A8F; font-size: 11px">⌘2</span></button>
+        </div>
+      </div>
+
+      <sc-if value="{{hasFilters}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; gap: 8px; padding: 0 18px 10px 52px; flex-wrap: wrap">
+          <sc-for list="{{filters}}" as="f" hint-placeholder-count="1">
+            <span style="font-size: 12px; padding: 3px 8px; border-radius: 6px; background: #EFEFF2; color: #3A3A3C; border: 1px solid #E0E0E5">{{f.label}}</span>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{hasNotice}}" hint-placeholder-val="{{ false }}">
+        <div style="margin: 0 16px 10px; padding: 8px 12px; border-radius: 8px; background: #FFF4DB; color: #6B4A00; font-size: 12.5px; line-height: 1.5">{{notice}}</div>
+      </sc-if>
+
+      <div style="height: 1px; background: rgba(0,0,0,0.08)"></div>
+
+      <sc-if value="{{isName}}" hint-placeholder-val="{{ false }}">
+        <div style="padding: 6px 8px; max-height: 470px; overflow-y: auto">
+          <sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+            <div style="font-size: 11.5px; font-weight: 600; color: #6E6E73; padding: 8px 10px 4px">{{g.label}}</div>
+            <sc-for list="{{g.items}}" as="it" hint-placeholder-count="3">
+              <div onClick="{{it.pick}}" style="display: flex; align-items: center; gap: 12px; padding: 7px 10px; border-radius: 9px; cursor: default; background: {{it.bg}}">
+                <div style="width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: {{it.iconBg}}; color: {{it.iconFg}}; font-size: 10px; font-weight: 700; letter-spacing: 0.3px">{{it.iconText}}</div>
+                <div style="flex: 1; min-width: 0">
+                  <div style="font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {{it.fg}}"><sc-for list="{{it.segs}}" as="s" hint-placeholder-count="1"><span style="{{s.style}}">{{s.t}}</span></sc-for></div>
+                  <div style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {{it.sub}}">{{it.path}}</div>
+                </div>
+                <div style="font-size: 12px; color: {{it.sub}}; white-space: nowrap">{{it.meta}}</div>
+              </div>
+            </sc-for>
+          </sc-for>
+          <sc-if value="{{nameEmpty}}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 28px 16px; text-align: center; color: #6E6E73; font-size: 13.5px; line-height: 1.7">文件名索引中没有匹配“{{text}}”的项目<br>
+              <a href="States.dc.html">查看可能的原因（范围、排除规则、权限）</a></div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{isContent}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; height: 500px">
+          <div style="width: 420px; flex-shrink: 0; border-right: 1px solid rgba(0,0,0,0.08); overflow-y: auto; padding: 6px 8px">
+            <sc-if value="{{contentPrompt}}" hint-placeholder-val="{{ false }}">
+              <div style="padding: 28px 14px; color: #6E6E73; font-size: 13.5px; line-height: 1.7">输入要在文件内容中查找的文字。<br>支持 dir:路径、ext:doc;pdf 缩小范围。</div>
+            </sc-if>
+            <sc-for list="{{docs}}" as="d" hint-placeholder-count="3">
+              <div onClick="{{d.pick}}" style="padding: 10px 10px 11px; border-radius: 10px; margin-bottom: 2px; background: {{d.bg}}">
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <span style="font-size: 9.5px; font-weight: 700; padding: 2px 5px; border-radius: 4px; background: {{d.extBg}}; color: #FFFFFF">{{d.extLabel}}</span>
+                  <span style="font-size: 14px; font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {{d.fg}}">{{d.name}}</span>
+                  <span style="font-size: 12px; color: {{d.sub}}; white-space: nowrap">{{d.hitsLabel}}</span>
+                </div>
+                <div style="font-size: 12.5px; line-height: 1.6; margin-top: 5px; color: {{d.fg}}"><sc-for list="{{d.snip}}" as="s" hint-placeholder-count="1"><span style="{{s.style}}">{{s.t}}</span></sc-for></div>
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: 5px; font-size: 11.5px; color: {{d.sub}}">
+                  <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.path}} · {{d.modified}}</span>
+                  <sc-if value="{{d.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="flex-shrink: 0; padding: 1px 6px; border-radius: 5px; background: #FFF1D6; color: #7A4E00; font-weight: 600">{{d.badge}}</span></sc-if>
+                </div>
+              </div>
+            </sc-for>
+            <sc-if value="{{contentEmpty}}" hint-placeholder-val="{{ false }}">
+              <div style="padding: 24px 14px; color: #3A3A3C; font-size: 13px; line-height: 1.7">已索引的内容中没有找到“{{text}}”。<br><span style="color: #6E6E73">内容索引范围：下载、文稿/示例项目 · 3 个文件等待 OCR · 1 个文件索引待更新</span><br><a href="States.dc.html">为什么可能搜不到？</a></div>
+            </sc-if>
+          </div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+            <sc-if value="{{hasPreview}}" hint-placeholder-val="{{ true }}">
+              <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid rgba(0,0,0,0.06)">
+                <div style="flex: 1; min-width: 0">
+                  <div style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{pv.name}}</div>
+                  <div style="font-size: 11.5px; color: #6E6E73">{{pv.path}} · {{pv.where}}</div>
+                </div>
+                <span style="font-size: 12.5px; color: #3A3A3C; white-space: nowrap">第 {{hitNo}}/{{pv.hits}} 处</span>
+                <button onClick="{{prevHit}}" aria-label="上一处 ⇧⌘G" style="font: inherit; width: 30px; height: 28px; border-radius: 7px; border: 1px solid #D8D8DD; background: #FFFFFF; cursor: pointer; color: #1D1D1F">↑</button>
+                <button onClick="{{nextHit}}" aria-label="下一处 ⌘G" style="font: inherit; width: 30px; height: 28px; border-radius: 7px; border: 1px solid #D8D8DD; background: #FFFFFF; cursor: pointer; color: #1D1D1F">↓</button>
+                <a href="Reader.dc.html" style="font-size: 12.5px; text-decoration: none; padding: 6px 10px; border-radius: 7px; background: #0A5CC2; color: #FFFFFF; white-space: nowrap">定位到原文件 ⌘↵</a>
+              </div>
+              <div style="flex: 1; overflow-y: auto; padding: 18px 26px 18px 22px; position: relative">
+                <sc-for list="{{pv.paras}}" as="p" hint-placeholder-count="3">
+                  <div style="display: flex; gap: 12px; margin-bottom: 12px">
+                    <span style="font-size: 11px; color: #8A8A8F; width: 54px; flex-shrink: 0; text-align: right; padding-top: 3px">{{p.anchor}}</span>
+                    <div style="font-size: 14.5px; line-height: 1.8; color: #1D1D1F; flex: 1"><sc-for list="{{p.segs}}" as="s" hint-placeholder-count="1"><span style="{{s.style}}">{{s.t}}</span></sc-for></div>
+                  </div>
+                </sc-for>
+                <div style="position: absolute; right: 8px; top: 18px; bottom: 18px; width: 6px; border-radius: 3px; background: rgba(0,0,0,0.05)">
+                  <sc-for list="{{pv.marks}}" as="m" hint-placeholder-count="2"><div style="position: absolute; left: 0; width: 6px; height: 3px; border-radius: 2px; top: {{m.top}}; background: {{m.color}}"></div></sc-for>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{noPreview}}" hint-placeholder-val="{{ false }}">
+              <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #8A8A8F; font-size: 13px">选中左侧结果后在这里预览</div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; border-top: 1px solid rgba(0,0,0,0.08); background: rgba(0,0,0,0.025); font-size: 11.5px; color: #6E6E73">
+        <div style="display: flex; gap: 14px; flex-wrap: wrap">
+          <sc-for list="{{hints}}" as="h" hint-placeholder-count="4"><span><span style="color: #3A3A3C; font-weight: 600">{{h.k}}</span> {{h.v}}</span></sc-for>
+        </div>
+        <div style="white-space: nowrap">{{status}}</div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{hasToast}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; right: 0; bottom: 36px; display: flex; justify-content: center">
+      <div style="padding: 10px 18px; border-radius: 12px; background: rgba(30,30,32,0.88); color: #FFFFFF; font-size: 13px">{{toast}}</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":820}}'>
+var APPS = [
+  { name: '访达', py: 'fd fangda', path: '/System/Library/CoreServices/Finder.app', meta: '应用' },
+  { name: 'WPS Office', py: 'wps', path: '/Applications/wpsoffice.app', meta: '应用' },
+  { name: '预览', py: 'yl yulan', path: '/System/Applications/Preview.app', meta: '应用' },
+  { name: '数据库管理工具', py: 'sjkgljj', path: '/Applications/DBeaver.app', meta: '应用' }
+];
+var FILES = [
+  { name: '某县新型智慧城市建设项目实施方案.docx', py: 'mxxxzhcsjsxmsssfa', path: '~/Downloads', meta: '今天 10:12', ext: 'docx' },
+  { name: '实施方案（修订稿）.doc', py: 'sssfa xdg', path: '~/Documents/示例项目/方案', meta: '昨天', ext: 'doc' },
+  { name: '数据共享交换平台技术方案.pdf', py: 'sjgxjhptjsfa', path: '~/Documents/示例项目/技术', meta: '10月20日', ext: 'pdf' },
+  { name: '关于报送数据资源目录的通知.doc', py: 'gybssjzymldtz', path: '~/Downloads', meta: '10月27日', ext: 'doc' },
+  { name: '大数据中心运维月报-2026-09.xlsx', py: 'dsjzxywyb', path: '~/Documents/示例项目/运维', meta: '10月08日', ext: 'xlsx' },
+  { name: '会议纪要-1028.docx', py: 'hyjy', path: '~/Downloads', meta: '昨天', ext: 'docx' },
+  { name: '示例项目', py: 'slxm', path: '~/Documents', meta: '文件夹', ext: 'folder' },
+  { name: '合同扫描件.pdf', py: 'htsmj', path: '~/Downloads', meta: '10月15日', ext: 'pdf' },
+  { name: '电子发票-202610.ofd', py: 'dzfp', path: '~/Downloads', meta: '10月26日', ext: 'ofd' },
+  { name: 'ARCHITECTURE.md', py: 'architecture', path: '~/Documents/Private/Code/XSearch/docs', meta: '今天', ext: 'md' }
+];
+var DOCS = [
+  { name: '数据共享交换平台技术方案.pdf', ext: 'pdf', path: '~/Documents/示例项目/技术', modified: '10月20日', where: 'PDF 第 14–15 页', badge: '',
+    paras: [ ['p.14', '第三章 总体设计'], ['p.14', '3.2 数据共享交换平台采用“前置交换 + 中心交换”两级架构，各委办局通过前置机接入，实现数据的统一汇聚与按需分发。'], ['p.14', '平台提供库表交换、文件交换和接口服务三种共享方式，并对数据共享的全过程进行日志审计。'], ['p.15', '3.3 安全设计：数据共享交换过程中采用国密 SM4 加密传输，接入单位须完成身份认证与授权后方可调用。'] ] },
+  { name: '某县新型智慧城市建设项目实施方案.docx', ext: 'docx', path: '~/Downloads', modified: '今天 10:12', where: 'Word 正文', badge: '',
+    paras: [ ['段 12', '二、建设内容'], ['段 13', '（一）建设数据共享交换平台，打通县级部门间的数据壁垒，形成统一的数据资源目录。'], ['段 14', '（二）建设城市运行管理平台，汇聚城管、应急、交通等领域数据，实现一屏统览。'], ['表 2·B3', '完善数据共享机制，明确各部门数据提供责任清单。'] ] },
+  { name: '关于报送数据资源目录的通知.doc', ext: 'doc', path: '~/Downloads', modified: '10月27日', where: 'Word 97-2003 文档', badge: '',
+    paras: [ ['段 1', '各乡镇、县级各部门：'], ['段 2', '为推进数据共享工作，请于 11 月 15 日前将本单位数据资源目录报送县大数据中心。'], ['段 3', '联系人：县大数据中心 [联系人]'] ] },
+  { name: '大数据中心运维月报-2026-09.xlsx', ext: 'xlsx', path: '~/Documents/示例项目/运维', modified: '10月08日', where: '工作表 Sheet1', badge: '',
+    paras: [ ['B12', '数据共享接口调用量 128,430 次'], ['B13', '数据共享异常告警 3 次，均已处理'] ] },
+  { name: '合同扫描件.pdf', ext: 'pdf', path: '~/Downloads', modified: '10月15日', where: '第 1 页（文字层）', badge: '3 页等待 OCR',
+    paras: [ ['p.1', '甲方与乙方就数据共享交换平台建设事宜，经友好协商，达成如下协议：'], ['p.2–4', '［扫描页，尚未识别文字，OCR 上线后补充］'] ] }
+];
+var EXT_COLOR = { pdf: '#C2332B', docx: '#2B5BB8', doc: '#2B5BB8', xlsx: '#1E7A45', ofd: '#8A4FB3', md: '#4A4A4F', folder: '#3D7FD6' };
+var HIT = 'background: #FFE08A; border-radius: 3px; padding: 0 1px';
+var CUR = 'background: #FF9F0A; color: #1D1D1F; border-radius: 3px; padding: 0 1px; box-shadow: 0 0 0 2px rgba(255,159,10,0.35)';
+var HIT_SEL = 'background: rgba(255,255,255,0.28); color: #FFFFFF; border-radius: 3px; text-decoration: underline';
+function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function bytes(s) { var n = 0; for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); n += c < 0x80 ? 1 : (c < 0x800 ? 2 : (c >= 0xD800 && c <= 0xDBFF ? (i++, 4) : 3)); } return n; }
+function segs(text, terms, start, cur, hitStyle) {
+  if (!terms.length) return { segs: [{ t: text, style: '' }], count: 0 };
+  var re = new RegExp(terms.map(esc).join('|'), 'gi'), out = [], last = 0, n = 0, m;
+  while ((m = re.exec(text))) {
+    if (m[0] === '') { re.lastIndex++; continue; }
+    if (m.index > last) out.push({ t: text.slice(last, m.index), style: '' });
+    out.push({ t: m[0], style: (start + n === cur) ? CUR : hitStyle });
+    n++; last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ t: text.slice(last), style: '' });
+  return { segs: out, count: n };
+}
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { query: 'in 数据共享', mode: 'content', sel: 0, hit: 0, closed: false, toast: '' }; }
+  flash(msg) { this.setState({ toast: msg }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 1800); }
+  parse() {
+    var raw = this.state.query, mode = this.state.mode, chipIn = false;
+    if (/^in\s/i.test(raw)) { mode = 'content'; chipIn = true; raw = raw.replace(/^in\s+/i, ''); }
+    var toks = raw.split(/\s+/).filter(Boolean), filters = [], terms = [];
+    toks.forEach(function (t) { if (/^(dir|ext):./i.test(t)) filters.push(t); else terms.push(t); });
+    var ext = null, dir = null;
+    filters.forEach(function (f) { var v = f.slice(f.indexOf(':') + 1); if (/^ext:/i.test(f)) ext = v.toLowerCase().split(';'); else dir = v.replace(/^~\/?/, ''); });
+    return { mode: mode, chipIn: chipIn, filters: filters, terms: terms, ext: ext, dir: dir, text: terms.join(' ') };
+  }
+  setMode(m) {
+    var q = this.state.query;
+    if (m === 'name' && /^in\s/i.test(q)) q = q.replace(/^in\s+/i, '');
+    this.setState({ mode: m, query: q, sel: 0, hit: 0 });
+  }
+  renderVals() {
+    var self = this, P = this.parse(), isName = P.mode === 'name', sel = this.state.sel;
+    var pass = function (path, ext) {
+      if (P.ext && P.ext.indexOf(ext) < 0) return false;
+      if (P.dir && path.indexOf(P.dir) < 0) return false;
+      return true;
+    };
+    var lower = P.terms.map(function (t) { return t.toLowerCase(); });
+    var groups = [], flat = [];
+    if (isName) {
+      var match = function (x) { var n = x.name.toLowerCase(); return lower.every(function (t) { return n.indexOf(t) >= 0; }); };
+      var mk = function (x, isApp) {
+        var i = flat.length, on = i === sel;
+        var r = segs(x.name, P.terms, -1, -2, on ? HIT_SEL : 'color: #0A5CC2; font-weight: 600');
+        var label = isApp ? 'APP' : (x.ext === 'folder' ? 'DIR' : x.ext.toUpperCase());
+        var it = { segs: r.segs, path: x.path, meta: x.meta, bg: on ? '#0A5CC2' : 'transparent', fg: on ? '#FFFFFF' : '#1D1D1F', sub: on ? 'rgba(255,255,255,0.82)' : '#6E6E73',
+          iconBg: isApp ? '#1D1D1F' : (EXT_COLOR[x.ext] || '#6E6E73'), iconFg: '#FFFFFF', iconText: label,
+          pick: function () { self.setState({ sel: i }); } };
+        flat.push(x); return it;
+      };
+      if (!P.terms.length && !P.filters.length) {
+        groups.push({ label: '收藏', items: [FILES[0], FILES[6]].map(function (x) { return mk(x, false); }) });
+        groups.push({ label: '最近打开', items: [FILES[5], FILES[2], FILES[3]].map(function (x) { return mk(x, false); }) });
+      } else {
+        var apps = P.filters.length ? [] : APPS.filter(match);
+        var files = FILES.filter(function (x) { return match(x) && pass(x.path, x.ext); });
+        if (apps.length) groups.push({ label: '应用', items: apps.map(function (x) { return mk(x, true); }) });
+        if (files.length) groups.push({ label: '文件与文件夹', items: files.map(function (x) { return mk(x, false); }) });
+      }
+    }
+    var docs = [], pv = null, hitNo = 0;
+    if (!isName && P.terms.length) {
+      var found = DOCS.filter(function (d) {
+        if (!pass(d.path, d.ext)) return false;
+        var all = d.paras.map(function (p) { return p[1]; }).join('\n').toLowerCase();
+        return lower.every(function (t) { return all.indexOf(t) >= 0; });
+      });
+      var s = Math.min(sel, Math.max(found.length - 1, 0));
+      docs = found.map(function (d, i) {
+        var total = 0, snip = null;
+        d.paras.forEach(function (p) {
+          var r = segs(p[1], P.terms, 0, -1, HIT); total += r.count;
+          if (!snip && r.count) { var idx = p[1].toLowerCase().indexOf(lower[0]); var a = Math.max(0, idx - 14); snip = (a > 0 ? '…' : '') + p[1].slice(a, a + 46) + (a + 46 < p[1].length ? '…' : ''); }
+        });
+        var on = i === s;
+        return { name: d.name, path: d.path, modified: d.modified, extLabel: d.ext.toUpperCase(), extBg: EXT_COLOR[d.ext], hitsLabel: total + ' 处',
+          snip: segs(snip || '', P.terms, -1, -2, on ? HIT_SEL : HIT).segs, badge: d.badge, hasBadge: !!d.badge,
+          bg: on ? '#0A5CC2' : 'transparent', fg: on ? '#FFFFFF' : '#1D1D1F', sub: on ? 'rgba(255,255,255,0.82)' : '#6E6E73',
+          pick: function () { self.setState({ sel: i, hit: 0 }); }, _d: d, _total: total };
+      });
+      if (docs.length) {
+        var cur = docs[s], d = cur._d, total = cur._total, h = ((this.state.hit % total) + total) % total, k = 0, marks = [];
+        var paras = d.paras.map(function (p, pi) {
+          var r = segs(p[1], P.terms, k, h, HIT);
+          for (var j = 0; j < r.count; j++) marks.push({ top: Math.round(((pi + 0.5) / d.paras.length) * 100) + '%', color: (k + j === h) ? '#FF9F0A' : '#E8B84A' });
+          k += r.count; return { anchor: p[0], segs: r.segs };
+        });
+        pv = { name: d.name, path: d.path, where: d.where, hits: total, paras: paras, marks: marks };
+        hitNo = h + 1;
+      }
+    }
+    var notice = '';
+    var shortT = P.terms.filter(function (t) { return bytes(t) < 3; });
+    if (!isName && shortT.length) {
+      notice = bytes(shortT[0]) === 2
+        ? '“' + shortT[0] + '”只有 2 个字节：使用“以这两个字节开头的 trigram + 文件末尾项”召回，结果完整。'
+        : '“' + shortT[0] + '”只有 1 个字节：无法用索引缩小范围，将在已存储的正文中扫描。建议加上 dir: 或 ext: 缩小范围。';
+    }
+    var hints = isName
+      ? [{ k: '↵', v: '打开' }, { k: '⌘↵', v: '在访达中显示' }, { k: '⇧⌘C', v: '复制路径' }, { k: '空格', v: '快速查看' }, { k: '⌘E', v: '完整窗口' }]
+      : [{ k: '↵', v: '打开' }, { k: '⌘↵', v: '定位到原文件' }, { k: '⌘G / ⇧⌘G', v: '下/上一处' }, { k: '⌘E', v: '完整窗口' }];
+    var nItems = flat.length;
+    var status = isName ? ('名称索引 1,284,551 项 · ' + nItems + ' 个结果 · 0.4 ms') : ('内容索引 3,214 个文件 · 待处理 12 · ' + docs.length + ' 个文件已核验');
+    var on = { bg: '#FFFFFF', fg: '#1D1D1F', sh: '0 1px 2px rgba(0,0,0,0.15)' }, off = { bg: 'transparent', fg: '#3A3A3C', sh: 'none' };
+    return {
+      closed: this.state.closed, open: !this.state.closed,
+      reopen: function () { self.setState({ closed: false }); },
+      query: this.state.query, text: P.text, chipIn: P.chipIn,
+      placeholder: isName ? '搜索应用、文件和文件夹（输入 in 加空格搜索内容）' : '在文件内容中查找',
+      removeIn: function () { self.setState({ query: self.state.query.replace(/^in\s+/i, ''), mode: 'name', sel: 0 }); },
+      isName: isName, isContent: !isName,
+      panelWidth: isName ? '720px' : '1120px',
+      nameTabBg: isName ? on.bg : off.bg, nameTabFg: isName ? on.fg : off.fg, nameTabShadow: isName ? on.sh : off.sh,
+      contentTabBg: !isName ? on.bg : off.bg, contentTabFg: !isName ? on.fg : off.fg, contentTabShadow: !isName ? on.sh : off.sh,
+      setName: function () { self.setMode('name'); }, setContent: function () { self.setMode('content'); },
+      filters: P.filters.map(function (f) { return { label: f }; }), hasFilters: P.filters.length > 0,
+      notice: notice, hasNotice: !!notice,
+      groups: groups, nameEmpty: isName && !flat.length,
+      docs: docs, contentPrompt: !isName && !P.terms.length, contentEmpty: !isName && P.terms.length > 0 && !docs.length,
+      pv: pv || { name: '', path: '', where: '', hits: 0, paras: [], marks: [] }, hasPreview: !!pv, noPreview: !isName && !pv, hitNo: hitNo,
+      prevHit: function () { self.setState({ hit: self.state.hit - 1 }); },
+      nextHit: function () { self.setState({ hit: self.state.hit + 1 }); },
+      hints: hints, status: status,
+      toast: this.state.toast, hasToast: !!this.state.toast,
+      onQuery: function (e) { self.setState({ query: e.target.value, sel: 0, hit: 0 }); },
+      onKey: function (e) {
+        if (e.nativeEvent && e.nativeEvent.isComposing) return;
+        var count = isName ? nItems : docs.length;
+        if (e.key === 'ArrowDown') { e.preventDefault(); self.setState({ sel: Math.min(self.state.sel + 1, Math.max(count - 1, 0)), hit: 0 }); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); self.setState({ sel: Math.max(self.state.sel - 1, 0), hit: 0 }); }
+        else if (e.metaKey && e.key === '1') { e.preventDefault(); self.setMode('name'); }
+        else if (e.metaKey && e.key === '2') { e.preventDefault(); self.setMode('content'); }
+        else if (e.metaKey && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); self.setState({ hit: self.state.hit + (e.shiftKey ? -1 : 1) }); }
+        else if (e.metaKey && e.shiftKey && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); self.flash('已复制路径'); }
+        else if (e.key === 'Enter') { e.preventDefault(); self.flash(e.metaKey ? (isName ? '在访达中显示' : '在阅读窗口中定位到第 ' + hitNo + ' 处（见画板 3）') : '用默认应用打开'); }
+        else if (e.key === 'Escape') { e.preventDefault(); self.setState({ closed: true }); }
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

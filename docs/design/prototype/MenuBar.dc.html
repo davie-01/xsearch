@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XSearch 菜单栏菜单</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0A5CC2}a:hover{color:#08488F}
+</style>
+</helmet>
+<div style="width: 420px; height: 560px; background: #C9D1DB; font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1D1D1F; position: relative">
+  <div style="height: 28px; background: rgba(255,255,255,0.55); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px; font-size: 13px">
+    <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 5px; background: rgba(0,0,0,0.12)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1D1D1F" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path></svg>
+    </span>
+    <span>21:30</span>
+  </div>
+  <div style="position: absolute; right: 40px; top: 34px; width: 320px; border-radius: 12px; background: rgba(248,248,250,0.96); box-shadow: 0 16px 40px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15); padding: 6px; font-size: 13px">
+    <div style="padding: 8px 10px 4px; font-weight: 600">XSearch</div>
+    <div style="padding: 4px 10px 10px">
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #3A3A3C"><span>文件名索引</span><span style="color: #1E7A45">已就绪 · 1,284,551 项</span></div>
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #3A3A3C; margin-top: 8px"><span>内容索引</span><span>{{contentLabel}}</span></div>
+      <div style="height: 5px; border-radius: 3px; background: #E5E5EA; margin-top: 6px; overflow: hidden"><div style="height: 5px; width: {{progress}}; background: {{barColor}}"></div></div>
+      <div style="font-size: 11.5px; color: #6E6E73; margin-top: 6px">{{detail}}</div>
+    </div>
+    <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 2px 6px"></div>
+    <a href="Main.dc.html" style="display: flex; justify-content: space-between; padding: 7px 10px; border-radius: 6px; text-decoration: none; color: #1D1D1F"><span>打开搜索</span><span style="color: #6E6E73">⌥Space</span></a>
+    <button onClick="{{togglePause}}" style="display: flex; width: 100%; justify-content: space-between; padding: 7px 10px; border-radius: 6px; border: 0; background: transparent; font: inherit; color: #1D1D1F; cursor: pointer; text-align: left"><span>{{pauseLabel}}</span><span style="color: #6E6E73">{{pauseHint}}</span></button>
+    <a href="Settings.dc.html" style="display: flex; justify-content: space-between; padding: 7px 10px; border-radius: 6px; text-decoration: none; color: #1D1D1F"><span>设置…</span><span style="color: #6E6E73">⌘,</span></a>
+    <a href="Settings.dc.html" style="display: block; padding: 7px 10px; border-radius: 6px; text-decoration: none; color: #1D1D1F">诊断：为什么搜不到…</a>
+    <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 2px 6px"></div>
+    <div style="padding: 7px 10px; color: #6E6E73; font-size: 12px">用电池时自动暂停大批量处理</div>
+    <button style="display: flex; width: 100%; justify-content: space-between; padding: 7px 10px; border-radius: 6px; border: 0; background: transparent; font: inherit; color: #1D1D1F; text-align: left"><span>退出 XSearch</span><span style="color: #6E6E73">⌘Q</span></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":420,"height":560}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { paused: false }; }
+  renderVals() {
+    var self = this, p = this.state.paused;
+    return {
+      contentLabel: p ? '已暂停 · 1,190 / 1,802' : '处理中 · 1,190 / 1,802',
+      progress: '66%', barColor: p ? '#AEAEB2' : '#0A5CC2',
+      detail: p ? '已暂停。已处理的文件可以正常搜索。' : '当前：~/Documents/示例项目 · 预计 3 分钟 · 2 个文件提取失败',
+      pauseLabel: p ? '恢复建立内容索引' : '暂停建立内容索引', pauseHint: p ? '' : '',
+      togglePause: function () { self.setState({ paused: !p }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XSearch 完整窗口</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0A5CC2}a:hover{color:#08488F}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; background: #C9D1DB; display: flex; align-items: center; justify-content: center; font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1D1D1F">
+  <div style="width: 1360px; height: 830px; border-radius: 14px; background: #FFFFFF; box-shadow: 0 24px 60px rgba(20,30,50,0.25), 0 0 0 0.5px rgba(0,0,0,0.15); overflow: hidden; display: flex; flex-direction: column">
+    <div style="height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #E5E5EA; background: #F6F6F8">
+      <div style="display: flex; gap: 8px" aria-hidden="true"><span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span></div>
+      <div style="flex: 1; display: flex; align-items: center; gap: 8px; height: 32px; border-radius: 8px; background: #FFFFFF; border: 1px solid #D8D8DD; padding: 0 10px; max-width: 640px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6E6E73" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path></svg>
+        <span style="font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: #E4EEFB; color: #0A4F9E">内容</span>
+        <label for="fw-q" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">搜索</label>
+        <input id="fw-q" type="text" value="{{query}}" onChange="{{onQuery}}" style="flex: 1; border: 0; outline: none; font: inherit; font-size: 14px; background: transparent; color: #1D1D1F">
+      </div>
+      <div style="display: flex; padding: 3px; border-radius: 8px; background: #EBEBEF; gap: 2px">
+        <button style="font: inherit; font-size: 12.5px; border: 0; border-radius: 6px; padding: 4px 10px; background: transparent; color: #3A3A3C">名称</button>
+        <button style="font: inherit; font-size: 12.5px; border: 0; border-radius: 6px; padding: 4px 10px; background: #FFFFFF; color: #1D1D1F; box-shadow: 0 1px 2px rgba(0,0,0,0.15)">内容</button>
+      </div>
+      <div style="font-size: 12px; color: #6E6E73">固定窗口：点击外部不会关闭</div>
+    </div>
+
+    <div style="flex: 1; display: flex; min-height: 0">
+      <div style="width: 236px; flex-shrink: 0; border-right: 1px solid #E5E5EA; background: #FAFAFB; padding: 14px 12px; overflow-y: auto; font-size: 13px">
+        <div style="font-size: 11.5px; font-weight: 600; color: #6E6E73; margin-bottom: 6px">搜索范围（内容索引）</div>
+        <sc-for list="{{scopes}}" as="s" hint-placeholder-count="4">
+          <label style="display: flex; align-items: center; gap: 8px; padding: 5px 4px; padding-left: {{s.indent}}">
+            <input type="checkbox" checked="{{s.on}}" onChange="{{s.toggle}}">
+            <span style="flex: 1">{{s.label}}</span><span style="color: #6E6E73; font-size: 11.5px">{{s.count}}</span>
+          </label>
+        </sc-for>
+        <div style="font-size: 11.5px; font-weight: 600; color: #6E6E73; margin: 16px 0 6px">文件类型</div>
+        <sc-for list="{{types}}" as="t" hint-placeholder-count="4">
+          <label style="display: flex; align-items: center; gap: 8px; padding: 4px">
+            <input type="checkbox" checked="{{t.on}}" onChange="{{t.toggle}}"><span>{{t.label}}</span>
+          </label>
+        </sc-for>
+        <div style="font-size: 11.5px; font-weight: 600; color: #6E6E73; margin: 16px 0 6px">修改时间</div>
+        <label for="fw-dm" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">修改时间</label>
+        <select id="fw-dm" style="font: inherit; font-size: 12.5px; width: 100%; padding: 4px; border-radius: 6px; border: 1px solid #D8D8DD; background: #FFFFFF"><option>不限</option><option>今天</option><option>最近 7 天</option><option>最近 30 天</option></select>
+        <div style="font-size: 11.5px; font-weight: 600; color: #6E6E73; margin: 16px 0 6px">匹配模式</div>
+        <label style="display: flex; gap: 8px; padding: 3px 4px"><input type="radio" name="fwm" checked="{{ true }}">宽松（默认）</label>
+        <label style="display: flex; gap: 8px; padding: 3px 4px"><input type="radio" name="fwm">区分大小写</label>
+        <label style="display: flex; gap: 8px; padding: 3px 4px"><input type="radio" name="fwm">严格原文</label>
+      </div>
+
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid #E5E5EA">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 180px 70px 80px 110px; font-size: 12px; color: #3A3A3C; background: #F6F6F8; border-bottom: 1px solid #E5E5EA">
+          <sc-for list="{{cols}}" as="c" hint-placeholder-count="5">
+            <button onClick="{{c.sort}}" style="font: inherit; text-align: left; border: 0; background: transparent; padding: 8px 12px; cursor: pointer; color: #3A3A3C; font-weight: {{c.weight}}">{{c.label}} {{c.arrow}}</button>
+          </sc-for>
+        </div>
+        <div style="flex: 1; overflow-y: auto">
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+            <div onClick="{{r.pick}}" style="display: grid; grid-template-columns: minmax(0, 1fr) 180px 70px 80px 110px; font-size: 13px; border-bottom: 1px solid #F0F0F3; background: {{r.bg}}; color: {{r.fg}}">
+              <div style="padding: 8px 12px; min-width: 0">
+                <div style="display: flex; gap: 8px; align-items: center"><span style="font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: {{r.extBg}}; color: #FFFFFF">{{r.ext}}</span><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600">{{r.name}}</span></div>
+                <div style="font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {{r.sub}}">{{r.snip}}</div>
+              </div>
+              <div style="padding: 8px 12px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {{r.sub}}">{{r.path}}</div>
+              <div style="padding: 8px 12px">{{r.hits}}</div>
+              <div style="padding: 8px 12px; color: {{r.sub}}">{{r.size}}</div>
+              <div style="padding: 8px 12px; color: {{r.sub}}">{{r.mod}}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding: 6px 12px; font-size: 11.5px; color: #6E6E73; border-top: 1px solid #E5E5EA; background: #FAFAFB">{{rowCount}} 个文件 · 全部已核验 · 点击表头排序 · 多选后可拖到其他应用</div>
+      </div>
+
+      <div style="width: 440px; flex-shrink: 0; display: flex; flex-direction: column">
+        <div style="padding: 12px 16px; border-bottom: 1px solid #E5E5EA">
+          <div style="font-size: 14px; font-weight: 600">{{pv.name}}</div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: #3A3A3C">
+            <span style="flex: 1">第 1/{{pv.hits}} 处</span>
+            <button style="font: inherit; padding: 3px 8px; border-radius: 6px; border: 1px solid #D8D8DD; background: #FFFFFF">↑</button>
+            <button style="font: inherit; padding: 3px 8px; border-radius: 6px; border: 1px solid #D8D8DD; background: #FFFFFF">↓</button>
+            <a href="Reader.dc.html" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; background: #0A5CC2; color: #FFFFFF">定位到原文件</a>
+          </div>
+        </div>
+        <div style="flex: 1; overflow-y: auto; padding: 16px 18px; font-size: 14px; line-height: 1.85">
+          <sc-for list="{{pv.paras}}" as="p" hint-placeholder-count="3">
+            <p style="margin: 0 0 12px"><sc-for list="{{p}}" as="s" hint-placeholder-count="1"><span style="{{s.style}}">{{s.t}}</span></sc-for></p>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+var DATA = [
+  { name: '数据共享交换平台技术方案.pdf', ext: 'pdf', scope: 'tech', path: '~/Documents/示例项目/技术', size: 2.4, sizeL: '2.4 MB', mod: 20, modL: '10月20日', text: ['3.2 数据共享交换平台采用“前置交换 + 中心交换”两级架构。', '平台提供库表交换、文件交换和接口服务三种共享方式，并对数据共享的全过程进行日志审计。', '3.3 数据共享交换过程中采用国密 SM4 加密传输。'] },
+  { name: '某县新型智慧城市建设项目实施方案.docx', ext: 'docx', scope: 'dl', path: '~/Downloads', size: 0.8, sizeL: '812 KB', mod: 29, modL: '今天 10:12', text: ['（一）建设数据共享交换平台，打通县级部门间的数据壁垒。', '完善数据共享机制，明确各部门数据提供责任清单。'] },
+  { name: '关于报送数据资源目录的通知.doc', ext: 'doc', scope: 'dl', path: '~/Downloads', size: 0.05, sizeL: '46 KB', mod: 27, modL: '10月27日', text: ['为推进数据共享工作，请于 11 月 15 日前将本单位数据资源目录报送县大数据中心。'] },
+  { name: '大数据中心运维月报-2026-09.xlsx', ext: 'xlsx', scope: 'ops', path: '~/Documents/示例项目/运维', size: 0.3, sizeL: '301 KB', mod: 8, modL: '10月08日', text: ['B12 数据共享接口调用量 128,430 次', 'B13 数据共享异常告警 3 次，均已处理'] },
+  { name: '会议纪要-1028.docx', ext: 'docx', scope: 'dl', path: '~/Downloads', size: 0.03, sizeL: '28 KB', mod: 28, modL: '昨天', text: ['会议要求加快数据共享交换平台与城运平台的对接。'] }
+];
+var EXT_COLOR = { pdf: '#C2332B', docx: '#2B5BB8', doc: '#2B5BB8', xlsx: '#1E7A45' };
+var HIT = 'background: #FFE08A; border-radius: 3px; padding: 0 1px';
+function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function segs(text, q, style) {
+  if (!q) return [{ t: text, style: '' }];
+  var re = new RegExp(esc(q), 'gi'), out = [], last = 0, m;
+  while ((m = re.exec(text))) { if (m.index > last) out.push({ t: text.slice(last, m.index), style: '' }); out.push({ t: m[0], style: style }); last = m.index + m[0].length; }
+  if (last < text.length) out.push({ t: text.slice(last), style: '' });
+  return out;
+}
+function count(text, q) { if (!q) return 0; var n = 0, i = 0, t = text.toLowerCase(), k = q.toLowerCase(); while ((i = t.indexOf(k, i)) >= 0) { n++; i += k.length; } return n; }
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { query: '数据共享', sort: 'hits', dir: -1, sel: 0, scopes: { dl: true, tech: true, ops: true }, types: { pdf: true, word: true, xlsx: true } }; }
+  renderVals() {
+    var self = this, st = this.state, q = st.query.trim();
+    var typeOf = function (e) { return e === 'pdf' ? 'pdf' : (e === 'xlsx' ? 'xlsx' : 'word'); };
+    var rows = DATA.map(function (d) { return Object.assign({}, d, { hits: count(d.text.join('\n'), q) }); })
+      .filter(function (d) { return d.hits > 0 && st.scopes[d.scope] && st.types[typeOf(d.ext)]; });
+    var key = st.sort;
+    rows.sort(function (a, b) { var x = key === 'name' || key === 'path' ? a[key].localeCompare(b[key], 'zh') : a[key] - b[key]; return x * st.dir; });
+    var sel = Math.min(st.sel, Math.max(rows.length - 1, 0));
+    var cols = [['name', '名称'], ['path', '位置'], ['hits', '命中'], ['size', '大小'], ['mod', '修改时间']].map(function (c) {
+      var on = st.sort === c[0];
+      return { label: c[1], arrow: on ? (st.dir > 0 ? '▲' : '▼') : '', weight: on ? '700' : '500',
+        sort: function () { self.setState({ sort: c[0], dir: on ? -st.dir : (c[0] === 'name' || c[0] === 'path' ? 1 : -1), sel: 0 }); } };
+    });
+    var out = rows.map(function (d, i) {
+      var on = i === sel, first = d.text.find(function (t) { return count(t, q); }) || '';
+      return { name: d.name, ext: d.ext.toUpperCase(), extBg: EXT_COLOR[d.ext], path: d.path, hits: d.hits, size: d.sizeL, mod: d.modL, snip: first,
+        bg: on ? '#0A5CC2' : '#FFFFFF', fg: on ? '#FFFFFF' : '#1D1D1F', sub: on ? 'rgba(255,255,255,0.85)' : '#6E6E73',
+        pick: function () { self.setState({ sel: i }); } };
+    });
+    var cur = rows[sel];
+    var pv = cur ? { name: cur.name, hits: cur.hits, paras: cur.text.map(function (t) { return segs(t, q, HIT); }) } : { name: '没有匹配的文件', hits: 0, paras: [] };
+    var scopeDefs = [['dl', '下载', '18px', '1,204'], ['wc', '文稿 / 示例项目', '4px', ''], ['tech', '技术', '26px', '386'], ['ops', '运维', '26px', '212']];
+    var scopes = scopeDefs.map(function (s) {
+      if (s[0] === 'wc') return { label: s[1], indent: s[2], count: '', on: st.scopes.tech && st.scopes.ops, toggle: function () { var v = !(st.scopes.tech && st.scopes.ops); self.setState({ scopes: Object.assign({}, st.scopes, { tech: v, ops: v }), sel: 0 }); } };
+      return { label: s[1], indent: s[2], count: s[3], on: !!st.scopes[s[0]], toggle: function () { var o = {}; o[s[0]] = !st.scopes[s[0]]; self.setState({ scopes: Object.assign({}, st.scopes, o), sel: 0 }); } };
+    });
+    var types = [['pdf', 'PDF'], ['word', 'Word（doc / docx）'], ['xlsx', 'Excel']].map(function (t) {
+      return { label: t[1], on: !!st.types[t[0]], toggle: function () { var o = {}; o[t[0]] = !st.types[t[0]]; self.setState({ types: Object.assign({}, st.types, o), sel: 0 }); } };
+    });
+    return { query: st.query, onQuery: function (e) { self.setState({ query: e.target.value, sel: 0 }); },
+      cols: cols, rows: out, rowCount: out.length, pv: pv, scopes: scopes, types: types };
+  }
+}
+</script>
+</body>
+</html>
