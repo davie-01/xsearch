@@ -321,7 +321,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         buttonsVisible = buttonsShown
 
         let widthCurve: SpringCurve = revealing ? .init(response: 0.36, damping: 0.5)
-            : hiding ? .init(response: 0.34, damping: 0.8, delay: 0.04) : .init(response: 0.3, damping: 0.86)
+            // Hide: the buttons vanish first (~80 ms); the bar only starts widening after that,
+            // so it never slides over them (Spotlight).
+            : hiding ? .init(response: 0.32, damping: 0.86, delay: 0.07) : .init(response: 0.3, damping: 0.86)
         // Spotlight: content gone in ~25 ms, a ~0.1 s hold, then a quick height snap (~0.1 s).
         let heightCurve: SpringCurve = collapsing ? .init(response: 0.2, damping: 0.95, delay: 0.1) : .init(response: 0.28, damping: 0.82)
         let n = modeButtons.count
@@ -334,7 +336,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let sizeCurves: [SpringCurve] = buttonCurves.map { c in
             revealing ? .init(response: 0.3, damping: 0.62, delay: c.delay) : c
         }
-        if revealing { modeButtons.forEach { $0.isHidden = false } }
+        if revealing { modeButtons.forEach { $0.isHidden = false; $0.alphaValue = 1 } }
         if expanding { body.isHidden = false }
         // Round ends while the body is (nearly) gone; rounded rectangle once it has height.
         let endRadius = targetH > Shell.bar + 0.5 ? Shell.bodyRadius : Shell.bar / 2
@@ -365,8 +367,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                     let fade = (t - 0.16 - 0.02 * Double(i)) / 0.1
                     b.iconAlpha = CGFloat(min(1, max(0, fade)))
                 } else if hiding {
-                    self.place(b, circleLerp(fromButtons[i], self.tucked(barEnd: x + w), c.value(t)))
-                    b.iconAlpha = fromIcons[i] * CGFloat(max(0, 1 - t / 0.06))
+                    // Shrink in place and fade out quickly; icons go first.
+                    let k = CGFloat(min(1, t / 0.08))
+                    let f = fromButtons[i]
+                    let d = f.width * (1 - 0.45 * k)
+                    self.place(b, NSRect(x: f.midX - d / 2, y: f.midY - d / 2, width: d, height: d))
+                    b.alphaValue = 1 - k
+                    b.iconAlpha = fromIcons[i] * CGFloat(max(0, 1 - t / 0.03))
                 } else if self.buttonsShown {
                     self.place(b, circleLerp(fromButtons[i], shownFrames[i], widthCurve.value(t)))
                 }
@@ -377,7 +384,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             self.setMainFrame(targetMain)
             if self.bodyHeight == 0 { self.body.isHidden = true }
             self.body.alphaValue = 1
-            if !self.buttonsShown { self.modeButtons.forEach { $0.isHidden = true } }
+            if !self.buttonsShown {
+                self.modeButtons.forEach { $0.isHidden = true; $0.alphaValue = 1 }
+            }
         }
         driver?.start()
     }
