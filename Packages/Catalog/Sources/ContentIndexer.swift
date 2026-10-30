@@ -20,6 +20,8 @@ public final class ContentIndexer: @unchecked Sendable {
     public struct Status: Sendable, Equatable {
         public var pending: Int
         public var failed: Int
+        /// Content-scope files with indexed text (complete, partial or waiting for OCR).
+        public var indexed: Int
         public var committedBatches: UInt64
         public var running: Bool
     }
@@ -34,7 +36,7 @@ public final class ContentIndexer: @unchecked Sendable {
     private let workerURL: URL
     private let workerCount: Int
     private let queue = DispatchQueue(label: "xsearch.indexer", qos: .utility)
-    private let state = OSAllocatedUnfairLock(initialState: Status(pending: 0, failed: 0, committedBatches: 0, running: false))
+    private let state = OSAllocatedUnfairLock(initialState: Status(pending: 0, failed: 0, indexed: 0, committedBatches: 0, running: false))
     private var catalog: FileCatalog?
     private var writer: ContentIndexWriter?
     private var workers: [ExtractionWorker] = []
@@ -435,7 +437,9 @@ public final class ContentIndexer: @unchecked Sendable {
         let pending = try p.first { p in Int(p.int(0)) } ?? 0
         let f = try catalog.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state = 4")
         let failed = try f.first { f in Int(f.int(0)) } ?? 0
+        let i = try catalog.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state IN (1, 2, 3)")
+        let indexed = try i.first { i in Int(i.int(0)) } ?? 0
         catalog.db.resetStatements()
-        state.withLock { $0.pending = pending; $0.failed = failed }
+        state.withLock { $0.pending = pending; $0.failed = failed; $0.indexed = indexed }
     }
 }

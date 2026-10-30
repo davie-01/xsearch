@@ -5,12 +5,13 @@ import SwiftUI
 import XSearchCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "通用", scope = "索引范围", privacy = "隐私与数据"
+    case general = "通用", scope = "索引范围", diagnostics = "诊断", privacy = "隐私与数据"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .general: "gearshape"
         case .scope: "folder"
+        case .diagnostics: "stethoscope"
         case .privacy: "lock"
         }
     }
@@ -27,6 +28,10 @@ final class SettingsModel: ObservableObject {
     @Published var summonMode: Preferences.SummonMode
     @Published var launchAtLogin: Bool
     @Published var newRule = ""
+    @Published var content: ContentScope
+    @Published var contentStatus: ContentIndexer.Status?
+    @Published var diagnosePath = ""
+    @Published var diagnosis: [NameService.DiagnosisItem] = []
     weak var delegate: AppDelegate?
     var names: NameService
 
@@ -38,9 +43,40 @@ final class SettingsModel: ObservableObject {
         hotKey = Preferences.shared.hotKey
         summonMode = Preferences.shared.summonMode
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        content = delegate.currentContentScope
+        contentStatus = delegate.contentStatus
     }
 
-    func refresh() { status = names.status }
+    func refresh() {
+        status = names.status
+        contentStatus = delegate?.contentStatus
+    }
+
+    func commitContent() { delegate?.applyContentScope(content) }
+
+    func addContentFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "添加"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            let p = PathUtil.abbreviate(url.path, home: NSHomeDirectory())
+            if !content.folders.contains(p) { content.folders.append(p) }
+        }
+        commitContent()
+    }
+
+    func runDiagnosis() {
+        let path = diagnosePath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return }
+        let names = self.names
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = names.diagnose(path)
+            DispatchQueue.main.async { self.diagnosis = result }
+        }
+    }
 
     func commitScope() { delegate?.applyScope(scope) }
 
@@ -155,6 +191,7 @@ struct SettingsView: View {
                     switch model.tab {
                     case .general: GeneralPane(model: model)
                     case .scope: ScopePane(model: model)
+                    case .diagnostics: DiagnosticsPane(model: model)
                     case .privacy: PrivacyPane(model: model)
                     }
                 }
@@ -285,10 +322,7 @@ struct ScopePane: View {
                 .toggleStyle(.switch)
             Text("修改后在后台重新核对范围，期间可以继续搜索。外置盘和网络盘在后续版本支持。").font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
-        Card(title: "内容索引", subtitle: "内容搜索将在下一个版本提供：只提取你选定的文件夹，首次推荐“下载”。") {
-            EmptyView()
-        }
-        .opacity(0.6)
+        ContentCard(model: model)
     }
 
     private func addRule() {
@@ -319,6 +353,100 @@ struct PrivacyPane: View {
                 } message: {
                     Text("重新扫描期间，已处理的部分可以立即搜索。")
                 }
+        }
+    }
+}
+
+struct ContentCard: View {
+    @ObservedObject var model: SettingsModel
+
+    var statusLine: String {
+        guard let st = model.contentStatus else { return "内容索引未启动" }
+        var parts = ["\(Theme.count(st.indexed)) 个文件"]
+        if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
+        if st.failed > 0 { parts.append("\(st.failed) 个提取失败") }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        Card(title: "内容索引", subtitle: "只提取下面的文件夹；网络盘默认不建内容索引。" + "  " + statusLine) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(model.content.folders, id: \.self) { folder in
+                    HStack {
+                        Image(systemName: "folder")
+                        Text(folder).font(.system(size: 13))
+                        Spacer()
+                        Button("移除") {
+                            model.content.folders.removeAll { $0 == folder }
+                            model.commitContent()
+                        }
+                        .foregroundStyle(.red)
+                        .buttonStyle(.borderless)
+                    }
+                }
+                if model.content.folders.isEmpty { Text("还没有文件夹，内容搜索暂不可用。").font(.system(size: 12)).foregroundStyle(.secondary) }
+                Button("＋ 添加文件夹") { model.addContentFolders() }.buttonStyle(.borderless)
+            }
+            Divider()
+            Text("提取的文件类型").font(.system(size: 13, weight: .medium))
+            HStack(spacing: 18) {
+                ForEach([(ContentType.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）")], id: \.0) { type, label in
+                    Toggle(label, isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
+                        if on { model.content.types.insert(type) } else { model.content.types.remove(type) }
+                        model.commitContent()
+                    }))
+                }
+                Text("Excel、PowerPoint、OFD、图片 OCR 在后续版本提供").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("单文件上限").font(.system(size: 13))
+                Picker("", selection: Binding(get: { model.content.maxFileBytes }, set: { model.content.maxFileBytes = $0; model.commitContent() })) {
+                    Text("50 MB").tag(UInt64(50 << 20))
+                    Text("100 MB").tag(UInt64(100 << 20))
+                    Text("200 MB").tag(UInt64(200 << 20))
+                }
+                .labelsHidden()
+                .frame(width: 110)
+            }
+        }
+    }
+}
+
+struct DiagnosticsPane: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Text("诊断：为什么搜不到").font(.system(size: 20, weight: .semibold))
+        Text("输入或把文件拖到这里，逐项检查它在索引中的状态。").font(.system(size: 12.5)).foregroundStyle(.secondary)
+        HStack {
+            TextField("文件路径，例如 ~/Downloads/合同.docx", text: $model.diagnosePath)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { model.runDiagnosis() }
+            Button("检查") { model.runDiagnosis() }.keyboardShortcut(.defaultAction)
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                DispatchQueue.main.async {
+                    model.diagnosePath = url.path
+                    model.runDiagnosis()
+                }
+            }
+            return true
+        }
+        if !model.diagnosis.isEmpty {
+            Card(title: (model.diagnosePath as NSString).lastPathComponent) {
+                ForEach(Array(model.diagnosis.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.level == .ok ? "checkmark.circle.fill" : item.level == .warning ? "exclamationmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(item.level == .ok ? Color(nsColor: Theme.hex(0x1E7A45)) : item.level == .warning ? .orange : Color(nsColor: Theme.hex(0xC2410C)))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.label).font(.system(size: 13, weight: .medium))
+                            Text(item.detail).font(.system(size: 12.5)).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                    }
+                }
+            }
         }
     }
 }

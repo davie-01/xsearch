@@ -15,6 +15,12 @@ struct ResultItem: Equatable {
     var meta: String
 }
 
+struct ContentStats {
+    var indexed = 0
+    var pending = 0
+    var failed = 0
+}
+
 struct SearchOutput {
     var query: NameQuery
     var text: String
@@ -35,6 +41,9 @@ final class SearchSession {
     private var apps: [AppEntry] = []
     private var appsScannedAt = Date.distantPast
     let home = NSHomeDirectory()
+    let content = ContentSearcher()
+    /// Content index figures for the footer and "no results" text.
+    var contentStats: (() -> ContentStats)?
 
     init(names: NameService, usage: UsageStore?) {
         self.names = names

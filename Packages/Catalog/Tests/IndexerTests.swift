@@ -191,3 +191,24 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(try p.search("older").isEmpty)
     #expect(try p.search("newer") == ["live.txt"])
 }
+
+@Test func diagnosisExplainsEachCase() throws {
+    let p = try Pipeline("diag")
+    defer { p.stop() }
+    try p.box.write("docs/ok.txt", "正常 文件")
+    try p.box.write("docs/bad.docx", "not a zip")
+    try p.box.write("docs/photo.png", "x")
+    try p.box.write("outside.txt", "范围外")
+    try p.start()
+    #expect(p.settle())
+    func verdict(_ rel: String, _ label: String) -> NameService.DiagnosisItem.Level? {
+        p.names.diagnose(p.box.p(rel)).first { $0.label == label }?.level
+    }
+    #expect(verdict("docs/ok.txt", "提取状态") == .ok)
+    #expect(verdict("docs/ok.txt", "文件名范围") == .ok)
+    #expect(verdict("docs/bad.docx", "提取状态") == .problem)
+    #expect(p.names.diagnose(p.box.p("docs/bad.docx")).last { $0.label == "提取状态" }?.detail.contains("提取失败") == true)
+    #expect(verdict("docs/photo.png", "内容范围") == .problem)
+    #expect(verdict("outside.txt", "内容范围") == .problem)
+    #expect(p.names.diagnose(p.box.p("missing.txt")).first?.label == "文件")
+}

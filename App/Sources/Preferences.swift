@@ -18,6 +18,15 @@ final class Preferences {
         set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "nameScope") }
     }
 
+    /// Content index scope; first launch recommends only ~/Downloads (D11).
+    var contentScope: ContentScope {
+        get {
+            guard let data = defaults.data(forKey: "contentScope"), let scope = try? JSONDecoder().decode(ContentScope.self, from: data) else { return .default }
+            return scope
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "contentScope") }
+    }
+
     var hotKey: HotKey.Combo {
         get {
             guard let data = defaults.data(forKey: "hotKey"), let c = try? JSONDecoder().decode(HotKey.Combo.self, from: data) else { return .optionSpace }

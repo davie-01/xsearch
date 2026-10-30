@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import ContentEngine
 import Quartz
 import XSearchCore
 
@@ -68,6 +69,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private let session: SearchSession
     private let usage: UsageStore?
     var openSettings: (() -> Void)?
+    var openDiagnostics: (() -> Void)?
 
     private let field = LauncherField()
     // Spotlight shell: one glass bar, plus round glass mode buttons that split out of it.
@@ -93,6 +95,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private var listHeight: NSLayoutConstraint!
     private let rootStack = NSStackView()
     private var bodyHeight: CGFloat = 0
+    private var contentPane: ContentPane!
+    private var contentHeight: NSLayoutConstraint!
+    private var contentOutput: ContentOutput?
+    private var contentShown = 0
     private var chipsHeight: NSLayoutConstraint!
 
     private enum Row { case group(String), item(ResultItem) }
@@ -122,7 +128,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // Fixed transparent window; only the glass frames move inside it (no window jumps).
         // Transparent margin on every side: springs overshoot (bigger drops, wider bounce) and
         // must never be clipped by the window edge.
-        let root = FlippedView(frame: NSRect(x: 0, y: 0, width: Shell.width + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset))
+        let root = FlippedView(frame: NSRect(x: 0, y: 0, width: Shell.contentWidth + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset))
         container.spacing = Shell.mergeDistance
         container.contentView = root
         panel.contentView = container
@@ -237,15 +243,20 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         footer.edgeInsets = NSEdgeInsets(top: 6, left: 22, bottom: 10, right: 22)
         hints.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        contentPane = ContentPane(searcher: session.content)
+        contentPane.onOpen = { [weak self] hit, reveal in self?.openContent(hit, reveal: reveal) }
+        contentPane.isHidden = true
         let stack = rootStack
-        for v in [ruleRow, chips, scroll, notice, footer] { stack.addArrangedSubview(v) }
+        for v in [ruleRow, chips, scroll, contentPane!, notice, footer] { stack.addArrangedSubview(v) }
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
         body.addSubview(stack)
-        for v in [ruleRow, chips, scroll, notice, footer] { v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for v in [ruleRow, chips, scroll, contentPane!, notice, footer] { v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         listHeight = scroll.heightAnchor.constraint(equalToConstant: 0)
+        contentHeight = contentPane.heightAnchor.constraint(equalToConstant: 0)
+        contentHeight.isActive = true
         chipsHeight = chips.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: body.leadingAnchor),
@@ -259,8 +270,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     // MARK: Spotlight shell
 
+    private var shellWidth: CGFloat { mode == .content ? Shell.contentWidth : Shell.width }
+    /// Left edge of the shell on the stage: the shell stays centred when it widens.
+    private var originX: CGFloat { (Shell.contentWidth - shellWidth) / 2 }
+
     private var mainWidth: CGFloat {
-        buttonsShown ? Shell.width - Shell.barGap - CGFloat(modeButtons.count) * Shell.button - CGFloat(modeButtons.count - 1) * Shell.gap : Shell.width
+        buttonsShown ? shellWidth - Shell.barGap - CGFloat(modeButtons.count) * Shell.button - CGFloat(modeButtons.count - 1) * Shell.gap : shellWidth
     }
 
     /// Places the bar, the result body and the mode buttons, matching Spotlight's choreography
@@ -275,9 +290,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func layoutShell(animated: Bool) {
         let targetW = mainWidth
         let targetH = Shell.bar + bodyHeight
-        let targetMain = NSRect(x: 0, y: 0, width: targetW, height: targetH)
+        let targetMain = NSRect(x: originX, y: 0, width: targetW, height: targetH)
         let shownFrames = modeButtons.indices.map { i in
-            NSRect(x: targetW + Shell.barGap + CGFloat(i) * (Shell.button + Shell.gap), y: 0, width: Shell.button, height: Shell.button)
+            NSRect(x: originX + targetW + Shell.barGap + CGFloat(i) * (Shell.button + Shell.gap), y: 0, width: Shell.button, height: Shell.button)
         }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         driver?.stop()
@@ -287,7 +302,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             body.isHidden = bodyHeight == 0
             body.alphaValue = 1
             for (b, f) in zip(modeButtons, shownFrames) {
-                place(b, buttonsShown ? f : tucked(barEnd: targetW))
+                place(b, buttonsShown ? f : tucked(barEnd: originX + targetW))
                 b.iconAlpha = buttonsShown ? 1 : 0
                 b.isHidden = !buttonsShown
             }
@@ -330,9 +345,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         driver = FrameDriver(view: mainGlass, duration: duration) { [weak self] t in
             guard let self else { return }
             let w = from.width + (targetW - from.width) * CGFloat(widthCurve.value(t))
+            let x = from.minX + (targetMain.minX - from.minX) * CGFloat(widthCurve.value(t))
             let h = from.height + (targetH - from.height) * CGFloat(heightCurve.value(t))
             self.mainGlass.cornerRadius = h > Shell.bar + 10 ? Shell.bodyRadius : min(Shell.bodyRadius + (Shell.bar / 2 - Shell.bodyRadius) * (1 - (h - Shell.bar) / 10), Shell.bar / 2)
-            self.setMainFrame(NSRect(x: 0, y: 0, width: w, height: max(Shell.bar, h)))
+            self.setMainFrame(NSRect(x: x, y: 0, width: w, height: max(Shell.bar, h)))
             // Body content: fade out quickly before collapsing, fade in while expanding.
             if collapsing {
                 self.body.alphaValue = fromBodyAlpha * CGFloat(max(0, 1 - t / 0.04))
@@ -343,12 +359,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 let c = buttonCurves[i]
                 if revealing {
                     // Bud out of the bar's end as it is at the moment this button starts.
-                    let endAtStart = from.width + (targetW - from.width) * CGFloat(widthCurve.value(c.delay))
+                    let v = CGFloat(widthCurve.value(c.delay))
+                    let endAtStart = from.minX + (targetMain.minX - from.minX) * v + from.width + (targetW - from.width) * v
                     self.place(b, circleLerp(self.tucked(barEnd: endAtStart), shownFrames[i], c.value(t), size: sizeCurves[i].value(t)))
                     let fade = (t - 0.16 - 0.02 * Double(i)) / 0.1
                     b.iconAlpha = CGFloat(min(1, max(0, fade)))
                 } else if hiding {
-                    self.place(b, circleLerp(fromButtons[i], self.tucked(barEnd: w), c.value(t)))
+                    self.place(b, circleLerp(fromButtons[i], self.tucked(barEnd: x + w), c.value(t)))
                     b.iconAlpha = fromIcons[i] * CGFloat(max(0, 1 - t / 0.06))
                 } else if self.buttonsShown {
                     self.place(b, circleLerp(fromButtons[i], shownFrames[i], widthCurve.value(t)))
@@ -471,9 +488,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             if case .group = r { return h + Theme.groupHeight }
             return h + Theme.rowHeight
         }
-        listHeight.constant = min(Theme.maxListHeight, content + (content > 0 ? 8 : 0))
+        let contentMode = mode == .content
+        listHeight.constant = contentMode ? 0 : min(Theme.maxListHeight, content + (content > 0 ? 8 : 0))
+        contentHeight.constant = contentMode && !contentPane.hits.isEmpty ? Shell.contentBody : 0
+        contentPane.isHidden = contentHeight.constant == 0
+        scroll.isHidden = contentMode
         chipsHeight.constant = chips.arrangedSubviews.isEmpty ? 0 : 40
-        let empty = rows.isEmpty && notice.isHidden && chips.arrangedSubviews.isEmpty
+        let hasResults = contentMode ? !contentPane.hits.isEmpty : !rows.isEmpty
+        let empty = !hasResults && notice.isHidden && chips.arrangedSubviews.isEmpty
         body.frame.size.width = mainWidth
         body.layoutSubtreeIfNeeded()
         let next = empty ? 0 : min(Shell.maxHeight - Shell.bar, rootStack.fittingSize.height)
@@ -494,8 +516,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     /// Input and filters are kept; switching to name mode drops the `in ` prefix (§5.2).
     private func switchMode(_ m: Preferences.Mode) {
+        let changed = m != mode
         setMode(m)
         runSearch()
+        if changed { layoutShell(animated: panel.isVisible) }
     }
 
     @objc private func removeContentPrefix() { switchMode(.name) }
@@ -517,9 +541,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let text = field.stringValue
         contentChip.isHidden = mode != .content
         if mode == .content {
-            showContentPlaceholder(text)
+            session.content.search(text, home: NSHomeDirectory()) { [weak self] out in self?.applyContent(out) }
             return
         }
+        session.content.cancel()
         session.search(text) { [weak self] out in self?.apply(out) }
     }
 
@@ -596,15 +621,59 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         addLink("查看可能的原因（范围、排除规则、权限）", action: #selector(showScopeSettings))
     }
 
-    private func showContentPlaceholder(_ text: String) {
-        rows = []
-        table.reloadData()
-        setChips([])
-        clearNotice()
-        addNotice("内容搜索将在下一个版本（M2）提供。", size: 13)
-        addNotice("目前可以在名称模式中按文件名搜索，支持 dir:、ext:、kind: 过滤。按 ⌘1 返回名称模式。", color: .tertiaryLabelColor, size: 12.5)
+    private func applyContent(_ out: ContentOutput) {
+        contentOutput = out
+        contentShown = out.append ? contentShown + out.hits.count : out.hits.count
+        if !out.append {
+            setChips(out.query.chips)
+            setContentNotice(out)
+        } else if out.done && contentShown == 0 {
+            setContentNotice(out)
+        }
+        contentPane.show(out)
         updateStatus()
         resize()
+    }
+
+    /// Cost hints and "no results" reasons for content queries (UI-SPEC §7).
+    private func setContentNotice(_ out: ContentOutput) {
+        clearNotice()
+        if out.query.isEmpty { return }
+        if let error = out.error {
+            addNotice(error, color: Theme.warnText, size: 12.5)
+            return
+        }
+        switch out.recall {
+        case .pair?: addNotice("两个字节的查询用前缀区间召回，结果完整。", color: Theme.warnText, size: 12.5)
+        case .scan?: addNotice("单字符或只含排除条件的查询会扫描全部已索引正文；加上 dir: 或 ext: 可以更快。", color: Theme.warnText, size: 12.5)
+        case .longTermsThenVerify?: addNotice("先用长词找候选，再核验短词。", color: .tertiaryLabelColor, size: 12.5)
+        default: break
+        }
+        guard out.done && contentShown == 0 else { return }
+        addNotice("已索引的内容中没有找到“\(out.query.expression)”。")
+        let stats = session.contentStats?() ?? ContentStats()
+        var parts = ["内容索引 \(Theme.count(stats.indexed)) 个文件"]
+        if stats.pending > 0 { parts.append("\(stats.pending) 个文件等待处理") }
+        if stats.failed > 0 { parts.append("\(stats.failed) 个文件提取失败") }
+        addNotice(parts.joined(separator: " · "), color: .tertiaryLabelColor, size: 12.5)
+        addLink("为什么可能搜不到？", action: #selector(showDiagnostics))
+    }
+
+    @objc private func showDiagnostics() {
+        hide()
+        openDiagnostics?()
+    }
+
+    private func openContent(_ hit: ContentHit, reveal: Bool) {
+        let path = hit.dir + "/" + hit.name
+        guard FileManager.default.fileExists(atPath: path) else {
+            toast("文件已不存在，索引会自动更新")
+            return
+        }
+        usage?.recordOpen(path: path, fileId: Int64(hit.fileId))
+        hide()
+        let url = URL(fileURLWithPath: path)
+        if reveal { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { NSWorkspace.shared.open(url) }
     }
 
     @objc private func showScopeSettings() {
@@ -617,7 +686,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func updateHints() {
         hints.attributedStringValue = Self.hintString(mode == .name
             ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⇧⌘C", "复制路径")]
-            : [("⌘1", "名称模式"), ("Esc", "关闭")])
+            : [("↵", "打开"), ("⌘↵", "定位到原文件"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘1", "名称模式")])
     }
 
     static func hintString(_ pairs: [(String, String)]) -> NSAttributedString {
@@ -640,7 +709,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         case .ready: parts.append("名称索引 \(Theme.count(st.count)) 项")
         case .failed: parts.append("文件名索引出错，详见设置")
         }
-        if mode == .name, let out = output, !out.query.isEmpty {
+        if mode == .content {
+            let stats = session.contentStats?() ?? ContentStats()
+            parts = ["内容索引 \(Theme.count(stats.indexed)) 个文件"]
+            if stats.pending > 0 { parts.append("待处理 \(Theme.count(stats.pending))") }
+            if let out = contentOutput, !out.query.isEmpty, out.error == nil {
+                parts.append(out.done ? "\(Theme.count(contentShown)) 个结果" : "仍在搜索… 已核验 \(Theme.count(Int(out.verified))) / \(Theme.count(Int(out.candidates)))")
+            }
+        } else if let out = output, !out.query.isEmpty {
             parts.append("\(Theme.count(out.total)) 个结果")
             parts.append(String(format: "%.1f ms", out.elapsedMs))
         }
@@ -658,6 +734,19 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         // Keys belong to the input method while it composes (§5.3).
         if textView.hasMarkedText() { return false }
+        if mode == .content {
+            switch selector {
+            case #selector(NSResponder.moveDown(_:)): contentPane.moveSelection(1); return true
+            case #selector(NSResponder.moveUp(_:)): contentPane.moveSelection(-1); return true
+            case #selector(NSResponder.insertNewline(_:)):
+                if let h = contentPane.selected { openContent(h, reveal: false) }
+                return true
+            case #selector(NSResponder.insertTab(_:)):
+                if !contentPane.hits.isEmpty { panel.makeFirstResponder(contentPane.table) }
+                return true
+            default: break
+            }
+        }
         switch selector {
         case #selector(NSResponder.moveDown(_:)): moveSelection(1); return true
         case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
@@ -677,8 +766,25 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         switch (flags, key, event.keyCode) {
         case (.command, "1", _): switchMode(.name); return true
         case (.command, "2", _): switchMode(.content); return true
-        case (.command, _, 36), (.command, _, 76): activate(.reveal); return true
-        case ([.command, .shift], "c", _), ([.command, .shift], "C", _): activate(.copyPath); return true
+        case (.command, _, 36), (.command, _, 76):
+            if mode == .content {
+                if let h = contentPane.selected { openContent(h, reveal: false) }
+            } else {
+                activate(.reveal)
+            }
+            return true
+        case (.command, "g", _) where mode == .content: contentPane.preview.goNext(); return true
+        case ([.command, .shift], "g", _) where mode == .content, ([.command, .shift], "G", _) where mode == .content:
+            contentPane.preview.goPrev(); return true
+        case ([.command, .shift], "c", _), ([.command, .shift], "C", _):
+            if mode == .content, let h = contentPane.selected {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(h.dir + "/" + h.name, forType: .string)
+                toast("已复制路径")
+            } else {
+                activate(.copyPath)
+            }
+            return true
         case (.command, ",", _): hide(); openSettings?(); return true
         case (.command, "/", _): showSyntaxHelp(); return true
         default: return false
@@ -884,6 +990,9 @@ enum Shell {
     static let mergeDistance: CGFloat = 12
     static let bodyRadius: CGFloat = 26
     static let maxHeight: CGFloat = 760
+    /// Content mode widens to two columns (UI-SPEC §3): list 420 + preview.
+    static let contentWidth: CGFloat = 1120
+    static let contentBody: CGFloat = 500
     /// Transparent margin around the shell inside the window (room for spring overshoot).
     static let inset: CGFloat = 40
     /// Development: XS_ANIM_SCALE slows animations down for frame-by-frame checks.

@@ -14,7 +14,9 @@ let package = Package(
             path: "Packages/XSearchCore/CXSearchCore",
             // libxs_ffi.a is the app's only Rust library (content engine + M1 name-key C ABI);
             // linking two Rust static libraries would duplicate the Rust runtime.
-            linkerSettings: [.unsafeFlags(["-L\(rustLib)"]), .linkedLibrary("xs_ffi"), .linkedLibrary("c++"), .linkedLibrary("z")]
+            // Full path: target/release also holds libxs_ffi.dylib (for uniffi-bindgen), which
+            // `-lxs_ffi` would prefer over the static archive.
+            linkerSettings: [.unsafeFlags(["\(rustLib)/libxs_ffi.a"]), .linkedLibrary("c++"), .linkedLibrary("z")]
         ),
         .target(name: "xs_ffiFFI", dependencies: ["CXSearchCore"], path: "Packages/ContentEngine/xs_ffiFFI"),
         // Generated UniFFI bindings (scripts/gen-bindings.sh) plus a thin Swift layer.

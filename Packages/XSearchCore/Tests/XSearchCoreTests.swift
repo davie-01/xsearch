@@ -66,3 +66,14 @@ import Testing
     #expect(keyExtension(Array("a.tar.gz".utf8)).map { String(decoding: $0, as: UTF8.self) } == "gz")
     #expect(keyExtension(Array(".zshrc".utf8)) == nil)
 }
+
+@Test func contentQuerySplitsFilters() {
+    let q = ContentQuery.parse(#"合同 "数据 共享" -草稿 dir:~/Downloads ext:.pdf;DOCX (AI | IP)"#, home: "/Users/t")
+    #expect(q.expression == #"合同 "数据 共享" -草稿 (AI | IP)"#)
+    #expect(q.dirs == ["/Users/t/Downloads"])
+    #expect(q.exts == ["pdf", "docx"])
+    #expect(q.chips.map(\.valid) == [true, true])
+    let r = ContentQuery.parse(#"dir:"~/My Docs" x dir:合同"#, home: "/h")
+    #expect(r.dirs == ["/h/My Docs"] && r.expression == "x" && r.chips.last?.valid == false)
+    #expect(ContentQuery.parse("dir:/a ext:pdf", home: "/").isEmpty)
+}

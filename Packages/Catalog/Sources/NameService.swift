@@ -116,6 +116,102 @@ public final class NameService: @unchecked Sendable {
         }
     }
 
+    /// One line of "为什么搜不到" (UI-SPEC §6.4): what was checked, the outcome, what to do.
+    public struct DiagnosisItem: Sendable, Equatable {
+        public enum Level: Sendable { case ok, warning, problem }
+        public var label: String
+        public var level: Level
+        public var detail: String
+    }
+
+    /// Explains where a path stands in both indexes (ARCHITECTURE §6.2 diagnostics).
+    public func diagnose(_ rawPath: String) -> [DiagnosisItem] {
+        let path = PathUtil.standardize((rawPath as NSString).expandingTildeInPath)
+        return queue.sync {
+            guard let catalog, let context else { return [DiagnosisItem(label: "索引", level: .problem, detail: "索引尚未打开")] }
+            var out: [DiagnosisItem] = []
+            let fm = FileManager.default
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDir) else {
+                return [DiagnosisItem(label: "文件", level: .problem, detail: "路径不存在（可能已被移动或删除）")]
+            }
+            let name = (path as NSString).lastPathComponent
+            let probe = Reconciler(catalog: catalog, context: context, seq: 0, publish: { _ in })
+            // 1. File-name scope.
+            let inRoots = context.roots.contains { PathUtil.isWithin(path, $0) }
+            var row: Row?
+            if inRoots, let root = try? catalog.rootRows().filter({ PathUtil.isWithin(path, $0.name) }).max(by: { $0.name.count < $1.name.count }),
+               let (r, rp) = try? catalog.nearest(path, root: root), rp == path {
+                row = r
+            } else if inRoots, let root = try? catalog.rootRows().filter({ PathUtil.isWithin(path, $0.name) }).max(by: { $0.name.count < $1.name.count }) {
+                let parent = (path as NSString).deletingLastPathComponent
+                if let (dirRow, dp) = try? catalog.nearest(parent, root: root), dp == parent { row = try? catalog.child(of: dirRow.id, named: name) }
+            }
+            if !inRoots {
+                out.append(.init(label: "文件名范围", level: .problem, detail: "不在文件名索引范围内。在 设置 › 索引范围 中把它所在的文件夹加入。"))
+            } else if !probe.isIndexable(path) || ((name.hasPrefix(".")) && !context.rules.includeHidden) {
+                out.append(.init(label: "文件名范围", level: .problem, detail: "被排除规则排除（或是隐藏文件）。在 设置 › 索引范围 › 排除规则 中调整。"))
+            } else if row == nil {
+                out.append(.init(label: "文件名范围", level: .warning, detail: "在范围内，但还没有进入索引：可能正在扫描，稍后再试。"))
+            } else {
+                out.append(.init(label: "文件名范围", level: .ok, detail: "已在文件名索引中，可以按名称搜到。"))
+            }
+            // 2. Access.
+            if fm.isReadableFile(atPath: path) {
+                out.append(.init(label: "访问权限", level: .ok, detail: "XSearch 可以读取这个文件。"))
+            } else {
+                out.append(.init(label: "访问权限", level: .problem, detail: "没有读取权限。可在 系统设置 › 隐私与安全性 中为 XSearch 授予文件访问或完全磁盘访问权限。"))
+            }
+            // 3. Content scope.
+            guard let rules = context.content else {
+                out.append(.init(label: "内容范围", level: .warning, detail: "内容索引未开启。"))
+                return out
+            }
+            if isDir.boolValue {
+                out.append(.init(label: "内容范围", level: .warning, detail: "这是文件夹；内容索引只提取其中的文件。"))
+                return out
+            }
+            if !rules.roots.contains(where: { PathUtil.isWithin(path, $0) }) {
+                out.append(.init(label: "内容范围", level: .problem, detail: "不在内容索引范围内。把 \(PathUtil.abbreviate((path as NSString).deletingLastPathComponent, home: home)) 加入内容范围后即可搜索正文。"))
+                return out
+            }
+            guard ContentType.of(name: name) != nil else {
+                out.append(.init(label: "内容范围", level: .problem, detail: "暂不支持提取这种文件类型（.\((name as NSString).pathExtension)）。"))
+                return out
+            }
+            guard rules.eligible(path: path, name: name, isDirectory: false) else {
+                out.append(.init(label: "内容范围", level: .problem, detail: "被内容范围的排除规则或类型设置排除。"))
+                return out
+            }
+            out.append(.init(label: "内容范围", level: .ok, detail: "在内容索引范围内。"))
+            // 4. Extraction state.
+            guard let row, let s = try? catalog.db.prepare("SELECT content_state, content_error, op_seq FROM files WHERE id = ?").bind(row.id),
+                  let (state, error, opSeq) = try? s.first({ s in (s.int(0), s.isNull(1) ? nil : s.text(1), s.int(2)) }) else {
+                out.append(.init(label: "提取状态", level: .warning, detail: "还没有进入内容任务队列。"))
+                return out
+            }
+            let queued = (try? catalog.db.prepare("SELECT 1 FROM content_tasks WHERE file_id = ? AND op_seq = ?").bind(row.id, opSeq).first { _ in true }) ?? nil
+            switch (state, queued != nil) {
+            case (_, true): out.append(.init(label: "提取状态", level: .warning, detail: "索引待更新：已排队，正在等待提取。"))
+            case (1, _): out.append(.init(label: "提取状态", level: .ok, detail: "已提取并建立内容索引。"))
+            case (2, _): out.append(.init(label: "提取状态", level: .warning, detail: "部分索引：只提取到一部分文字（超出大小上限或文字层有缺失）。"))
+            case (3, _): out.append(.init(label: "提取状态", level: .warning, detail: "等待 OCR：没有文字层，OCR 在后续版本提供。"))
+            case (4, _): out.append(.init(label: "提取状态", level: .problem, detail: "提取失败：\(error ?? "未知原因")"))
+            default: out.append(.init(label: "提取状态", level: .warning, detail: "还没有建立内容索引。"))
+            }
+            let mtime = row.mtimeNs / 1_000_000_000
+            out.append(.init(label: "最近修改", level: .ok, detail: Self.dateText(mtime)))
+            return out
+        }
+    }
+
+    static func dateText(_ seconds: Int64) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy年M月d日 HH:mm"
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+    }
+
     struct TaskRow: Equatable { var fileId: Int64; var opSeq: Int64; var kind: Int64; var state: Int64 }
 
     /// Test / diagnostics: content tasks and the file each belongs to.

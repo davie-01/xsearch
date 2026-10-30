@@ -6,6 +6,9 @@ import XSearchCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var names: NameService!
+    private var indexer: ContentIndexer?
+    private var statusTimer: Timer?
+    private let contentStatusItem = NSMenuItem(title: "内容索引：正在打开", action: nil, keyEquivalent: "")
     private var usage: UsageStore?
     private var session: SearchSession!
     private var launcher: LauncherController!
@@ -29,6 +32,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return s
     }
 
+    /// XS_CONTENT_ROOTS (comma-separated) overrides the content scope for development.
+    private var contentScope: ContentScope {
+        guard let roots = env["XS_CONTENT_ROOTS"] else { return Preferences.shared.contentScope }
+        return ContentScope(folders: roots.split(separator: ",").map(String.init))
+    }
+
+    /// Starts IndexService (in-process, own queue) with the bundled extraction worker.
+    private func startIndexer() {
+        let worker = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("xs-extract")
+        let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: 2)
+        do {
+            try ix.start()
+            indexer = ix
+        } catch {
+            indexer = nil
+            contentStatusItem.title = "内容索引无法启动：\(String(describing: error).prefix(60))"
+        }
+        session.content.indexPath = { [weak ix] in ix?.indexURL.path }
+        session.contentStats = { [weak ix] in
+            guard let st = ix?.status else { return ContentStats() }
+            return ContentStats(indexed: st.indexed, pending: st.pending, failed: st.failed)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let data = dataDirectory
         names = NameService(directory: data)
@@ -42,18 +69,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         names.onStatus = { [weak self] _ in
             Task { @MainActor in self?.statusChanged() }
         }
-        names.start(scope: nameScope)
+        names.start(scope: nameScope, content: contentScope)
+        startIndexer()
+        launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.statusChanged() }
+        }
 
         buildStatusItem()
         hotKey = HotKey { [weak self] in self?.launcher.toggle() }
         registerHotKey(Preferences.shared.hotKey)
         // Development: show the launcher with a query (screenshots, UI checks).
         if let text = env["XS_LAUNCHER_TEXT"] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.launcher.show(text: text) }
+            let delay = env["XS_LAUNCHER_DELAY"].flatMap(Double.init) ?? 1.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.launcher.show(text: text) }
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        indexer?.stop()
         names.shutdown()
     }
 
@@ -106,9 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         indexStatusItem.isEnabled = false
         menu.addItem(indexStatusItem)
-        let content = NSMenuItem(title: "内容索引：下一个版本提供", action: nil, keyEquivalent: "")
-        content.isEnabled = false
-        menu.addItem(content)
+        contentStatusItem.isEnabled = false
+        menu.addItem(contentStatusItem)
         menu.addItem(.separator())
         hotKeyItem.target = self
         menu.addItem(hotKeyItem)
@@ -130,6 +163,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .scanning: indexStatusItem.title = "文件名索引：正在建立 · \(Theme.count(st.count)) 项"
         case .ready: indexStatusItem.title = "文件名索引：已就绪 · \(Theme.count(st.count)) 项"
         case .failed(let message): indexStatusItem.title = "文件名索引出错：\(message.prefix(60))"
+        }
+        if let st = indexer?.status {
+            var parts = ["内容索引：\(Theme.count(st.indexed)) 个文件"]
+            if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
+            if st.failed > 0 { parts.append("\(st.failed) 个失败") }
+            contentStatusItem.title = parts.joined(separator: " · ")
         }
         launcher?.updateStatus()
         settings?.refresh()
@@ -153,11 +192,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         names.setScope(scope)
     }
 
+    func applyContentScope(_ scope: ContentScope) {
+        Preferences.shared.contentScope = scope
+        names.setContentScope(scope)
+    }
+
+    var currentContentScope: ContentScope { contentScope }
+    var contentStatus: ContentIndexer.Status? { indexer?.status }
+    var nameService: NameService { names }
+
     /// Deletes the rebuildable name index (catalog + snapshot) and scans again. user.sqlite stays.
     func rebuildNameIndex() {
+        indexer?.stop()
         names.shutdown()
         let data = dataDirectory
-        for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "names"] {
+        // File ids are catalog ids: the content index is rebuilt together with the catalog.
+        for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "names", "content"] {
             try? FileManager.default.removeItem(at: data.appendingPathComponent(name))
         }
         names = NameService(directory: data)
@@ -168,7 +218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         session.onAppsLoaded = { [weak self] in self?.launcher.appsDidLoad() }
         session.refreshApps()
         settings?.names = names
-        names.start(scope: nameScope)
+        names.start(scope: nameScope, content: contentScope)
+        startIndexer()
+        launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
     }
 
     var currentHotKey: HotKey.Combo { Preferences.shared.hotKey }
