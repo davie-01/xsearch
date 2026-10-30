@@ -65,7 +65,25 @@ fn column(mut i: usize) -> String {
 /// One line per non-empty row (cells separated by tabs), anchored "Sheet1!A12" at the row's
 /// first non-empty cell. Formulas contribute their cached values.
 pub fn spreadsheet(path: &Path, limits: Limits) -> Result<Extraction> {
-    let mut wb = open_workbook_auto(path).context("spreadsheet unreadable")?;
+    // Known extensions pick their reader; others (WPS .et = BIFF8) are recognised by content.
+    let known = path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        ["xlsx", "xlsm", "xlsb", "xls", "xla", "ods"].contains(&e.to_ascii_lowercase().as_str())
+    });
+    let mut wb = if known {
+        open_workbook_auto(path).context("spreadsheet unreadable")?
+    } else {
+        let data = std::fs::read(path)?;
+        let auto = calamine::open_workbook_auto_from_rs(std::io::Cursor::new(data)).context("spreadsheet unreadable")?;
+        return sheets_into(auto, limits);
+    };
+    sheets_into_impl(&mut wb, limits)
+}
+
+fn sheets_into<RS: std::io::Read + std::io::Seek>(mut wb: calamine::Sheets<RS>, limits: Limits) -> Result<Extraction> {
+    sheets_into_impl(&mut wb, limits)
+}
+
+fn sheets_into_impl<RS: std::io::Read + std::io::Seek>(wb: &mut calamine::Sheets<RS>, limits: Limits) -> Result<Extraction> {
     let mut out = Out::new(limits);
     'sheets: for name in wb.sheet_names().to_owned() {
         let Ok(range) = wb.worksheet_range(&name) else { continue };
@@ -140,8 +158,13 @@ fn drawing_paragraphs(xml: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Slides in order, each followed by its speaker notes; a slide anchor per slide.
+/// Slides in order, each followed by its speaker notes; a slide anchor per slide. Binary
+/// PowerPoint (.ppt / .pps, WPS .dps) is recognised by its OLE2 signature.
 pub fn pptx(path: &Path, limits: Limits) -> Result<Extraction> {
+    let mut magic = [0u8; 8];
+    if File::open(path)?.read_exact(&mut magic).is_ok() && magic == OLE_MAGIC {
+        return ppt_binary(path, limits);
+    }
     let mut zip = zip::ZipArchive::new(File::open(path)?)?;
     let slides = numbered(&zip, "ppt/slides/slide");
     if slides.is_empty() {
@@ -303,4 +326,268 @@ pub(crate) fn open_zip(path: &Path, limits: Limits) -> Result<AnyZip> {
     data[eocd + 8..eocd + 10].copy_from_slice(&count.to_le_bytes());
     data[eocd + 10..eocd + 12].copy_from_slice(&count.to_le_bytes());
     Ok(zip::ZipArchive::new(Box::new(std::io::Cursor::new(data)) as Box<dyn ReadSeek>)?)
+}
+
+pub(crate) const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+/// Text of a binary PowerPoint 97–2003 deck ([MS-PPT]). Primary path: `ppt_by_persist`.
+/// Fallback for files without a usable persist directory: a plain walk of the record tree that
+/// assigns text boxes to slides in container order (title / notes masters can then shift
+/// numbering).
+fn ppt_binary(path: &Path, limits: Limits) -> Result<Extraction> {
+    let mut ole = cfb::open(path).context("not an OLE2 file")?;
+    let mut stream = ole.open_stream("/PowerPoint Document").context("missing PowerPoint Document stream")?;
+    let mut data = vec![];
+    Read::by_ref(&mut stream).take(limits.max_unpacked_bytes).read_to_end(&mut data)?;
+
+    #[derive(Default)]
+    struct Walk {
+        slides: BTreeMap<u32, Vec<String>>,
+        notes: BTreeMap<u32, Vec<String>>,
+        list: Option<u16>,
+        slide: u32,
+        note: u32,
+        container: Option<u32>,
+        containers: u32,
+        notes_container: Option<u32>,
+        notes_containers: u32,
+    }
+    fn add(map: &mut BTreeMap<u32, Vec<String>>, n: u32, text: String) {
+        let t = text.replace(['\r', '\u{0B}'], "\n");
+        let t = t.trim();
+        if t.is_empty() || n == 0 {
+            return;
+        }
+        let v = map.entry(n).or_default();
+        if !v.iter().any(|x| x == t) {
+            v.push(t.to_owned());
+        }
+    }
+    fn walk(d: &[u8], w: &mut Walk, depth: u32) {
+        let mut pos = 0;
+        while pos + 8 <= d.len() && depth < 32 {
+            let verinst = u16::from_le_bytes([d[pos], d[pos + 1]]);
+            let rtype = u16::from_le_bytes([d[pos + 2], d[pos + 3]]);
+            let len = u32::from_le_bytes([d[pos + 4], d[pos + 5], d[pos + 6], d[pos + 7]]) as usize;
+            let body = &d[pos + 8..(pos + 8).saturating_add(len).min(d.len())];
+            pos = (pos + 8).saturating_add(len);
+            let (ver, inst) = (verinst & 0xF, verinst >> 4);
+            let text = match rtype {
+                0x0FA0 => Some(String::from_utf16_lossy(&body.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect::<Vec<_>>())),
+                0x0FA8 => Some(body.iter().map(|&b| b as char).collect()),
+                _ => None,
+            };
+            if let Some(t) = text {
+                if let Some(c) = w.container {
+                    add(&mut w.slides, c, t);
+                } else if let Some(c) = w.notes_container {
+                    add(&mut w.notes, c, t);
+                } else if w.list == Some(0) {
+                    add(&mut w.slides, w.slide, t);
+                } else if w.list == Some(2) {
+                    add(&mut w.notes, w.note, t);
+                }
+                continue;
+            }
+            match rtype {
+                0x03F8 | 0x0FD9 | 0x0FC4 => {}
+                0x0FF0 => {
+                    w.list = Some(inst);
+                    walk(body, w, depth + 1);
+                    w.list = None;
+                }
+                0x03F3 => match w.list {
+                    Some(0) => w.slide += 1,
+                    Some(2) => w.note += 1,
+                    _ => {}
+                },
+                0x03EE => {
+                    w.containers += 1;
+                    w.container = Some(w.containers);
+                    walk(body, w, depth + 1);
+                    w.container = None;
+                }
+                0x03F0 => {
+                    w.notes_containers += 1;
+                    w.notes_container = Some(w.notes_containers);
+                    walk(body, w, depth + 1);
+                    w.notes_container = None;
+                }
+                _ if ver == 0xF => walk(body, w, depth + 1),
+                _ => {}
+            }
+        }
+    }
+    let mut w = Walk::default();
+    if !ppt_by_persist(&data, &mut w.slides, &mut w.notes) {
+        walk(&data, &mut w, 0);
+    }
+    let mut out = Out::new(limits);
+    let numbers: std::collections::BTreeSet<u32> = w.slides.keys().chain(w.notes.keys()).copied().collect();
+    for n in numbers {
+        out.anchor(AnchorKind::Slide { slide: n });
+        for t in w.slides.get(&n).into_iter().flatten() {
+            out.push(t);
+            out.push("\n");
+        }
+        // Slide-number fields and similar one-word placeholders are left out of notes.
+        let notes: Vec<&String> = w.notes.get(&n).into_iter().flatten().filter(|t| t.trim().parse::<u32>().is_err()).collect();
+        if !notes.is_empty() {
+            out.anchor(AnchorKind::Part { name: format!("备注 {n}") });
+            for t in notes {
+                out.push(t);
+                out.push("\n");
+            }
+        }
+        if out.partial {
+            break;
+        }
+    }
+    Ok(out.done("ppt"))
+}
+
+struct Rec<'a> {
+    ver: u16,
+    inst: u16,
+    rtype: u16,
+    body: &'a [u8],
+    end: usize,
+}
+
+fn rec_at(d: &[u8], pos: usize) -> Option<Rec<'_>> {
+    if pos + 8 > d.len() {
+        return None;
+    }
+    let verinst = u16::from_le_bytes([d[pos], d[pos + 1]]);
+    let rtype = u16::from_le_bytes([d[pos + 2], d[pos + 3]]);
+    let len = u32::from_le_bytes([d[pos + 4], d[pos + 5], d[pos + 6], d[pos + 7]]) as usize;
+    let end = (pos + 8).saturating_add(len).min(d.len());
+    Some(Rec { ver: verinst & 0xF, inst: verinst >> 4, rtype, body: &d[pos + 8..end], end })
+}
+
+fn atom_text(r: &Rec) -> Option<String> {
+    match r.rtype {
+        0x0FA0 => Some(String::from_utf16_lossy(&r.body.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect::<Vec<_>>())),
+        0x0FA8 => Some(r.body.iter().map(|&b| b as char).collect()),
+        _ => None,
+    }
+}
+
+/// Every text atom inside a container, depth-first.
+fn texts_in(d: &[u8], out: &mut Vec<String>, depth: u32) {
+    let mut pos = 0;
+    while let Some(r) = rec_at(d, pos) {
+        pos = pos + 8 + r.body.len();
+        if let Some(t) = atom_text(&r) {
+            out.push(t);
+        } else if r.ver == 0xF && depth < 32 {
+            texts_in(r.body, out, depth + 1);
+        }
+    }
+}
+
+/// [MS-PPT] structure: the persist directory (0x1772, later entries win) maps persist ids to
+/// stream offsets; the newest DocumentContainer's SlideListWithText lists slides (instance 0)
+/// and notes (instance 2) in order, each SlidePersistAtom carrying persistIdRef (+0) and
+/// slideId (+12) followed by its placeholder text; a slide's container holds its text boxes
+/// and a SlideAtom (0x03EF) whose notesIdRef (+16) names its notes. Masters are never
+/// referenced, so their template text stays out. Returns false when the structure is missing.
+fn ppt_by_persist(d: &[u8], slides: &mut BTreeMap<u32, Vec<String>>, notes: &mut BTreeMap<u32, Vec<String>>) -> bool {
+    let u32_at = |b: &[u8], o: usize| (o + 4 <= b.len()).then(|| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]));
+    let mut persist: std::collections::HashMap<u32, usize> = Default::default();
+    let mut doc: Option<usize> = None;
+    let mut pos = 0;
+    while let Some(r) = rec_at(d, pos) {
+        match r.rtype {
+            0x1772 => {
+                let mut o = 0;
+                while let Some(h) = u32_at(r.body, o) {
+                    let (start, count) = (h & 0xF_FFFF, (h >> 20) as usize);
+                    for k in 0..count {
+                        if let Some(off) = u32_at(r.body, o + 4 + 4 * k) {
+                            persist.insert(start + k as u32, off as usize);
+                        }
+                    }
+                    o += 4 + 4 * count;
+                }
+            }
+            0x03E8 => doc = Some(pos),
+            _ => {}
+        }
+        pos = r.end;
+    }
+    let Some(doc) = doc.and_then(|p| rec_at(d, p)) else { return false };
+    struct Entry {
+        persist: u32,
+        id: u32,
+        texts: Vec<String>,
+    }
+    let (mut slide_list, mut notes_list) = (vec![], vec![]);
+    let mut p = 0;
+    while let Some(r) = rec_at(doc.body, p) {
+        p = r.end;
+        if r.rtype != 0x0FF0 || (r.inst != 0 && r.inst != 2) {
+            continue;
+        }
+        let list: &mut Vec<Entry> = if r.inst == 0 { &mut slide_list } else { &mut notes_list };
+        let mut q = 0;
+        while let Some(c) = rec_at(r.body, q) {
+            q = c.end;
+            if c.rtype == 0x03F3 {
+                list.push(Entry { persist: u32_at(c.body, 0).unwrap_or(0), id: u32_at(c.body, 12).unwrap_or(0), texts: vec![] });
+            } else if let (Some(t), Some(e)) = (atom_text(&c), list.last_mut()) {
+                e.texts.push(t);
+            } else if c.ver == 0xF && let Some(e) = list.last_mut() {
+                texts_in(c.body, &mut e.texts, 1);
+            }
+        }
+    }
+    if slide_list.is_empty() {
+        return false;
+    }
+    let container = |persist_id: u32| persist.get(&persist_id).and_then(|&o| rec_at(d, o)).filter(|r| r.rtype == 0x03EE || r.rtype == 0x03F0);
+    let notes_by_id: std::collections::HashMap<u32, &Entry> = notes_list.iter().map(|e| (e.id, e)).collect();
+    let push = |map: &mut BTreeMap<u32, Vec<String>>, n: u32, t: &str| {
+        let t = t.replace(['\r', '\u{0B}'], "\n");
+        let t = t.trim();
+        if t.is_empty() {
+            return;
+        }
+        let v = map.entry(n).or_default();
+        if !v.iter().any(|x| x == t) {
+            v.push(t.to_owned());
+        }
+    };
+    for (i, s) in slide_list.iter().enumerate() {
+        let n = i as u32 + 1;
+        slides.entry(n).or_default();
+        s.texts.iter().for_each(|t| push(slides, n, t));
+        let Some(c) = container(s.persist) else { continue };
+        let mut boxes = vec![];
+        texts_in(c.body, &mut boxes, 1);
+        boxes.iter().for_each(|t| push(slides, n, t));
+        // SlideAtom → notesIdRef → notes entry (list text + notes container text boxes).
+        let notes_id = {
+            let mut q = 0;
+            let mut found = None;
+            while let Some(a) = rec_at(c.body, q) {
+                q = a.end;
+                if a.rtype == 0x03EF {
+                    found = u32_at(a.body, 16);
+                    break;
+                }
+            }
+            found
+        };
+        if let Some(e) = notes_id.filter(|&id| id != 0).and_then(|id| notes_by_id.get(&id)) {
+            e.texts.iter().for_each(|t| push(notes, n, t));
+            if let Some(nc) = container(e.persist) {
+                let mut nb = vec![];
+                texts_in(nc.body, &mut nb, 1);
+                nb.iter().for_each(|t| push(notes, n, t));
+            }
+        }
+    }
+    slides.retain(|_, v| !v.is_empty());
+    true
 }

@@ -12,6 +12,7 @@ tar = "=0.4.46"
 flate2 = "1"
 sevenz-rust2 = { version = "=0.24.1", features = ["deflate"] }
 unrar = "=0.5.8"
+cfb = "=0.15.0"
 encoding_rs.workspace = true
 roxmltree.workspace = true
 serde.workspace = true

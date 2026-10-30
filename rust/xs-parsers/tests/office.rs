@@ -90,3 +90,79 @@ fn scanned_ofd_pages_wait_for_ocr() {
     let mixed = build("mixed.ofd", &[text, image]);
     assert_eq!((mixed.state, mixed.warnings.len()), (ExtractState::Partial, 1));
 }
+
+/// A minimal binary PowerPoint stream, records as [MS-PPT] lays them out.
+fn rec(ver: u16, inst: u16, rtype: u16, body: &[u8]) -> Vec<u8> {
+    let mut v = (ver | (inst << 4)).to_le_bytes().to_vec();
+    v.extend(rtype.to_le_bytes());
+    v.extend((body.len() as u32).to_le_bytes());
+    v.extend(body);
+    v
+}
+fn chars(t: &str) -> Vec<u8> {
+    rec(0, 0, 0x0FA0, &t.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>())
+}
+fn persist_atom(persist: u32, slide_id: u32) -> Vec<u8> {
+    let mut b = vec![];
+    for v in [persist, 0, 0, slide_id, 0] {
+        b.extend(v.to_le_bytes());
+    }
+    rec(0, 0, 0x03F3, &b)
+}
+fn slide_atom(notes_id: u32) -> Vec<u8> {
+    let mut b = vec![0u8; 16];
+    b.extend(notes_id.to_le_bytes());
+    b.extend([0u8; 4]);
+    rec(2, 0, 0x03EF, &b)
+}
+
+#[test]
+fn binary_ppt_follows_persist_directory() {
+    // Version 1 of the deck (superseded), then version 2 appended by an incremental save.
+    let doc = |title: &str| {
+        let mut slides = persist_atom(1, 256);
+        slides.extend(chars(title));
+        let mut notes = persist_atom(2, 300);
+        notes.extend(chars("讲者备注"));
+        let mut body = rec(0xF, 0, 0x0FF0, &slides);
+        body.extend(rec(0xF, 2, 0x0FF0, &notes));
+        rec(0xF, 0, 0x03E8, &body)
+    };
+    let slide = |boxed: &str| {
+        let mut body = slide_atom(300);
+        body.extend(rec(0xF, 0, 0x040C, &chars(boxed)));
+        rec(0xF, 0, 0x03EE, &body)
+    };
+    let mut s = vec![];
+    s.extend(rec(0xF, 0, 0x03F8, &chars("单击此处编辑母版标题样式")));
+    // An unreferenced title master is also a slide container.
+    s.extend(rec(0xF, 0, 0x03EE, &chars("单击此处编辑母版副标题样式")));
+    let old_slide = s.len();
+    s.extend(slide("旧文本框"));
+    s.extend(doc("旧标题"));
+    let notes_at = s.len();
+    s.extend(rec(0xF, 0, 0x03F0, &rec(0xF, 0, 0x040C, &chars("备注页文本框"))));
+    let dir = |slide_at: usize| {
+        let mut b = (1u32 | (2 << 20)).to_le_bytes().to_vec();
+        b.extend((slide_at as u32).to_le_bytes());
+        b.extend((notes_at as u32).to_le_bytes());
+        rec(0, 0, 0x1772, &b)
+    };
+    s.extend(dir(old_slide));
+    let new_slide = s.len();
+    s.extend(slide("新文本框"));
+    s.extend(doc("新标题"));
+    s.extend(dir(new_slide));
+
+    let dir_path = tempfile::tempdir().unwrap();
+    let p = dir_path.path().join("deck.ppt");
+    let mut ole = cfb::create(&p).unwrap();
+    ole.create_stream("/PowerPoint Document").unwrap().write_all(&s).unwrap();
+    ole.flush().unwrap();
+    drop(ole);
+    let e = office::pptx(&p, Limits::default()).unwrap();
+    assert_eq!(e.method, "ppt");
+    assert_eq!(e.text.lines().collect::<Vec<_>>(), vec!["新标题", "新文本框", "讲者备注", "备注页文本框"]);
+    let kinds: Vec<_> = e.anchors.iter().map(|a| a.kind.clone()).collect();
+    assert_eq!(kinds, vec![AnchorKind::Slide { slide: 1 }, AnchorKind::Part { name: "备注 1".into() }]);
+}

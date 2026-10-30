@@ -8,8 +8,8 @@ fn main() {
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         let t = Instant::now();
         let r = match ext.as_str() {
-            "xlsx" | "xlsm" | "xls" | "ods" => office::spreadsheet(p, Limits::default()),
-            "pptx" | "pptm" => office::pptx(p, Limits::default()),
+            "xlsx" | "xlsm" | "xls" | "ods" | "et" => office::spreadsheet(p, Limits::default()),
+            "pptx" | "pptm" | "ppt" | "pps" | "dps" => office::pptx(p, Limits::default()),
             "ofd" => office::ofd(p, Limits::default()),
             "html" | "htm" | "xhtml" => web::html(p, Limits::default()),
             "epub" => web::epub(p, Limits::default()),

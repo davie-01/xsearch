@@ -55,6 +55,7 @@ public enum Extractor {
     public static let pdfVersion: UInt64 = 1
     public static let docVersion: UInt64 = 1
     public static let rtfVersion: UInt64 = 1
+    public static let wpsVersion: UInt64 = 1
 
     /// Current extractor version per type (Rust ones come from the engine).
     public static func version(of type: ContentType) -> UInt64 {
@@ -70,6 +71,7 @@ public enum Extractor {
         case .ebook: engineVersions()["extractor.ebook"].flatMap(UInt64.init) ?? 1
         case .rtf: rtfVersion
         case .archive: archiveVersion
+        case .wps: wpsVersion
         }
     }
 
@@ -87,6 +89,18 @@ public enum Extractor {
         case .doc:
             try checkSize(path, limits)
             return try doc(path)
+        case .wps:
+            // WPS Writer saves either an OOXML package (= docx) or Word 97 binary (= doc).
+            try checkSize(path, limits)
+            if (FileHandle(forReadingAtPath: path).flatMap { try? $0.read(upToCount: 2) }) == Data("PK".utf8) {
+                var r = try rust { try extractDocx(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+                r.method = "wps/docx"
+                r.extractorVersion = wpsVersion
+                return r
+            }
+            var r = try attributed(path, type: .docFormat, method: "wps/doc", version: wpsVersion)
+            if r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { r.state = "partial"; r.warnings.append("没有读到正文") }
+            return r
         case .rtf:
             try checkSize(path, limits)
             return try attributed(path, type: .rtf, method: "rtf", version: rtfVersion)

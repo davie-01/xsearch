@@ -45,25 +45,28 @@ public struct ContentScope: Codable, Sendable, Equatable {
         return paths.filter { p in !paths.contains { $0 != p && PathUtil.isWithin(p, $0) } }
     }
 
-    /// Changes whenever the set of content-indexed files could change.
+    /// Changes whenever the set of content-indexed files could change, including a type gaining
+    /// extensions (M4-4: .ppt joined the slide type; existing .ppt files must become eligible).
     public func fingerprint(home: String) -> String {
         [roots(home: home).joined(separator: "\u{1}"), excludes.map { expand($0, home: home) }.joined(separator: "\u{1}"),
-         types.map(\.rawValue).sorted().joined(separator: ","), "\(maxFileBytes)"].joined(separator: "\u{2}")
+         types.sorted { $0.rawValue < $1.rawValue }.map { "\($0.rawValue)=\($0.extensions.sorted().joined(separator: ";"))" }.joined(separator: ","),
+         "\(maxFileBytes)"].joined(separator: "\u{2}")
     }
 }
 
 /// Content types (D7: .doc/.docx in M2; spreadsheets, slides and OFD in M3; HTML, ePub, RTF
 /// and WPS in M4; OCR M6).
 public enum ContentType: String, Codable, Sendable, CaseIterable {
-    case text, docx, pdf, doc, sheet, slide, ofd, web, ebook, rtf, archive
+    case text, docx, pdf, doc, sheet, slide, ofd, web, ebook, rtf, archive, wps
 
     public var extensions: Set<String> {
         switch self {
         case .docx: ["docx", "docm"]
         case .pdf: ["pdf"]
         case .doc: ["doc", "dot"]
-        case .sheet: ["xlsx", "xlsm", "xls", "ods"]
-        case .slide: ["pptx", "pptm"]
+        case .sheet: ["xlsx", "xlsm", "xls", "ods", "et"]
+        case .slide: ["pptx", "pptm", "ppt", "pps", "dps"]
+        case .wps: ["wps"]
         case .ofd: ["ofd"]
         case .web: ["html", "htm", "xhtml", "shtml"]
         case .ebook: ["epub"]
