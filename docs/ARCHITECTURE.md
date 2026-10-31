@@ -1,6 +1,6 @@
 # XSearch 架构设计
 
-> 版本：v0.11（2026-10-30）
+> 版本：v0.12（2026-10-31）
 > 状态：M0 完成（[M0 报告](m0/RESULTS.md)）；M1 完成（[M1 进度](m1/STATUS.md)）；**M2 内容最小闭环完成**（[M2 进度](m2/STATUS.md)）。
 > 平台：macOS 26 及以上，Apple Silicon（arm64）
 > 相关文档：`design/UI-SPEC.md`（界面与交互规范，v1.1）、`design/design-tokens.json`（设计变量）、`design/prototype/`（原型源文件）；`XSearch-architecture-review-v0.3.md`（评审意见）
@@ -590,6 +590,7 @@ XSearch/
 
 | 版本 | 变更 |
 |---|---|
+| v0.12 | M4（HTML / ePub / RTF、压缩包含 rar、实时扫描、WPS 与二进制 PPT、包内文件作为单独结果）；首次启动引导；IndexService 拆成 XPC 服务（§5 原设计落地） |
 | v0.11 | M3-3/M3-4：收藏（user.sqlite，按 file_id 跟踪移动）、移到废纸篓、阅读窗口（PDF 原页面精确高亮、外部打开到第 N 页）、完整窗口、搜索语法与打开方式设置、隐藏主菜单 |
 | v0.10 | M3-1/M3-2：表格、PPTX、OFD 提取；名称模式支持运算符、通配符、正则和 size:/dm:；内容模式支持邻近查询和正则；§8.6、§12 补充实现细节 |
 | v0.9 | M2 实现：xs-index/xs-parsers/xs-ffi（UniFFI）；ExtractionWorker 为可强杀的辅助进程；IndexService 暂在进程内；内容任务由对账器同事务写入、op_seq 全局递增；提取缓存键为 SHA-256 + 提取器版本 + 配置；重建内容索引为新实例追平后切换 |

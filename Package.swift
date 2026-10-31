@@ -7,7 +7,8 @@ let rustLib = Context.packageDirectory + "/target/release"
 let package = Package(
     name: "XSearch",
     platforms: [.macOS(.v26)],
-    products: [.executable(name: "XSearch", targets: ["XSearch"]), .executable(name: "xs-extract", targets: ["xs-extract"])],
+    products: [.executable(name: "XSearch", targets: ["XSearch"]), .executable(name: "xs-extract", targets: ["xs-extract"]),
+               .executable(name: "IndexService", targets: ["IndexService"])],
     targets: [
         .target(
             name: "CXSearchCore",
@@ -29,6 +30,7 @@ let package = Package(
         .target(name: "Extraction", dependencies: ["ContentEngine", "XSearchCore"], path: "Packages/Extraction/Sources"),
         // Extraction worker process (killable on timeout / crash); bundled into the app.
         .executableTarget(name: "xs-extract", dependencies: ["Extraction"], path: "Packages/Extraction/Worker"),
+        .executableTarget(name: "IndexService", dependencies: ["Catalog"], path: "Packages/IndexService"),
         .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog", "ContentEngine", "Extraction"], path: "App/Sources"),
         .testTarget(name: "XSearchCoreTests", dependencies: ["XSearchCore"], path: "Packages/XSearchCore/Tests"),
         .testTarget(name: "NameEngineTests", dependencies: ["NameEngine"], path: "Packages/NameEngine/Tests"),

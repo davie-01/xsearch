@@ -7,7 +7,7 @@
 | 项 | 状态 |
 |---|---|
 | 首次启动引导 | ✅ 完成 |
-| 索引服务拆成独立进程（XPC） | 待开始 |
+| 索引服务拆成独立进程（XPC） | ✅ 完成 |
 | DMG 安装包 | 待开始 |
 | 自动更新（Sparkle） | 待开始 |
 | 升级和数据迁移 | 待开始 |
@@ -25,3 +25,20 @@
 - 点“完成”时，如果所选文件夹和当前不同，就应用新的内容范围。
 - 开发用环境变量：`XS_ONBOARDING=1` 强制显示，`XS_ONBOARDING_STEP=0…3` 直接打开某一步（用于截图）。
 - 验证：四个页面都截图检查过。
+
+## 索引服务拆成独立进程（ARCHITECTURE §5）
+
+- `IndexService.xpc` 打包在 `XSearch.app/Contents/XPCServices/` 里（可执行目标 `IndexService`，`App/IndexService/Info.plist`，ServiceType 为 Application）。其中运行 ContentIndexer：它是唯一的 Tantivy 写入者，也负责调度 `xs-extract` 提取子进程（子进程的父进程是 IndexService）。
+- 主应用保留文件名索引、目录数据库的变化检测和全部读取（查询、预览）。双方共用 catalog.sqlite（WAL 模式，锁等待 5 秒）；原来就是两个连接，拆成两个进程后数据语义不变。
+- 接口（`IndexServiceProtocol`，NSXPC）：启动、快照（状态和当前实例目录，JSON）、重建内容索引、停止。
+- 主应用 `IndexServiceClient`：
+  - 启动时就连接（预热）；状态随原来的 2 秒定时器异步拉取；
+  - 服务崩溃或被结束时，在中断回调里重新启动索引器（launchd 收到下一条消息会自动拉起服务）；
+  - 退出应用和重建文件名索引时，先同步停止服务，确保写入干净收尾。
+  - 服务在应用断开连接时停止索引器并退出，不会比应用活得更久。
+  - 包里没有服务时（直接 `swift run`、测试），或设置了 `XS_INPROCESS_INDEX=1`，退回到进程内运行，接口相同。
+- 打包脚本按由内到外的顺序签名：xs-extract、IndexService.xpc，最后是应用本身。
+- 真机验证：
+  - 在“下载”新建带唯一词的文件，约 10 秒内被提取进索引并可以搜到；
+  - `kill -9` 结束服务后，新的服务进程被拉起，新文件照常进入索引；
+  - 退出应用后，服务和提取子进程全部退出。

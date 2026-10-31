@@ -18,13 +18,21 @@ import XSearchCore
 ///    its payload, then SQLite confirms. At most one unconfirmed batch exists; on restart the
 ///    payload tells whether it was committed.
 public final class ContentIndexer: @unchecked Sendable {
-    public struct Status: Sendable, Equatable {
+    public struct Status: Codable, Sendable, Equatable {
         public var pending: Int
         public var failed: Int
         /// Content-scope files with indexed text (complete, partial or waiting for OCR).
         public var indexed: Int
         public var committedBatches: UInt64
         public var running: Bool
+
+        public init(pending: Int = 0, failed: Int = 0, indexed: Int = 0, committedBatches: UInt64 = 0, running: Bool = false) {
+            self.pending = pending
+            self.failed = failed
+            self.indexed = indexed
+            self.committedBatches = committedBatches
+            self.running = running
+        }
     }
 
     public enum Fault: String, CaseIterable, Sendable {

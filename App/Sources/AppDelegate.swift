@@ -6,7 +6,8 @@ import XSearchCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var names: NameService!
-    private var indexer: ContentIndexer?
+    /// Content indexer in IndexService.xpc (in-process without the bundled service).
+    private var indexer: IndexServiceClient?
     private var statusTimer: Timer?
     private let contentStatusItem = NSMenuItem(title: "内容索引：正在打开", action: nil, keyEquivalent: "")
     private var usage: UsageStore?
@@ -130,17 +131,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Starts IndexService (in-process, own queue) with the bundled extraction worker.
+    /// Starts IndexService.xpc (warm-up at launch) with the bundled extraction worker.
     private func startIndexer() {
         let worker = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("xs-extract")
-        let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: 2)
-        do {
-            try ix.start()
-            indexer = ix
-        } catch {
-            indexer = nil
-            contentStatusItem.title = "内容索引无法启动：\(String(describing: error).prefix(60))"
-        }
-        session.content.indexPath = { [weak ix] in ix?.indexURL.path }
+        let ix = IndexServiceClient(dataDirectory: dataDirectory, worker: worker)
+        ix.onError = { [weak self] message in self?.contentStatusItem.title = "内容索引出错：\(message.prefix(60))" }
+        ix.onUpdate = { [weak self] in self?.showContentStatus() }
+        ix.start()
+        indexer = ix
+        session.content.indexPath = { [ix] in ix.indexPath }
         session.contentStats = { [weak ix] in
             guard let st = ix?.status else { return ContentStats() }
             return ContentStats(indexed: st.indexed, pending: st.pending, failed: st.failed)
@@ -278,13 +277,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .ready: indexStatusItem.title = "文件名索引：已就绪 · \(Theme.count(st.count)) 项"
         case .failed(let message): indexStatusItem.title = "文件名索引出错：\(message.prefix(60))"
         }
-        if let st = indexer?.status {
-            var parts = ["内容索引：\(Theme.count(st.indexed)) 个文件"]
-            if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
-            if st.failed > 0 { parts.append("\(st.failed) 个失败") }
-            contentStatusItem.title = parts.joined(separator: " · ")
-        }
+        // The snapshot arrives asynchronously from the service (`showContentStatus`).
+        indexer?.refresh()
         launcher?.updateStatus()
+        settings?.refresh()
+    }
+
+    private func showContentStatus() {
+        guard let st = indexer?.status else { return }
+        var parts = ["内容索引：\(Theme.count(st.indexed)) 个文件"]
+        if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
+        if st.failed > 0 { parts.append("\(st.failed) 个失败") }
+        contentStatusItem.title = parts.joined(separator: " · ")
         settings?.refresh()
     }
 
@@ -315,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Settings › 隐私与数据 › 重建内容索引: new instance in the background, switch when caught up.
     func rebuildContentIndex() {
-        try? indexer?.rebuildContentIndex()
+        indexer?.rebuildContentIndex()
         statusChanged()
     }
     var contentStatus: ContentIndexer.Status? { indexer?.status }
