@@ -1,0 +1,294 @@
+{
+ "content.2015.first_p95": {
+  "value": 1.645791,
+  "kind": "ms"
+ },
+ "content.2015.full_p95": {
+  "value": 508.41733300000004,
+  "kind": "ms"
+ },
+ "content.2015.hits": {
+  "value": 8600.0,
+  "kind": "count"
+ },
+ "content.AI | IP.first_p95": {
+  "value": 1.432917,
+  "kind": "ms"
+ },
+ "content.AI | IP.full_p95": {
+  "value": 439.753,
+  "kind": "ms"
+ },
+ "content.AI | IP.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "content.build": {
+  "value": 1026.0,
+  "kind": "ms"
+ },
+ "content.dir:/Users/t/Docs/A 合同.first_p95": {
+  "value": 1.190917,
+  "kind": "ms"
+ },
+ "content.dir:/Users/t/Docs/A 合同.full_p95": {
+  "value": 132.252417,
+  "kind": "ms"
+ },
+ "content.dir:/Users/t/Docs/A 合同.hits": {
+  "value": 2500.0,
+  "kind": "count"
+ },
+ "content.port.first_p95": {
+  "value": 1.315042,
+  "kind": "ms"
+ },
+ "content.port.full_p95": {
+  "value": 408.1325,
+  "kind": "ms"
+ },
+ "content.port.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "content.ud.first_p95": {
+  "value": 1.3802079999999999,
+  "kind": "ms"
+ },
+ "content.ud.full_p95": {
+  "value": 384.844541,
+  "kind": "ms"
+ },
+ "content.ud.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "content.不存在的词组.first_p95": {
+  "value": 0.006291000000000001,
+  "kind": "ms"
+ },
+ "content.不存在的词组.full_p95": {
+  "value": 0.006333,
+  "kind": "ms"
+ },
+ "content.不存在的词组.hits": {
+  "value": 0.0,
+  "kind": "count"
+ },
+ "content.共享方案.first_p95": {
+  "value": 1.618625,
+  "kind": "ms"
+ },
+ "content.共享方案.full_p95": {
+  "value": 546.085,
+  "kind": "ms"
+ },
+ "content.共享方案.hits": {
+  "value": 8932.0,
+  "kind": "count"
+ },
+ "content.合同 -附件.first_p95": {
+  "value": 30.511582999999998,
+  "kind": "ms"
+ },
+ "content.合同 -附件.full_p95": {
+  "value": 331.654166,
+  "kind": "ms"
+ },
+ "content.合同 -附件.hits": {
+  "value": 0.0,
+  "kind": "count"
+ },
+ "content.数.first_p95": {
+  "value": 1.313667,
+  "kind": "ms"
+ },
+ "content.数.full_p95": {
+  "value": 377.63437500000003,
+  "kind": "ms"
+ },
+ "content.数.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "content.数据.first_p95": {
+  "value": 1.262834,
+  "kind": "ms"
+ },
+ "content.数据.full_p95": {
+  "value": 392.165708,
+  "kind": "ms"
+ },
+ "content.数据.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "content.数据共.first_p95": {
+  "value": 1.474833,
+  "kind": "ms"
+ },
+ "content.数据共.full_p95": {
+  "value": 506.33754200000004,
+  "kind": "ms"
+ },
+ "content.数据共.hits": {
+  "value": 9555.0,
+  "kind": "count"
+ },
+ "content.智慧 城市 2020.first_p95": {
+  "value": 1.339375,
+  "kind": "ms"
+ },
+ "content.智慧 城市 2020.full_p95": {
+  "value": 398.357375,
+  "kind": "ms"
+ },
+ "content.智慧 城市 2020.hits": {
+  "value": 8585.0,
+  "kind": "count"
+ },
+ "content.的.first_p95": {
+  "value": 1.268041,
+  "kind": "ms"
+ },
+ "content.的.full_p95": {
+  "value": 394.931958,
+  "kind": "ms"
+ },
+ "content.的.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "content.，.first_p95": {
+  "value": 1.288208,
+  "kind": "ms"
+ },
+ "content.，.full_p95": {
+  "value": 386.760417,
+  "kind": "ms"
+ },
+ "content.，.hits": {
+  "value": 10000.0,
+  "kind": "count"
+ },
+ "extract.docx": {
+  "value": 3.0,
+  "kind": "ms"
+ },
+ "extract.docx.chars": {
+  "value": 57.0,
+  "kind": "count"
+ },
+ "extract.large-txt": {
+  "value": 96.0,
+  "kind": "ms"
+ },
+ "extract.large-txt.chars": {
+  "value": 13195920.0,
+  "kind": "count"
+ },
+ "extract.txt": {
+  "value": 0.0,
+  "kind": "ms"
+ },
+ "extract.txt.chars": {
+  "value": 36.0,
+  "kind": "count"
+ },
+ "name.2024.hits": {
+  "value": 186.0,
+  "kind": "count"
+ },
+ "name.2024.p95": {
+  "value": 14.2,
+  "kind": "ms"
+ },
+ "name._1.hits": {
+  "value": 97027.0,
+  "kind": "count"
+ },
+ "name._1.p95": {
+  "value": 18.2,
+  "kind": "ms"
+ },
+ "name.build": {
+  "value": 2299.0,
+  "kind": "ms"
+ },
+ "name.café.hits": {
+  "value": 99258.0,
+  "kind": "count"
+ },
+ "name.café.p95": {
+  "value": 14.9,
+  "kind": "ms"
+ },
+ "name.ext:pdf 合同.hits": {
+  "value": 10752.0,
+  "kind": "count"
+ },
+ "name.ext:pdf 合同.p95": {
+  "value": 32.1,
+  "kind": "ms"
+ },
+ "name.kind:folder 设计.hits": {
+  "value": 12462.0,
+  "kind": "count"
+ },
+ "name.kind:folder 设计.p95": {
+  "value": 13.1,
+  "kind": "ms"
+ },
+ "name.memory": {
+  "value": 79.0,
+  "kind": "mb"
+ },
+ "name.rep.hits": {
+  "value": 100019.0,
+  "kind": "count"
+ },
+ "name.rep.p95": {
+  "value": 15.8,
+  "kind": "ms"
+ },
+ "name.report.hits": {
+  "value": 100019.0,
+  "kind": "count"
+ },
+ "name.report.p95": {
+  "value": 14.1,
+  "kind": "ms"
+ },
+ "name.不存在的名字.hits": {
+  "value": 0.0,
+  "kind": "count"
+ },
+ "name.不存在的名字.p95": {
+  "value": 5.8,
+  "kind": "ms"
+ },
+ "name.报.hits": {
+  "value": 99661.0,
+  "kind": "count"
+ },
+ "name.报.p95": {
+  "value": 15.6,
+  "kind": "ms"
+ },
+ "name.报告.hits": {
+  "value": 99661.0,
+  "kind": "count"
+ },
+ "name.报告.p95": {
+  "value": 14.3,
+  "kind": "ms"
+ },
+ "name.数据共享 pdf.hits": {
+  "value": 11119.0,
+  "kind": "count"
+ },
+ "name.数据共享 pdf.p95": {
+  "value": 11.2,
+  "kind": "ms"
+ }
+}
