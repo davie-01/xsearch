@@ -47,6 +47,12 @@ final class ResultCellView: NSTableCellView {
         icon.imageScaling = .scaleProportionallyUpOrDown
         name.lineBreakMode = .byTruncatingMiddle
         path.lineBreakMode = .byTruncatingMiddle
+        // One line each: a long name wrapped and pushed the path line out of the row.
+        for f in [name, path] {
+            f.maximumNumberOfLines = 1
+            f.usesSingleLineMode = true
+            f.cell?.wraps = false
+        }
         path.font = Theme.pathFont
         path.textColor = .secondaryLabelColor
         meta.font = Theme.metaFont

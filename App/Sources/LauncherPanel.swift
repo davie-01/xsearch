@@ -86,6 +86,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     /// What is on screen (may lag `buttonsShown` while animating).
     private var buttonsVisible = false
     private let contentChip = NSButton(title: "内容  ×", target: nil, action: nil)
+    /// Spotlight-style scope: Tab on an app (its documents) or a folder (its contents).
+    private let scopeChip = NSButton(title: "", target: nil, action: nil)
+    private enum Scope { case app(DocumentTypes), folder(String) }
+    private var scope: Scope?
     private let chips = NSStackView()
     private let table = ResultTable()
     private let scroll = NSScrollView()
@@ -179,7 +183,19 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentChip.setAccessibilityLabel("移除内容前缀")
         contentChip.isHidden = true
 
-        let headerRow = NSStackView(views: [icon, contentChip, field])
+        scopeChip.bezelStyle = .inline
+        scopeChip.isBordered = false
+        scopeChip.wantsLayer = true
+        scopeChip.layer?.cornerRadius = 9
+        scopeChip.layer?.backgroundColor = NSColor.secondaryLabelColor.withAlphaComponent(0.16).cgColor
+        scopeChip.contentTintColor = .labelColor
+        scopeChip.font = .systemFont(ofSize: 14, weight: .medium)
+        scopeChip.imagePosition = .imageLeading
+        scopeChip.target = self
+        scopeChip.action = #selector(removeScope)
+        scopeChip.isHidden = true
+
+        let headerRow = NSStackView(views: [icon, contentChip, scopeChip, field])
         headerRow.orientation = .horizontal
         headerRow.spacing = 12
         headerRow.translatesAutoresizingMaskIntoConstraints = false
@@ -526,10 +542,79 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func setMode(_ m: Preferences.Mode) {
         mode = m
+        // The Tab scope belongs to name search only; content search never carries it.
+        if m == .content && scope != nil {
+            scope = nil
+            scopeChip.isHidden = true
+        }
         Preferences.shared.lastMode = m
         for (i, b) in modeButtons.enumerated() { b.isOn = i == m.rawValue }
-        field.placeholderString = m == .name ? "搜索应用和文件" : "在文件内容中查找"
+        updatePlaceholder()
         updateHints()
+    }
+
+    private func updatePlaceholder() {
+        switch scope {
+        case .app(let t)?: field.placeholderString = "在“\(t.appName)”可打开的文档中搜索"
+        case .folder(let p)?: field.placeholderString = "在“\(FileManager.default.displayName(atPath: p))”中搜索"
+        case nil: field.placeholderString = mode == .name ? "搜索应用和文件" : "在文件内容中查找"
+        }
+    }
+
+    /// Tab on the selected app or folder narrows the search to it (Spotlight, macOS 26: apps
+    /// narrow to the documents they can open, locations to their files). Returns false when
+    /// the selection is neither (Tab then moves the focus as before).
+    private func scopeToSelection() -> Bool {
+        guard mode == .name, let item = selectedItem else { return false }
+        switch item.kind {
+        case .app:
+            var types = DocumentTypes(appPath: item.path)
+            if types.isEmpty { toast("“\(item.name)”没有声明可打开的文档类型"); return true }
+            // The name as Finder shows it (localized: “预览”, not “Preview”).
+            types.appName = (FileManager.default.displayName(atPath: item.path) as NSString).deletingPathExtension
+            setScope(.app(types), icon: NSWorkspace.shared.icon(forFile: item.path), title: types.appName)
+        case .folder:
+            setScope(.folder(item.path), icon: NSWorkspace.shared.icon(forFile: item.path), title: FileManager.default.displayName(atPath: item.path))
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func setScope(_ s: Scope?, icon: NSImage? = nil, title: String = "") {
+        scope = s
+        if s != nil {
+            icon?.size = NSSize(width: 16, height: 16)
+            scopeChip.image = icon
+            scopeChip.title = " \(title)  ×  "
+            scopeChip.setAccessibilityLabel("移除范围 \(title)")
+            field.stringValue = ""
+        }
+        scopeChip.isHidden = s == nil
+        updatePlaceholder()
+        runSearch()
+    }
+
+    @objc private func removeScope() { setScope(nil) }
+
+    /// The scope as query text the parsers already understand (folder) and the app's types.
+    private var scopeFolderClause: String {
+        if case .folder(let p)? = scope { return " dir:\"\(p)\"" }
+        return ""
+    }
+
+    /// Chips for the filters the scope added (shown once, as the scope token).
+    private func isScopeChip(_ label: String) -> Bool {
+        switch scope {
+        case .folder(let p)?: return label == "dir:" + p || label == "dir:\"\(p)\""
+        case .app?: return false
+        case nil: return false
+        }
+    }
+
+    private var scopeTypes: DocumentTypes? {
+        if case .app(let t)? = scope { return t }
+        return nil
     }
 
     /// Input and filters are kept; switching to name mode drops the `in ` prefix (§5.2).
@@ -567,7 +652,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             return
         }
         session.content.cancel()
-        session.search(text) { [weak self] out in self?.apply(out) }
+        session.search(text + scopeFolderClause, documentTypes: scopeTypes) { [weak self] out in self?.apply(out) }
     }
 
     /// The app list loads asynchronously; refresh visible results when it arrives.
@@ -598,7 +683,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func setChips(_ list: [NameQuery.Chip]) {
         chips.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for chip in list {
+        for chip in list where !isScopeChip(chip.label) {
             chips.addArrangedSubview(CapsuleLabel(chip.valid ? chip.label : chip.label + "（无法识别）", warning: !chip.valid))
         }
     }
@@ -885,7 +970,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         resize()
     }
 
-    /// Dev (XS_TYPE): feeds keystrokes through the same path as typing.
+    /// Dev (XS_TYPE): feeds keystrokes through the same path as typing ("⇥" Tab, "⌫" delete).
     func typeForTesting(_ script: String) {
         show()
         var delay = 0.3
@@ -894,6 +979,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 delay += 0.15
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
+                    if ch == "⇥" { _ = self.scopeToSelection(); return }
+                    if ch == "⌫" && self.field.stringValue.isEmpty {
+                        if self.scope != nil { self.setScope(nil) } else if self.mode == .content { self.switchMode(.name) }
+                        return
+                    }
                     if ch == "⌫" { self.field.stringValue = String(self.field.stringValue.dropLast()) } else { self.field.stringValue.append(ch) }
                     self.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: self.field))
                 }
@@ -912,6 +1002,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         // Keys belong to the input method while it composes (§5.3).
         if textView.hasMarkedText() { return false }
+        // ⌫ in an empty field removes the “内容” token (back to name mode), like deleting a
+        // Spotlight filter token.
+        if selector == #selector(NSResponder.deleteBackward(_:)) && field.stringValue.isEmpty {
+            if scope != nil { setScope(nil); return true }
+            if mode == .content { switchMode(.name); return true }
+        }
         if mode == .content {
             switch selector {
             case #selector(NSResponder.moveDown(_:)): contentPane.moveSelection(1); return true
@@ -931,6 +1027,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         case #selector(NSResponder.insertNewline(_:)): activate(.open); return true
         case #selector(NSResponder.cancelOperation(_:)): hide(); return true
         case #selector(NSResponder.insertTab(_:)):
+            if scopeToSelection() { return true }
             if !rows.isEmpty { panel.makeFirstResponder(table) }
             return true
         default: return false

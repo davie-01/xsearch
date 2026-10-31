@@ -374,8 +374,24 @@ struct Matcher {
     let kindExtensions: Set<[UInt8]>
     let size: ClosedRange<Int64>?
     let modified: ClosedRange<Int64>?
+    let documents: DocumentCheck?
+
+    /// Per-search cache of "is this extension one of the app's documents" (UTI conformance is
+    /// too slow to repeat for every one of a million names; distinct extensions are few).
+    final class DocumentCheck {
+        let types: DocumentTypes
+        private var cache: [[UInt8]: Bool] = [:]
+        init(_ types: DocumentTypes) { self.types = types }
+        func allows(_ ext: [UInt8]) -> Bool {
+            if let hit = cache[ext] { return hit }
+            let ok = types.allows(extension: String(decoding: ext, as: UTF8.self))
+            cache[ext] = ok
+            return ok
+        }
+    }
 
     init(_ q: NameQuery) {
+        documents = q.documentTypes.map(DocumentCheck.init)
         extensions = Set(q.extensions.map { Array($0.utf8) })
         kinds = q.kinds
         kindExtensions = Set(q.kinds.flatMap(\.extensions).map { Array($0.utf8) })
@@ -438,8 +454,10 @@ struct Matcher {
                 if t == 0 { best = found }
             }
         }
-        guard !extensions.isEmpty || !kindExtensions.isEmpty else { return best | 0x80 }
+        guard !extensions.isEmpty || !kindExtensions.isEmpty || documents != nil else { return best | 0x80 }
         let ext = keyExtension(UnsafeBufferPointer(start: base, count: n)).map(Array.init) ?? []
+        if let documents, !documents.allows(ext) { return 0 }
+        if extensions.isEmpty && kindExtensions.isEmpty { return best | 0x80 }
         if !extensions.isEmpty && !extensions.contains(ext) { return 0 }
         return kindExtensions.contains(ext) ? best | 0x80 : best
     }

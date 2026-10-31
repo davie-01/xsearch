@@ -69,7 +69,7 @@ final class SearchSession {
         }
     }
 
-    func search(_ text: String, limit: Int = 200, deliver: @escaping @MainActor (SearchOutput) -> Void) {
+    func search(_ text: String, limit: Int = 200, documentTypes: DocumentTypes? = nil, deliver: @escaping @MainActor (SearchOutput) -> Void) {
         latest += 1
         let id = latest
         let names = self.names, usage = self.usage, apps = self.apps, home = self.home
@@ -77,7 +77,8 @@ final class SearchSession {
         let showRecents = Preferences.shared.showRecents
         queue.async {
             let start = DispatchTime.now()
-            let q = NameQuery.parse(text, home: home, syntax: syntax)
+            var q = NameQuery.parse(text, home: home, syntax: syntax)
+            q.documentTypes = documentTypes
             var items: [ResultItem] = []
             var total = 0
             var unresolved: [String] = []

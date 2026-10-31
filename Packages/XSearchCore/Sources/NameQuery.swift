@@ -26,13 +26,15 @@ public struct NameQuery: Sendable, Equatable {
     public var kinds: Set<FileKind> = []
     public var size: ClosedRange<Int64>?
     public var modified: ClosedRange<Int64>?
+    /// Tab on an app: only documents it can open (set by the launcher, not parsed).
+    public var documentTypes: DocumentTypes?
     public var chips: [Chip] = []
     /// Input started with `in ` (content mode request, M2).
     public var contentPrefix = false
 
     /// Only AND-ed literals: matched by the M1 fast path.
     public var isSimple: Bool { expr == nil || !termKeys.isEmpty }
-    public var hasFilters: Bool { !dirs.isEmpty || !extensions.isEmpty || !kinds.isEmpty || size != nil || modified != nil }
+    public var hasFilters: Bool { !dirs.isEmpty || !extensions.isEmpty || !kinds.isEmpty || size != nil || modified != nil || documentTypes != nil }
     public var isEmpty: Bool { expr == nil && !hasFilters }
 
     public init() {}

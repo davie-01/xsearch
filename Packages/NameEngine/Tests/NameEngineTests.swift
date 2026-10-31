@@ -269,3 +269,36 @@ func check(_ view: NameView, _ o: Oracle, _ label: String) {
     // Ranking still follows the first positive literal.
     #expect(view.search(NameQuery.parse("采购合同 | 租赁", home: "/"), limit: 10).hits.first?.fileId == a)
 }
+
+@Test func tabOnAppScopesToItsDocuments() throws {
+    // A fake app declaring PDF and images (UTIs), a legacy extension, and a role-None type.
+    let app = FileManager.default.temporaryDirectory.appendingPathComponent("xs-app-\(UUID().uuidString)/Viewer.app")
+    try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
+    let plist: [String: Any] = ["CFBundleName": "Viewer", "CFBundleDocumentTypes": [
+        ["CFBundleTypeRole": "Viewer", "LSItemContentTypes": ["com.adobe.pdf", "public.image", "public.folder", "com.apple.application-bundle"]],
+        ["CFBundleTypeRole": "Editor", "CFBundleTypeExtensions": ["OFD", "*"]],
+        ["CFBundleTypeRole": "None", "LSItemContentTypes": ["public.plain-text"]],
+    ]]
+    try (plist as NSDictionary).write(to: app.appendingPathComponent("Contents/Info.plist"))
+    let types = DocumentTypes(appPath: app.path)
+    #expect(types.appName == "Viewer" && types.extensions == ["ofd"])
+    #expect(types.allows(extension: "pdf") && types.allows(extension: "heic") && types.allows(extension: "png") && types.allows(extension: "ofd"))
+    #expect(!types.allows(extension: "txt") && !types.allows(extension: "docx") && !types.allows(extension: ""))
+    #expect(!types.allows(extension: "app"), "containers are not documents")
+
+    var o = Oracle()
+    let root = o.add(parent: 0, name: "/", dir: true, root: "/")
+    let pdf = o.add(parent: root, name: "合同.pdf", dir: false)
+    let img = o.add(parent: root, name: "合同扫描.HEIC", dir: false)
+    _ = o.add(parent: root, name: "合同.docx", dir: false)
+    _ = o.add(parent: root, name: "合同", dir: true)
+    let view = NameView(base: NameSnapshot.build(Array(o.records.values), seq: 1, fingerprint: "t"))
+    var q = NameQuery.parse("合同", home: "/")
+    q.documentTypes = types
+    #expect(Set(view.search(q, limit: 10).hits.map(\.fileId)) == [pdf, img])
+    // An empty input with the app scope lists all of its documents.
+    var all = NameQuery.parse("", home: "/")
+    all.documentTypes = types
+    #expect(!all.isEmpty && Set(view.search(all, limit: 10).hits.map(\.fileId)) == [pdf, img])
+}
