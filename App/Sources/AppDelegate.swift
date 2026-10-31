@@ -62,6 +62,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = main
     }
 
+    private var onboarding: OnboardingWindowController?
+
+    /// First-launch guide (UI-SPEC §6.5); also from the menu bar.
+    @objc func showOnboarding() {
+        if let onboarding { onboarding.present(); return }
+        let model = OnboardingModel(scope: currentContentScope, hotKey: Preferences.shared.hotKey.display)
+        model.onFinish = { [weak self] scope in
+            Preferences.shared.onboarded = true
+            if scope != self?.currentContentScope { self?.applyContentScope(scope) }
+        }
+        model.onTry = { [weak self] in
+            self?.onboarding?.close()
+            self?.onboarding = nil
+            self?.launcher.show()
+        }
+        // Dev: XS_ONBOARDING_STEP=0…3 opens a given step (screenshots).
+        if let step = env["XS_ONBOARDING_STEP"].flatMap(Int.init) { model.step = step }
+        let controller = OnboardingWindowController(model: model)
+        onboarding = controller
+        controller.present()
+        // Extractable files in Downloads, from the name index (still filling on a first launch).
+        let count = { [weak self, weak model] in
+            guard let self, let model else { return }
+            let exts = ContentType.allCases.flatMap(\.extensions).joined(separator: ";")
+            model.downloadsCount = self.names.search(NameQuery.parse("dir:~/Downloads ext:\(exts)", home: NSHomeDirectory()), limit: 0).total
+        }
+        count()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { count() }
+    }
+
     /// Callbacks shared by every launcher instance (startup and index rebuild).
     private func wireLauncher() {
         launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
@@ -119,6 +149,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let data = dataDirectory
+        // A first launch has no catalog yet; installs that predate the guide skip it.
+        let fresh = !FileManager.default.fileExists(atPath: data.appendingPathComponent("catalog.sqlite").path)
         names = NameService(directory: data)
         usage = try? UsageStore(directory: data)
         session = SearchSession(names: names, usage: usage)
@@ -140,6 +172,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installKeyMenu()
         hotKey = HotKey { [weak self] in self?.launcher.toggle() }
         registerHotKey(Preferences.shared.hotKey)
+        if env["XS_ONBOARDING"] == "1" || (!Preferences.shared.onboarded && fresh) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
+        } else if !Preferences.shared.onboarded {
+            Preferences.shared.onboarded = true
+        }
         // Development: show the launcher with a query (screenshots, UI checks).
         if let text = env["XS_LAUNCHER_TEXT"] {
             let delay = env["XS_LAUNCHER_DELAY"].flatMap(Double.init) ?? 1.5
@@ -219,6 +256,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         hotKeyItem.target = self
         menu.addItem(hotKeyItem)
+        let guide = NSMenuItem(title: "使用引导…", action: #selector(showOnboarding), keyEquivalent: "")
+        guide.target = self
+        menu.addItem(guide)
         let prefs = NSMenuItem(title: "设置…", action: #selector(openGeneralSettings), keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)

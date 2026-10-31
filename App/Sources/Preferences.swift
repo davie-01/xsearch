@@ -73,6 +73,12 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: "summonMode") }
     }
 
+    /// The first-launch guide was shown (or the install predates it).
+    var onboarded: Bool {
+        get { defaults.bool(forKey: "onboarded") }
+        set { defaults.set(newValue, forKey: "onboarded") }
+    }
+
     var lastMode: Mode {
         get { Mode(rawValue: defaults.integer(forKey: "lastMode")) ?? .name }
         set { defaults.set(newValue.rawValue, forKey: "lastMode") }
