@@ -155,8 +155,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         table.reloadData()
         countLabel.stringValue = "正在载入…"
         showWindow(nil)
-        NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront(window)
         searcher.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
             guard let self, token == self.token else { return }
             guard let data else {

@@ -456,7 +456,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func toggle() { panel.isVisible ? hide() : show() }
 
     func show(mode requested: Preferences.Mode? = nil, text: String? = nil) {
-        if let text { field.stringValue = text }
+        if let text { field.stringValue = text } else if !Preferences.shared.keepLastQuery { field.stringValue = "" }
         session.refreshApps()
         let prefs = Preferences.shared
         setMode(requested ?? (prefs.summonMode == .rememberLast ? prefs.lastMode : .name))
@@ -883,6 +883,22 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             toast("无法移到废纸篓：\(error.localizedDescription)")
         }
         resize()
+    }
+
+    /// Dev (XS_TYPE): feeds keystrokes through the same path as typing.
+    func typeForTesting(_ script: String) {
+        show()
+        var delay = 0.3
+        for chunk in script.split(separator: "|", omittingEmptySubsequences: false) {
+            for ch in chunk {
+                delay += 0.15
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self else { return }
+                    if ch == "⌫" { self.field.stringValue = String(self.field.stringValue.dropLast()) } else { self.field.stringValue.append(ch) }
+                    self.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: self.field))
+                }
+            }
+        }
     }
 
     private func toast(_ text: String) {

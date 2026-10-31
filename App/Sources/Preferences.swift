@@ -73,6 +73,18 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: "summonMode") }
     }
 
+    /// Settings › 通用 › 历史记录: keep the last query in the box when summoned.
+    var keepLastQuery: Bool {
+        get { defaults.object(forKey: "keepLastQuery") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "keepLastQuery") }
+    }
+
+    /// Settings › 通用 › 历史记录: list recently opened files under an empty box.
+    var showRecents: Bool {
+        get { defaults.object(forKey: "showRecents") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "showRecents") }
+    }
+
     /// The first-launch guide was shown (or the install predates it).
     var onboarded: Bool {
         get { defaults.bool(forKey: "onboarded") }

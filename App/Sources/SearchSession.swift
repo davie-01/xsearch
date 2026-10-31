@@ -74,6 +74,7 @@ final class SearchSession {
         let id = latest
         let names = self.names, usage = self.usage, apps = self.apps, home = self.home
         let syntax = Preferences.shared.querySyntax
+        let showRecents = Preferences.shared.showRecents
         queue.async {
             let start = DispatchTime.now()
             let q = NameQuery.parse(text, home: home, syntax: syntax)
@@ -94,7 +95,7 @@ final class SearchSession {
                     shown.insert(path)
                     items.append(Self.item(path: path, fileId: f.fileId, group: .favorites))
                 }
-                for r in usage?.recents() ?? [] where !shown.contains(r.path) && FileManager.default.fileExists(atPath: r.path) {
+                for r in (showRecents ? usage?.recents() ?? [] : []) where !shown.contains(r.path) && FileManager.default.fileExists(atPath: r.path) {
                     items.append(Self.item(path: r.path, fileId: r.fileId, group: .recents))
                 }
             } else {

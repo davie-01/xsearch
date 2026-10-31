@@ -287,8 +287,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
             rebuildSidebar()
         }
         showWindow(nil)
-        NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront(window)
         window?.makeFirstResponder(field)
         runSearch()
     }

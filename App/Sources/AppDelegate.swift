@@ -67,6 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func checkForUpdates() { Updater.shared.checkForUpdates() }
 
+    func clearRecents() { usage?.clearOpens() }
+
     /// First-launch guide (UI-SPEC §6.5); also from the menu bar.
     @objc func showOnboarding() {
         if let onboarding { onboarding.present(); return }
@@ -182,6 +184,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
         } else if !Preferences.shared.onboarded {
             Preferences.shared.onboarded = true
+        }
+        PerfLog.watchMainThread()
+        // Dev: XS_TYPE="in wp |a|⌫" types into the launcher key by key (performance checks);
+        // "|" separates 150 ms steps, "⌫" deletes one character.
+        if let keys = env["XS_TYPE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.launcher.typeForTesting(keys) }
         }
         // Development: show the launcher with a query (screenshots, UI checks).
         if let text = env["XS_LAUNCHER_TEXT"] {

@@ -107,9 +107,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func present() {
-        NSApp.activate()
         showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront(window)
     }
 
     /// Back from System Settings: the access state may have changed.

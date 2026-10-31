@@ -238,6 +238,9 @@ final class PreviewPane: NSView {
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 8, height: 12)
         textView.isVerticallyResizable = true
+        // Large documents (millions of characters) must not be laid out in full on the main
+        // thread: only what is shown or asked for gets laid out.
+        textView.layoutManager?.allowsNonContiguousLayout = true
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         scroll.documentView = textView
@@ -292,6 +295,8 @@ final class PreviewPane: NSView {
         subtitle.stringValue = ""
         position.stringValue = ""
         textView.string = ""
+        fullText = ""
+        shownRange = NSRange(location: NSNotFound, length: 0)
         hits = []
         anchors = []
         marks.fractions = []
@@ -315,22 +320,17 @@ final class PreviewPane: NSView {
         banner.stringValue = stale ? "  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  " : ""
         banner.isHidden = !stale
 
-        let para = NSMutableParagraphStyle()
-        para.lineHeightMultiple = 1.8
-        let text = NSAttributedString(string: doc.text, attributes: [.font: NSFont.systemFont(ofSize: 14.5), .foregroundColor: NSColor.labelColor, .paragraphStyle: para])
-        textView.textStorage?.setAttributedString(text)
-
         // Anchors are scalar offsets; convert to UTF-16 once.
+        fullText = doc.text as NSString
+        let length = fullText.length
+        hits = stale ? [] : data.highlights.map { NSRange(location: Int($0.start), length: Int($0.end - $0.start)) }.filter { NSMaxRange($0) <= length }
         let decoded = (try? JSONDecoder().decode([AnchorInfo].self, from: Data(doc.anchorsJson.utf8))) ?? []
         anchors = Self.utf16(decoded, in: doc.text)
-        ruler.anchors = anchors.map { ($0.utf16, $0.info.gutter) }
-        ruler.needsDisplay = true
-
-        let length = (doc.text as NSString).length
-        hits = stale ? [] : data.highlights.map { NSRange(location: Int($0.start), length: Int($0.end - $0.start)) }.filter { NSMaxRange($0) <= length }
         marks.fractions = hits.map { CGFloat($0.location) / CGFloat(max(1, length)) }
         currentHit = -1
+        shownRange = NSRange(location: NSNotFound, length: 0)
         if hits.isEmpty {
+            render(around: 0)
             position.stringValue = stale ? "" : "没有可定位的命中"
             subtitle.stringValue = locationOverride ?? PathUtil.abbreviate((path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
             textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
@@ -341,19 +341,60 @@ final class PreviewPane: NSView {
         next.isEnabled = hits.count > 1
     }
 
-    func go(to i: Int) {
-        guard !hits.isEmpty, let lm = textView.layoutManager else { return }
-        currentHit = (i % hits.count + hits.count) % hits.count
-        let full = NSRange(location: 0, length: (textView.string as NSString).length)
-        lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
-        lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
-        for (n, r) in hits.enumerated() {
-            lm.addTemporaryAttribute(.backgroundColor, value: n == currentHit ? HitColors.current : HitColors.hit, forCharacterRange: r)
-            if n == currentHit { lm.addTemporaryAttribute(.foregroundColor, value: NSColor.black, forCharacterRange: r) }
+    /// The whole stored text; the text view shows `shownRange` of it.
+    private var fullText: NSString = ""
+    private var shownRange = NSRange(location: NSNotFound, length: 0)
+    /// Documents above this size (UTF-16 units) are shown as a shownRange around the current hit:
+    /// handing millions of characters to the text system costs ~100 ms per document even with
+    /// non-contiguous layout, and typing must not wait for previews.
+    static let windowLimit = 300_000
+    static let windowSize = 200_000
+
+    /// Hit range in text-view coordinates.
+    private func local(_ r: NSRange) -> NSRange { NSRange(location: r.location - shownRange.location, length: r.length) }
+
+    /// Shows the part of the text around `location` (all of it for ordinary documents), hits
+    /// colored before the text reaches the layout system (coloring afterwards forces glyph
+    /// generation up to each hit).
+    private func render(around location: Int) {
+        let length = fullText.length
+        var range = NSRange(location: 0, length: length)
+        if length > Self.windowLimit {
+            let end = min(length, max(0, location - Self.windowSize / 2) + Self.windowSize)
+            range = fullText.rangeOfComposedCharacterSequences(for: NSRange(location: max(0, end - Self.windowSize), length: min(Self.windowSize, end)))
         }
-        let r = hits[currentHit]
-        // Center the current hit.
-        lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: NSMaxRange(r)))
+        shownRange = range
+        let para = NSMutableParagraphStyle()
+        para.lineHeightMultiple = 1.8
+        let text = NSMutableAttributedString(string: fullText.substring(with: range),
+                                             attributes: [.font: NSFont.systemFont(ofSize: 14.5), .foregroundColor: NSColor.labelColor, .paragraphStyle: para])
+        for r in hits where NSIntersectionRange(r, range).length == r.length {
+            text.addAttribute(.backgroundColor, value: HitColors.hit, range: local(r))
+        }
+        textView.textStorage?.setAttributedString(text)
+        ruler.anchors = anchors.filter { NSLocationInRange($0.utf16, range) }.map { ($0.utf16 - range.location, $0.info.gutter) }
+        ruler.needsDisplay = true
+        let windowed = range.length < length
+        banner.stringValue = stale ? "  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  "
+            : windowed ? "  文档较大，只显示当前命中附近约 20 万字；切换命中时会跟着移动。  " : ""
+        banner.isHidden = !stale && !windowed
+    }
+
+    func go(to i: Int) {
+        guard !hits.isEmpty, let lm = textView.layoutManager, let storage = textView.textStorage else { return }
+        let previous = currentHit
+        currentHit = (i % hits.count + hits.count) % hits.count
+        let target = hits[currentHit]
+        if shownRange.location == NSNotFound || NSIntersectionRange(target, shownRange).length < target.length {
+            render(around: target.location)
+        } else if previous >= 0 && previous < hits.count, NSIntersectionRange(hits[previous], shownRange).length == hits[previous].length {
+            // Only the previous and the new current hit change.
+            storage.addAttributes([.backgroundColor: HitColors.hit, .foregroundColor: NSColor.labelColor], range: local(hits[previous]))
+        }
+        let r = local(target)
+        storage.addAttributes([.backgroundColor: HitColors.current, .foregroundColor: NSColor.black], range: r)
+        // Center the current hit; non-contiguous layout lays out only around it.
+        lm.ensureLayout(forCharacterRange: r)
         if let tc = textView.textContainer {
             let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc)
             let y = max(0, rect.midY - scroll.contentView.bounds.height / 2)
@@ -362,7 +403,7 @@ final class PreviewPane: NSView {
         }
         marks.current = currentHit
         position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处"
-        let loc = anchors.last { $0.utf16 <= r.location }?.info.location
+        let loc = anchors.last { $0.utf16 <= target.location }?.info.location
         subtitle.stringValue = [locationOverride ?? PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
         ruler.needsDisplay = true
     }
@@ -374,7 +415,7 @@ final class PreviewPane: NSView {
     /// 1-based line of the current hit in the stored text (editor "open at line").
     var currentLine: Int? {
         guard currentHit >= 0, currentHit < hits.count else { return nil }
-        let prefix = (textView.string as NSString).substring(to: hits[currentHit].location)
+        let prefix = fullText.substring(to: hits[currentHit].location)
         return prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
     }
 
@@ -532,10 +573,16 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
             guard let self, token == self.previewToken else { return }
             if let data { self.preview.show(data, path: path, location: h.isMember ? h.displayLocation : nil) } else { self.preview.clear() }
         }
-        if liveIds.contains(h.fileId) {
-            searcher.livePreview(path: path, expression: expression, deliver: show)
-        } else {
-            searcher.preview(fileId: h.fileId, expression: expression, member: h.member, memberStart: h.memberStart, deliver: show)
+        // Debounced: while the user types, each keystroke replaces the results; loading (and
+        // laying out) a large document for every intermediate result would block typing.
+        let live = liveIds.contains(h.fileId), expression = self.expression
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self, token == self.previewToken else { return }
+            if live {
+                self.searcher.livePreview(path: path, expression: expression, deliver: show)
+            } else {
+                self.searcher.preview(fileId: h.fileId, expression: expression, member: h.member, memberStart: h.memberStart, deliver: show)
+            }
         }
     }
 

@@ -105,6 +105,11 @@ public final class UsageStore: @unchecked Sendable {
         }
     }
 
+    /// Settings › 清除最近打开: forgets every open (ranking by use starts over too).
+    public func clearOpens() {
+        lock.withLock { _ = try? db.exec("DELETE FROM opens") }
+    }
+
     public func remove(path: String) {
         lock.withLock { _ = try? db.prepare("DELETE FROM opens WHERE path = ?").bind(path).run() }
     }

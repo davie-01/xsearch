@@ -68,3 +68,44 @@ enum Theme {
         return f.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 }
+
+/// Dev: XS_PERF_LOG=/path appends main-thread timings (performance investigations).
+enum PerfLog {
+    nonisolated(unsafe) static let handle: FileHandle? = ProcessInfo.processInfo.environment["XS_PERF_LOG"].flatMap { path in
+        FileManager.default.createFile(atPath: path, contents: nil)
+        return FileHandle(forWritingAtPath: path)
+    }
+    /// Records main-thread stalls longer than 40 ms (a 10 ms timer that arrives late).
+    @MainActor static func watchMainThread() {
+        guard handle != nil else { return }
+        var last = Date()
+        Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
+            let now = Date()
+            let gap = now.timeIntervalSince(last) * 1000
+            if gap > 40 { note(String(format: "STALL %.0f ms", gap)) }
+            last = now
+        }
+    }
+
+    static func note(_ s: String) {
+        guard let handle else { return }
+        handle.write(Data((String(format: "%.3f ", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000)) + s + "\n").utf8))
+    }
+}
+
+/// Brings one of XSearch's normal windows in front of every app. Activation is cooperative
+/// (macOS 14+): a request made while the status menu closes is often declined, which leaves
+/// the window above other inactive apps but below the active one. `orderFrontRegardless`
+/// raises it anyway; the activation is retried once the menu is gone.
+@MainActor
+func bringToFront(_ window: NSWindow?) {
+    guard let window else { return }
+    NSApp.activate()
+    window.makeKeyAndOrderFront(nil)
+    window.orderFrontRegardless()
+    DispatchQueue.main.async {
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+}

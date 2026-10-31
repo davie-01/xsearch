@@ -32,6 +32,9 @@ final class SettingsModel: ObservableObject {
     @Published var syntax: QuerySyntax { didSet { Preferences.shared.querySyntax = syntax } }
     @Published var matchMode = Preferences.shared.matchMode { didSet { Preferences.shared.matchMode = matchMode } }
     @Published var openWith = Preferences.shared.openWith { didSet { Preferences.shared.openWith = openWith } }
+    @Published var keepLastQuery = Preferences.shared.keepLastQuery { didSet { Preferences.shared.keepLastQuery = keepLastQuery } }
+    @Published var showRecents = Preferences.shared.showRecents { didSet { Preferences.shared.showRecents = showRecents } }
+    @Published var recentsCleared = false
     @Published var newRule = ""
     @Published var content: ContentScope
     @Published var contentStatus: ContentIndexer.Status?
@@ -163,9 +166,8 @@ final class SettingsWindowController: NSWindowController {
     func show(tab: SettingsTab) {
         model.tab = tab
         model.refresh()
-        NSApp.activate()
         showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront(window)
     }
 
     func refresh() { model.refresh() }
@@ -183,8 +185,13 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6).padding(.horizontal, 10)
                             .background(model.tab == tab ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                            // The whole row reacts, not only the label's glyphs (a transparent
+                            // background is not hit-testable: clicks beside the text did nothing).
+                            .contentShape(RoundedRectangle(cornerRadius: 7))
                     }
                     .buttonStyle(.plain)
+                    // The selection highlight shows where you are; no keyboard focus ring.
+                    .focusEffectDisabled()
                 }
                 Spacer()
             }
@@ -192,6 +199,7 @@ struct SettingsView: View {
             .frame(width: 200)
             .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
             Divider()
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     switch model.tab {
@@ -202,9 +210,17 @@ struct SettingsView: View {
                     case .diagnostics: DiagnosticsPane(model: model)
                     case .privacy: PrivacyPane(model: model)
                     }
+                    Color.clear.frame(height: 1).id("pane-end")
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // Dev: XS_SETTINGS_BOTTOM=1 scrolls to the end of the pane (screenshots).
+            .onAppear {
+                if ProcessInfo.processInfo.environment["XS_SETTINGS_BOTTOM"] == "1" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { withAnimation { proxy.scrollTo("pane-end", anchor: .bottom) } }
+                }
+            }
             }
         }
         .frame(width: 940, height: 660)
@@ -256,6 +272,18 @@ struct GeneralPane: View {
             if !Updater.shared.isConfigured {
                 Text("这个版本没有配置更新地址，新版需要手动下载安装。").font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
+        }
+        Card(title: "历史记录", subtitle: "只保存在本机") {
+            Toggle("呼出时保留上次的搜索内容", isOn: $model.keepLastQuery).toggleStyle(.switch)
+            Toggle("输入框为空时显示最近打开的文件", isOn: $model.showRecents).toggleStyle(.switch)
+            HStack {
+                Button("清除最近打开记录") {
+                    model.delegate?.clearRecents()
+                    model.recentsCleared = true
+                }
+                if model.recentsCleared { Text("已清除").font(.system(size: 12)).foregroundStyle(.secondary) }
+            }
+            Text("收藏不受影响。按使用频率排序的依据也会一并清除。").font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
         Card(title: "呼出时的模式") {
             Picker("", selection: Binding(get: { model.summonMode }, set: { model.summonMode = $0; Preferences.shared.summonMode = $0 })) {
@@ -358,7 +386,7 @@ struct ScopePane: View {
             }
             Divider()
             Text("排除规则").font(.system(size: 13, weight: .medium))
-            Text("路径（/System、~/Library）、名称（node_modules）或模式（*.log、**/build/**）。").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(verbatim: "路径（/System、~/Library）、名称（node_modules）或模式（*.log、**/build/**）。").font(.system(size: 11.5)).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(model.scope.excludes, id: \.self) { rule in
                     HStack {
@@ -457,15 +485,17 @@ struct ContentCard: View {
             }
             Divider()
             Text("提取的文件类型").font(.system(size: 13, weight: .medium))
-            HStack(spacing: 18) {
-                ForEach([(ContentType.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, "网页 HTML"), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, "压缩包"), (.wps, "WPS 文字")], id: \.0) { type, label in
-                    Toggle(label, isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
+            // A grid that wraps: twelve types do not fit one row.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12, alignment: .leading)], alignment: .leading, spacing: 8) {
+                ForEach([(ContentType.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"), (.wps, "WPS 文字"), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, "网页 HTML"), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, "压缩包")], id: \.0) { type, label in
+                    Toggle(isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
                         if on { model.content.types.insert(type) } else { model.content.types.remove(type) }
                         model.commitContent()
-                    }))
+                    })) { Text(verbatim: label).lineLimit(1) }
+                    .toggleStyle(.checkbox)
                 }
-                Text("WPS 表格、演示分别归入 Excel、PowerPoint；压缩包只读一层；图片 OCR 在 M6").font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
+            Text("WPS 表格、演示分别归入 Excel、PowerPoint；压缩包只读一层；图片 OCR 在 M6").font(.system(size: 11.5)).foregroundStyle(.secondary)
             HStack {
                 Text("单文件上限").font(.system(size: 13))
                 Picker("", selection: Binding(get: { model.content.maxFileBytes }, set: { model.content.maxFileBytes = $0; model.commitContent() })) {
