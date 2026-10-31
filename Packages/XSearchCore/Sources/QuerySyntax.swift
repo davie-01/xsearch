@@ -233,3 +233,18 @@ public enum MetaFilter {
         return span(cal.date(from: c), [.year, .month, .day][parts.count - 1])
     }
 }
+
+// Settings decode field by field with defaults: a field added in a later version (or missing
+// from an older one) never resets the user's other choices (M5: upgrades).
+extension QuerySyntax {
+    private enum CodingKeys: String, CodingKey { case operators, wildcards, regex, proximity }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = QuerySyntax.default
+        self.init(operators: try c.decodeIfPresent(Bool.self, forKey: .operators) ?? d.operators,
+                  wildcards: try c.decodeIfPresent(Bool.self, forKey: .wildcards) ?? d.wildcards,
+                  regex: try c.decodeIfPresent(Bool.self, forKey: .regex) ?? d.regex,
+                  proximity: try c.decodeIfPresent(Bool.self, forKey: .proximity) ?? d.proximity)
+    }
+}

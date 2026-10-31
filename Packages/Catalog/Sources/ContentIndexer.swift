@@ -109,7 +109,13 @@ public final class ContentIndexer: @unchecked Sendable {
             if try catalog.meta("content_instance") == nil { try catalog.setMeta("content_instance", UUID().uuidString) }
             instanceId = try catalog.meta("content_instance")!
             rebuildId = try catalog.meta("content_rebuild_instance")
-            try openWriter()
+            do {
+                try openWriter()
+            } catch EngineError.Rebuild {
+                // The index on disk has another schema (an upgrade changed it, or a downgrade):
+                // start a fresh instance and extract everything again instead of staying down.
+                try resetIndexInstance()
+            }
             try recover()
             try reindexUpgradedExtractors()
             stopped = false
@@ -156,6 +162,22 @@ public final class ContentIndexer: @unchecked Sendable {
         committedSeq = try w.appliedSeqs()
         lastBatch = try w.lastCommit()?.batchId ?? 0
         state.withLock { $0.committedBatches = lastBatch }
+    }
+
+    /// Replaces an unreadable index instance (schema mismatch) with a new, empty one; every
+    /// content file is queued again. Old instance directories and unconfirmed batches go away.
+    private func resetIndexInstance() throws {
+        guard let catalog else { return }
+        writer = nil
+        for old in [instanceId, rebuildId].compactMap({ $0 }) {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("content").appendingPathComponent(old))
+        }
+        instanceId = UUID().uuidString
+        rebuildId = nil
+        try catalog.setMeta("content_instance", instanceId)
+        try catalog.db.exec("DELETE FROM meta WHERE key = 'content_rebuild_instance'; DELETE FROM content_batch;")
+        try openWriter()
+        _ = try requeue { _ in true }
     }
 
     // MARK: Versions and rebuild

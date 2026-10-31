@@ -24,7 +24,13 @@ public final class UsageStore: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS opens_recent ON opens(last_opened);
             CREATE TABLE IF NOT EXISTS favorites(path TEXT PRIMARY KEY, file_id INTEGER, added REAL NOT NULL);
             """)
+        // Personal data is never discarded: a file from a newer build is used as it is (its
+        // tables only grow), not migrated backwards.
+        do { try Migrations.migrate(db, file: "user.sqlite", steps: Self.migrations) } catch is Migrations.NewerFormat {}
     }
+
+    /// Version 1: opens + favorites (M3).
+    static let migrations: [@Sendable (SQLite) throws -> Void] = [{ _ in }]
 
     public struct Favorite: Sendable, Equatable {
         public var path: String

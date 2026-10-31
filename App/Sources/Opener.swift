@@ -72,6 +72,17 @@ struct OpenWith: Codable, Sendable, Equatable {
     var editor: Editor = .system
     /// PDFs open externally at the hit's page (Skim, or Preview with Accessibility).
     var pdfAtPage = false
+
+    init() {}
+
+    // Field by field with defaults; an editor this version does not know falls back to the system.
+    private enum CodingKeys: String, CodingKey { case editor, pdfAtPage }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        editor = (try? c.decodeIfPresent(Editor.self, forKey: .editor)) ?? .system
+        pdfAtPage = try c.decodeIfPresent(Bool.self, forKey: .pdfAtPage) ?? false
+    }
 }
 
 @MainActor

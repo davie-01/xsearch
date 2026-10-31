@@ -287,7 +287,17 @@ public final class NameService: @unchecked Sendable {
         self.scope = scope
         contentScope = content
         context = makeContext(scope)
-        let catalog = try FileCatalog(url: directory.appendingPathComponent("catalog.sqlite"))
+        let catalog: FileCatalog
+        do {
+            catalog = try FileCatalog(url: directory.appendingPathComponent("catalog.sqlite"))
+        } catch is Migrations.NewerFormat {
+            // Downgrade: the catalog (like the name and content indexes built from it) is
+            // rebuildable; start over instead of misreading a newer layout.
+            for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "names", "content"] {
+                try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+            }
+            catalog = try FileCatalog(url: directory.appendingPathComponent("catalog.sqlite"))
+        }
         self.catalog = catalog
         if try catalog.meta("catalog_id") == nil { try catalog.setMeta("catalog_id", UUID().uuidString) }
         let catalogId = try catalog.meta("catalog_id")!

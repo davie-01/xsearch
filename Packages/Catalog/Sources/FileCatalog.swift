@@ -99,13 +99,22 @@ final class FileCatalog {
             CREATE TABLE IF NOT EXISTS content_batch(file_id INTEGER NOT NULL, op_seq INTEGER NOT NULL, kind INTEGER NOT NULL,
                 state INTEGER NOT NULL DEFAULT 0, error TEXT);
             """)
-        // M2 columns on catalogs created by M1.
-        let columns = try Set(Self.columns(db, "files"))
-        for (name, decl) in [("content_state", "INTEGER NOT NULL DEFAULT 0"), ("content_error", "TEXT")] where !columns.contains(name) {
-            try db.exec("ALTER TABLE files ADD COLUMN \(name) \(decl)")
-        }
+        try Migrations.migrate(db, file: "catalog.sqlite", steps: Self.migrations)
         for suffix in ["-wal", "-shm"] { chmod(url.path + suffix, 0o600) }
     }
+
+    /// Schema steps after the tables above (which describe the current layout for new files).
+    /// Version 1: M1 tables. Version 2: M2 content columns on catalogs created by M1. Unversioned
+    /// catalogs (before M5) start at 0 and pass through the idempotent steps.
+    static let migrations: [@Sendable (SQLite) throws -> Void] = [
+        { _ in },
+        { db in
+            let columns = try Set(FileCatalog.columns(db, "files"))
+            for (name, decl) in [("content_state", "INTEGER NOT NULL DEFAULT 0"), ("content_error", "TEXT")] where !columns.contains(name) {
+                try db.exec("ALTER TABLE files ADD COLUMN \(name) \(decl)")
+            }
+        },
+    ]
 
     static func columns(_ db: SQLite, _ table: String) throws -> [String] {
         let s = try db.prepare("SELECT name FROM pragma_table_info(?)").bind(table)

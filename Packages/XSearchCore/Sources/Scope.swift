@@ -129,3 +129,18 @@ func segmentMatch(_ p: ArraySlice<UInt8>, _ s: ArraySlice<UInt8>) -> Bool {
     guard let h = s.first, c == 0x3F || c == h else { return false }
     return segmentMatch(p.dropFirst(), s.dropFirst())
 }
+
+// Field-by-field with defaults (see QuerySyntax): upgrades keep the user's scope.
+extension NameScope {
+    private enum CodingKeys: String, CodingKey { case wholeDisk, folders, excludes, includeHidden, includePackageContents }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = NameScope.default
+        self.init(wholeDisk: try c.decodeIfPresent(Bool.self, forKey: .wholeDisk) ?? d.wholeDisk,
+                  folders: try c.decodeIfPresent([String].self, forKey: .folders) ?? d.folders,
+                  excludes: try c.decodeIfPresent([String].self, forKey: .excludes) ?? d.excludes,
+                  includeHidden: try c.decodeIfPresent(Bool.self, forKey: .includeHidden) ?? d.includeHidden,
+                  includePackageContents: try c.decodeIfPresent(Bool.self, forKey: .includePackageContents) ?? d.includePackageContents)
+    }
+}

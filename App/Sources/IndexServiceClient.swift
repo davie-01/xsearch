@@ -65,11 +65,24 @@ final class IndexServiceClient {
         } as? IndexServiceProtocol
     }
 
+    private var startAttempts = 0
+
+    /// A start can fail transiently (e.g. while the catalog is being rebuilt after a
+    /// downgrade): retried every 3 s, up to 5 times.
     private func startRemote() {
         proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2) { [weak self] error in
             Task { @MainActor in
-                if let error { self?.onError?(error) }
-                self?.refresh()
+                guard let self else { return }
+                if let error {
+                    self.onError?(error)
+                    self.startAttempts += 1
+                    if self.startAttempts < 5 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.startRemote() }
+                    }
+                } else {
+                    self.startAttempts = 0
+                }
+                self.refresh()
             }
         }
     }
