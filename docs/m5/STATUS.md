@@ -8,7 +8,7 @@
 |---|---|
 | 首次启动引导 | ✅ 完成 |
 | 索引服务拆成独立进程（XPC） | ✅ 完成 |
-| DMG 安装包 | 待开始 |
+| DMG 安装包 | ✅ 完成（未公证） |
 | 自动更新（Sparkle） | 待开始 |
 | 升级和数据迁移 | 待开始 |
 | 性能和正确性回归测试 | 待开始 |
@@ -42,3 +42,8 @@
   - 在“下载”新建带唯一词的文件，约 10 秒内被提取进索引并可以搜到；
   - `kill -9` 结束服务后，新的服务进程被拉起，新文件照常进入索引；
   - 退出应用后，服务和提取子进程全部退出。
+
+## DMG 安装包
+
+- `scripts/build-dmg.sh`：先用 build-app.sh 打包，再把应用和指向 /Applications 的链接放进 APFS 压缩镜像，生成 `target/XSearch-<版本>.dmg`（目前 16 MB）。打完后挂载镜像，校验其中应用的签名。
+- 没有 Developer ID：应用用 `XS_SIGN_IDENTITY`（本机的 Apple Development 证书）签名，没有设置时用 ad-hoc 签名；不做公证。其他 Mac 第一次打开需要右键 → 打开。有账号后再补 Developer ID 签名、`notarytool` 公证和 `stapler`。
