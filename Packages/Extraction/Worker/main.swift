@@ -28,7 +28,9 @@ while let data = Framing.read(from: STDIN_FILENO) {
     if faultsAllowed {
         switch request.fault {
         case "hang": while true { sleep(60) }
-        case "crash": abort()
+        // SIGKILL rather than abort(): the supervisor sees the same death, and no crash
+        // report is written to ~/Library/Logs/DiagnosticReports on every test run.
+        case "crash": kill(getpid(), SIGKILL)
         default: break
         }
     }

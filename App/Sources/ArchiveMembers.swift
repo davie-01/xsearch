@@ -57,4 +57,17 @@ enum MemberOpener {
     }
 
     static let notAlone = "压缩包内的文件不能单独收藏或移到废纸篓"
+
+    /// Members opened from archives live in $TMPDIR/XSearch-open/<uuid>; an app may still have
+    /// today's open, so only folders older than a day are removed (at launch).
+    static func removeOldExtractions() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("XSearch-open")
+        let cutoff = Date().addingTimeInterval(-24 * 3600)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [] {
+            let url = root.appendingPathComponent(name)
+            if let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, m < cutoff {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
 }

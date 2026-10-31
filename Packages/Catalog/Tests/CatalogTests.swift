@@ -10,8 +10,12 @@ final class Sandbox {
     let data: URL
     let fm = FileManager.default
 
+    private let base: URL
+
     init(_ label: String) throws {
+        Self.removeStale()
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("xs-catalog-\(label)-\(getpid())-\(UInt32.random(in: 0...UInt32.max))")
+        self.base = base
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         root = base.appendingPathComponent("root").path
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
@@ -21,6 +25,19 @@ final class Sandbox {
     }
 
     let rootReal: String
+
+    /// Sandboxes of runs killed by a timeout never reach deinit (one left a 4.8 GB WAL from
+    /// the M1 checkpoint bug): anything older than six hours goes.
+    static func removeStale() {
+        let tmp = FileManager.default.temporaryDirectory
+        let cutoff = Date().addingTimeInterval(-6 * 3600)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? [] where name.hasPrefix("xs-catalog-") {
+            let url = tmp.appendingPathComponent(name)
+            if let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, m < cutoff {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
 
     var scope: NameScope {
         NameScope(wholeDisk: false, folders: [rootReal], excludes: ["node_modules", "*.log"], includeHidden: false, includePackageContents: false)

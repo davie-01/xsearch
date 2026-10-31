@@ -151,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MemberOpener.removeOldExtractions()
         let data = dataDirectory
         // A first launch has no catalog yet; installs that predate the guide skip it.
         let fresh = !FileManager.default.fileExists(atPath: data.appendingPathComponent("catalog.sqlite").path)
