@@ -3,6 +3,8 @@
 import PackageDescription
 
 let rustLib = Context.packageDirectory + "/target/release"
+/// Sparkle.framework (auto-update), fetched by scripts/fetch-sparkle.sh; embedded by build-app.sh.
+let sparkle = Context.packageDirectory + "/.tools/sparkle-2.10.0"
 
 let package = Package(
     name: "XSearch",
@@ -31,7 +33,9 @@ let package = Package(
         // Extraction worker process (killable on timeout / crash); bundled into the app.
         .executableTarget(name: "xs-extract", dependencies: ["Extraction"], path: "Packages/Extraction/Worker"),
         .executableTarget(name: "IndexService", dependencies: ["Catalog"], path: "Packages/IndexService"),
-        .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog", "ContentEngine", "Extraction"], path: "App/Sources"),
+        .executableTarget(name: "XSearch", dependencies: ["XSearchCore", "NameEngine", "Catalog", "ContentEngine", "Extraction"], path: "App/Sources",
+                          swiftSettings: [.unsafeFlags(["-F", sparkle])],
+                          linkerSettings: [.unsafeFlags(["-F", sparkle, "-framework", "Sparkle", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "XSearchCoreTests", dependencies: ["XSearchCore"], path: "Packages/XSearchCore/Tests"),
         .testTarget(name: "NameEngineTests", dependencies: ["NameEngine"], path: "Packages/NameEngine/Tests"),
         .testTarget(name: "CatalogTests", dependencies: ["Catalog", "ContentEngine", "xs-extract"], path: "Packages/Catalog/Tests"),

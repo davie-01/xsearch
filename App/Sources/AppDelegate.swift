@@ -65,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var onboarding: OnboardingWindowController?
 
+    @objc func checkForUpdates() { Updater.shared.checkForUpdates() }
+
     /// First-launch guide (UI-SPEC §6.5); also from the menu bar.
     @objc func showOnboarding() {
         if let onboarding { onboarding.present(); return }
@@ -169,6 +171,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         buildStatusItem()
         installKeyMenu()
+        _ = Updater.shared  // starts scheduled checks when a feed is configured
+        // Dev: XS_CHECK_UPDATES=1 checks right away (update flow tests).
+        if env["XS_CHECK_UPDATES"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Updater.shared.checkForUpdates() }
+        }
         hotKey = HotKey { [weak self] in self?.launcher.toggle() }
         registerHotKey(Preferences.shared.hotKey)
         if env["XS_ONBOARDING"] == "1" || (!Preferences.shared.onboarded && fresh) {
@@ -255,6 +262,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         hotKeyItem.target = self
         menu.addItem(hotKeyItem)
+        let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
         let guide = NSMenuItem(title: "使用引导…", action: #selector(showOnboarding), keyEquivalent: "")
         guide.target = self
         menu.addItem(guide)

@@ -9,7 +9,7 @@
 | 首次启动引导 | ✅ 完成 |
 | 索引服务拆成独立进程（XPC） | ✅ 完成 |
 | DMG 安装包 | ✅ 完成（未公证） |
-| 自动更新（Sparkle） | 待开始 |
+| 自动更新（Sparkle） | ✅ 完成（待建 GitHub 发布仓库） |
 | 升级和数据迁移 | 待开始 |
 | 性能和正确性回归测试 | 待开始 |
 | Developer ID 签名、公证 | 暂缓（需要账号） |
@@ -47,3 +47,21 @@
 
 - `scripts/build-dmg.sh`：先用 build-app.sh 打包，再把应用和指向 /Applications 的链接放进 APFS 压缩镜像，生成 `target/XSearch-<版本>.dmg`（目前 16 MB）。打完后挂载镜像，校验其中应用的签名。
 - 没有 Developer ID：应用用 `XS_SIGN_IDENTITY`（本机的 Apple Development 证书）签名，没有设置时用 ad-hoc 签名；不做公证。其他 Mac 第一次打开需要右键 → 打开。有账号后再补 Developer ID 签名、`notarytool` 公证和 `stapler`。
+
+## 自动更新（Sparkle 2.10.0，经 GitHub Releases 分发）
+
+- `scripts/fetch-sparkle.sh`：把官方发布包下载到 `.tools/`，按 GitHub 公布的 SHA-256 校验（c2bf58aa…）。Sparkle 2.10.1 发布才 6 天，所以选用已发布 6 周的 2.10.0。
+- 打包：Sparkle.framework 放进 `Contents/Frameworks`（rpath 为 `@executable_path/../Frameworks`），按由内到外的顺序签名（Installer.xpc、Downloader.xpc、Autoupdate、Updater.app、framework）；Info.plist 写入 `SUPublicEDKey`；只有设置了 `XS_FEED_URL` 才写入 `SUFeedURL`，没有更新地址的版本自动更新处于关闭状态，“检查更新”会提示手动下载。
+- 密钥：EdDSA 密钥对由 `generate_keys --account xsearch` 生成；私钥只存在本机登录钥匙串里（不进仓库），公钥在 `App/Resources/sparkle-public-key.txt`。
+  - **请备份私钥**：`.tools/sparkle-2.10.0/bin/generate_keys --account xsearch -x 备份文件路径`，把文件存到安全的地方。私钥丢失后，已经安装的版本就无法再接收更新。
+- 界面：菜单栏“检查更新…”；设置 → 通用 → 软件更新（显示当前版本、“自动检查更新”开关、“检查更新…”按钮）。
+- 发布流程（`scripts/release.sh`）：
+  1. 在 GitHub 新建一个仓库用来发布（源码可以不公开），比如 `你的用户名/xsearch-releases`；
+  2. `XS_SIGN_IDENTITY=… XS_GITHUB_REPO=你的用户名/xsearch-releases bash scripts/release.sh 0.2.0`：修改版本号（主应用和 IndexService 的 Info.plist，build 号加 1），打出带更新地址的 DMG，用钥匙串里的私钥签名，生成包含 `work/releases/` 里所有版本的 appcast.xml；
+  3. 在 GitHub 新建 Release，标签为 `v0.2.0`，上传 `work/releases/XSearch-0.2.0.dmg` 和 `appcast.xml`，并设为 Latest。更新地址是 `https://github.com/<repo>/releases/latest/download/appcast.xml`，始终指向最新那个 Release 里的 appcast。
+- 端到端验证（本机，用 `python3 -m http.server` 代替 GitHub）：
+  - 0.1.0（更新地址指向本地）检查到 0.1.1，弹出“新版本的 XSearch 已经发布”；
+  - 下载并通过 EdDSA 校验，安装后重新启动；测试副本变为 0.1.1，签名校验通过，IndexService 也跟着重新启动；
+  - 测试文件已删除，仓库里的版本号已恢复为 0.1.0。
+- 开发用环境变量：`XS_CHECK_UPDATES=1`，启动后立即检查更新。
+- 注意：没有 Developer ID 公证时，用户从网页下载的第一个 DMG 仍需右键 → 打开；之后通过 Sparkle 安装的更新不需要再这样操作。

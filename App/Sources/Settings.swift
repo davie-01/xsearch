@@ -245,6 +245,18 @@ struct GeneralPane: View {
             Toggle("登录时打开 XSearch", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                 .toggleStyle(.switch)
         }
+        Card(title: "软件更新", subtitle: "当前版本 \(Updater.shared.version)") {
+            HStack {
+                Toggle("自动检查更新", isOn: Binding(get: { Updater.shared.automaticallyChecks }, set: { Updater.shared.automaticallyChecks = $0; model.objectWillChange.send() }))
+                    .toggleStyle(.switch)
+                    .disabled(!Updater.shared.isConfigured)
+                Spacer()
+                Button("检查更新…") { Updater.shared.checkForUpdates() }
+            }
+            if !Updater.shared.isConfigured {
+                Text("这个版本没有配置更新地址，新版需要手动下载安装。").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+        }
         Card(title: "呼出时的模式") {
             Picker("", selection: Binding(get: { model.summonMode }, set: { model.summonMode = $0; Preferences.shared.summonMode = $0 })) {
                 Text("总是名称模式").tag(Preferences.SummonMode.alwaysName)
