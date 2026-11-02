@@ -139,6 +139,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         panel.setContentSize(root.frame.size)
 
         mainGlass.style = .regular
+        // Plain glass lets bright windows behind it wash out the text; a tint keeps the depth.
+        mainGlass.tintColor = Theme.panelTint
         let mainContent = FlippedView()
         mainGlass.contentView = mainContent
         root.addSubview(mainGlass)
@@ -249,9 +251,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         notice.isHidden = true
 
         hints.font = Theme.hintFont
-        hints.textColor = .tertiaryLabelColor
+        hints.textColor = .secondaryLabelColor
         status.font = Theme.hintFont
-        status.textColor = .tertiaryLabelColor
+        status.textColor = .secondaryLabelColor
         status.alignment = .right
         status.lineBreakMode = .byTruncatingHead
         let footer = NSStackView(views: [hints, NSView(), status])
@@ -867,7 +869,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         for (i, (k, v)) in pairs.enumerated() {
             if i > 0 { s.append(NSAttributedString(string: "   ")) }
             s.append(NSAttributedString(string: k, attributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor]))
-            s.append(NSAttributedString(string: " " + v, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.tertiaryLabelColor]))
+            s.append(NSAttributedString(string: " " + v, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
         }
         return s
     }

@@ -76,7 +76,7 @@ final class ContentHitCell: NSTableCellView {
         snippet.usesSingleLineMode = true
         snippet.cell?.wraps = false
         meta.font = .systemFont(ofSize: 11.5)
-        meta.textColor = .tertiaryLabelColor
+        meta.textColor = .secondaryLabelColor
         meta.lineBreakMode = .byTruncatingMiddle
         badge.font = .systemFont(ofSize: 10.5, weight: .medium)
         badge.wantsLayer = true
@@ -209,7 +209,7 @@ final class PreviewPane: NSView {
         title.font = .systemFont(ofSize: 15, weight: .semibold)
         title.lineBreakMode = .byTruncatingMiddle
         subtitle.font = .systemFont(ofSize: 11.5)
-        subtitle.textColor = .tertiaryLabelColor
+        subtitle.textColor = .secondaryLabelColor
         subtitle.lineBreakMode = .byTruncatingMiddle
         position.font = .systemFont(ofSize: 12)
         position.textColor = .secondaryLabelColor

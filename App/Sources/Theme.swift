@@ -47,6 +47,8 @@ enum Theme {
     static let sidebar = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0x232326) : hex(0xF4F4F6) }
     static let warnText = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua]) == .darkAqua ? hex(0xFFD98A) : hex(0x6B4A00) }
     /// Spotlight-style translucent fills that read on top of glass in both appearances.
+    /// Over the launcher's glass: strong enough for text over any window behind it.
+    static let panelTint = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.black.withAlphaComponent(0.55) : NSColor.white.withAlphaComponent(0.62) }
     static var selectionFill: NSColor { NSColor.labelColor.withAlphaComponent(0.11) }
     static var capsuleFill: NSColor { NSColor.labelColor.withAlphaComponent(0.08) }
 

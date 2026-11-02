@@ -20,7 +20,7 @@ final class GroupHeaderView: NSTableCellView {
     init() {
         super.init(frame: .zero)
         label.font = Theme.groupFont
-        label.textColor = .tertiaryLabelColor
+        label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
@@ -56,7 +56,7 @@ final class ResultCellView: NSTableCellView {
         path.font = Theme.pathFont
         path.textColor = .secondaryLabelColor
         meta.font = Theme.metaFont
-        meta.textColor = .tertiaryLabelColor
+        meta.textColor = .secondaryLabelColor
         meta.alignment = .right
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
