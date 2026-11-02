@@ -1,6 +1,7 @@
 import AppKit
 import ContentEngine
 import Foundation
+import os
 import Testing
 @testable import Catalog
 import XSearchCore
@@ -649,4 +650,24 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     try fm.moveItem(atPath: p.box.p("names/folder"), toPath: p.box.p("other/folder"))
     #expect(p.until { nameHits(p.names, "mover").isEmpty }, "hidden again after moving back")
     #expect(p.until { try p.search("mu78") == ["inner-mover.txt"] && p.search("mu77") == ["mover.txt"] })
+}
+
+@Test func settledFiresOnceAfterABurstOfWork() throws {
+    let count = OSAllocatedUnfairLock(initialState: 0)
+    let p = try Pipeline("settled") {
+        $0.settleDelay = 0.3
+        $0.onSettled = { count.withLock { $0 += 1 } }
+    }
+    defer { p.stop() }
+    try p.start()
+    usleep(800_000)
+    #expect(count.withLock { $0 } == 0, "no work, nothing to report")
+    try p.box.write("docs/s.txt", "稳定 nu77")
+    #expect(p.until { try p.search("nu77") == ["s.txt"] })
+    p.indexer.wake()
+    let deadline = Date().addingTimeInterval(5)
+    while count.withLock({ $0 }) == 0 && Date() < deadline { usleep(50_000) }
+    #expect(count.withLock { $0 } == 1)
+    usleep(800_000)
+    #expect(count.withLock { $0 } == 1, "once per burst")
 }

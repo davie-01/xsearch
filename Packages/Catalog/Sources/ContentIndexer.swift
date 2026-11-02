@@ -84,6 +84,10 @@ public final class ContentIndexer: @unchecked Sendable {
     var baseTimeout: TimeInterval = 30
     var limits = ExtractionLimits()
     var errorBackoff: TimeInterval = 5
+    var settleDelay: TimeInterval = 30
+    /// A burst of work has finished and nothing has arrived for a while (any thread).
+    public var onSettled: (@Sendable () -> Void)?
+    private var lastWork: Date?
     var oldInstanceGrace: TimeInterval = 60
     /// Test hooks: crash at a protocol step; inject a worker fault for a path; run between
     /// extraction and staging (to change the file mid-flight).
@@ -184,7 +188,16 @@ public final class ContentIndexer: @unchecked Sendable {
 
     private func cycleAndReschedule() {
         cycle()
+        reportSettled()
         scheduleNextCycle()
+    }
+
+    /// Once per burst of work, after `settleDelay` with nothing to do.
+    private func reportSettled() {
+        guard let last = lastWork, Date().timeIntervalSince(last) >= settleDelay,
+              status.pending == 0, rebuildId == nil, !needsRecovery, !stopped else { return }
+        lastWork = nil
+        if let onSettled { DispatchQueue.global().async(execute: onSettled) }
     }
 
     /// Idle stays idle: the timer fires for the earliest retry or lease expiry, and otherwise
@@ -192,6 +205,7 @@ public final class ContentIndexer: @unchecked Sendable {
     private func scheduleNextCycle() {
         guard let timer, !stopped else { return }
         var delay = Self.fallbackInterval
+        if let last = lastWork { delay = min(delay, max(0.05, settleDelay - Date().timeIntervalSince(last))) }
         if needsRecovery {
             delay = max(0.05, errorBackoffUntil.timeIntervalSinceNow)
         } else if let catalog,
@@ -490,6 +504,7 @@ public final class ContentIndexer: @unchecked Sendable {
                 worked = true
             }
             try refreshCounts(full: worked || Date().timeIntervalSince(lastFullCount) > 30)
+            if worked { lastWork = Date() }
             try finishRebuildIfCaughtUp()
             removeRetiredInstances()
             if status.lastError != nil { state.withLock { $0.lastError = nil } }

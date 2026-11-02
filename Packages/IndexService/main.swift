@@ -20,6 +20,7 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         indexer?.stop()
         let ix = ContentIndexer(directory: URL(fileURLWithPath: dataDirectory), workerExecutable: URL(fileURLWithPath: workerPath), workers: workers)
         ix.setMaxFileBytes(maxFileBytes)
+        ix.onSettled = { [weak self] in self?.recycleIfLarge() }
         do {
             try ix.start()
             indexer = ix
@@ -59,6 +60,27 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         let ix = indexer
         lock.unlock()
         ix?.wake()
+    }
+
+    /// Text and index buffers of a large batch stay with the allocator after they are freed
+    /// (hundreds of MB, which `malloc_zone_pressure_relief` does not return). The clean way to
+    /// give them back is to leave: nothing is lost, and the app's next message starts a new
+    /// service, the same path as after a crash. Searching runs in the app and does not notice.
+    private func recycleIfLarge() {
+        guard footprintBytes() > Self.recycleAbove else { return }
+        stop {}
+        exit(0)
+    }
+
+    private static let recycleAbove: UInt64 = 64 << 20
+
+    private func footprintBytes() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return result == KERN_SUCCESS ? info.phys_footprint : 0
     }
 
     func stop(reply: @escaping () -> Void) {
