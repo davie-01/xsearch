@@ -286,6 +286,11 @@ public struct NameView: Sendable {
         let levels = !matcher.needsPath && scanned >= base.keys.count / 2 ? matcher.levels(base.keys) : nil
         var top = TopK(limit: limit)
         var total = 0
+        // Shallower first, then by path: the end of the shown order.
+        let tie: (Int64, Int64) -> Bool = { a, b in
+            let da = self.depth(a), db = self.depth(b)
+            return da != db ? da < db : (self.path(a) ?? "") < (self.path(b) ?? "")
+        }
         let overlayEmpty = overlay.isEmpty
         let isRootFlag: (Int) -> Bool = { self.base.parents[$0] < 0 && self.base.rootPaths[self.base.fileIds[$0]] == "/" }
         base.keys.bytes.withUnsafeBufferPointer { keyBytes in
@@ -310,7 +315,7 @@ public struct NameView: Sendable {
                     if isRootFlag(i) { continue }
                     if needWalk && !inTargets(id) { continue }
                     total += 1
-                    top.offer(Candidate(id: id, level: level & 0x7F, usage: usage[id] ?? 0, mtime: base.mtimes[i]))
+                    top.offer(Candidate(id: id, level: level & 0x7F, usage: usage[id] ?? 0, mtime: base.mtimes[i]), tie: tie)
                 }
             }
         }
@@ -322,7 +327,7 @@ public struct NameView: Sendable {
             if r.parentId == 0 && r.rootPath == "/" { continue }
             if targets != nil && !inTargets(id) { continue }
             total += 1
-            top.offer(Candidate(id: id, level: level & 0x7F, usage: usage[id] ?? 0, mtime: r.mtime))
+            top.offer(Candidate(id: id, level: level & 0x7F, usage: usage[id] ?? 0, mtime: r.mtime), tie: tie)
         }
 
         var hits: [(Hit, Int)] = top.items.compactMap { c in
@@ -533,12 +538,13 @@ struct Candidate {
     var usage: Int
     var mtime: Int64
 
-    /// Ordering for selection: higher is better.
-    func better(than o: Candidate) -> Bool {
+    /// Ordering for selection: higher is better. Must be the order results are shown in, or the
+    /// best of a tie can be dropped before the final sort. `tie` is costly and rarely reached.
+    func better(than o: Candidate, tie: (Int64, Int64) -> Bool) -> Bool {
         if level != o.level { return level > o.level }
         if usage != o.usage { return usage > o.usage }
         if mtime != o.mtime { return mtime > o.mtime }
-        return id < o.id
+        return tie(id, o.id)
     }
 }
 
@@ -549,24 +555,24 @@ struct TopK {
 
     init(limit: Int) { self.limit = max(0, limit) }
 
-    mutating func offer(_ c: Candidate) {
+    mutating func offer(_ c: Candidate, tie: (Int64, Int64) -> Bool) {
         guard limit > 0 else { return }
         if items.count < limit {
             items.append(c)
             var i = items.count - 1
             while i > 0 {
                 let p = (i - 1) / 2
-                guard items[p].better(than: items[i]) else { break }
+                guard items[p].better(than: items[i], tie: tie) else { break }
                 items.swapAt(p, i); i = p
             }
-        } else if c.better(than: items[0]) {
+        } else if c.better(than: items[0], tie: tie) {
             items[0] = c
             var i = 0
             while true {
                 let l = 2 * i + 1, r = l + 1
                 var worst = i
-                if l < items.count && items[worst].better(than: items[l]) { worst = l }
-                if r < items.count && items[worst].better(than: items[r]) { worst = r }
+                if l < items.count && items[worst].better(than: items[l], tie: tie) { worst = l }
+                if r < items.count && items[worst].better(than: items[r], tie: tie) { worst = r }
                 if worst == i { break }
                 items.swapAt(i, worst); i = worst
             }

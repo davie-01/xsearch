@@ -109,11 +109,18 @@ impl Sink<'_> {
         Decision::Take(self.dest.join(format!("{}.{}", self.out.members.len(), ext.to_lowercase())))
     }
 
-    /// Copies at most the member limit (headers can lie about sizes).
+    /// Copies at most what the limits leave (headers can lie about sizes, and a .gz has none).
     fn write(&mut self, name: &str, target: PathBuf, reader: &mut dyn Read) -> Result<()> {
         let mut f = File::create(&target)?;
-        let n = std::io::copy(&mut reader.take(self.limits.max_member_bytes + 1), &mut f)?;
+        let left = self.limits.max_total_bytes.saturating_sub(self.total);
+        let cap = self.limits.max_member_bytes.min(left);
+        let n = std::io::copy(&mut reader.take(cap + 1), &mut f)?;
         f.flush()?;
+        if n > left {
+            std::fs::remove_file(&target)?;
+            self.out.truncated = true;
+            return Ok(());
+        }
         if n > self.limits.max_member_bytes {
             std::fs::remove_file(&target)?;
             self.out.skipped_too_large += 1;

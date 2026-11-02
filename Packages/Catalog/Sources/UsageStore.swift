@@ -16,6 +16,7 @@ public final class UsageStore: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
     private let db: SQLite
     private var boundCatalog: String?
+    private var usageCache: (byId: [Int64: Int], byPath: [String: Int])?
 
     public init(directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -48,6 +49,7 @@ public final class UsageStore: @unchecked Sendable {
                     try db.exec("UPDATE opens SET file_id = NULL; UPDATE favorites SET file_id = NULL;")
                     try db.prepare("INSERT OR REPLACE INTO user_meta(key, value) VALUES('catalog_id', ?)").bind(id).run()
                 }
+                usageCache = nil
             }
             boundCatalog = id
         }
@@ -98,6 +100,7 @@ public final class UsageStore: @unchecked Sendable {
                 INSERT INTO opens(path, file_id, count, last_opened) VALUES(?, ?, 1, ?)
                 ON CONFLICT(path) DO UPDATE SET count = count + 1, last_opened = excluded.last_opened, file_id = COALESCE(excluded.file_id, file_id)
                 """).bind(path, fileId, Int64(Date().timeIntervalSince1970)).run()
+            usageCache = nil
         }
     }
 
@@ -113,25 +116,34 @@ public final class UsageStore: @unchecked Sendable {
         }
     }
 
-    /// Open counts by file id and by path, for ranking.
+    /// Open counts by file id and by path, for ranking. Asked on every keystroke, changed only
+    /// by opening something: kept until then.
     public func usage() -> (byId: [Int64: Int], byPath: [String: Int]) {
         lock.withLock {
+            if let usageCache { return usageCache }
             var ids: [Int64: Int] = [:], paths: [String: Int] = [:]
             guard let s = try? db.prepare("SELECT path, file_id, count FROM opens ORDER BY last_opened DESC LIMIT 5000") else { return (ids, paths) }
             while (try? s.step()) == true {
                 paths[s.text(0)] = Int(s.int(2))
                 if !s.isNull(1) { ids[s.int(1)] = Int(s.int(2)) }
             }
+            usageCache = (ids, paths)
             return (ids, paths)
         }
     }
 
     /// Settings › 清除最近打开: forgets every open (ranking by use starts over too).
     public func clearOpens() {
-        lock.withLock { _ = try? db.exec("DELETE FROM opens") }
+        lock.withLock {
+            _ = try? db.exec("DELETE FROM opens")
+            usageCache = nil
+        }
     }
 
     public func remove(path: String) {
-        lock.withLock { _ = try? db.prepare("DELETE FROM opens WHERE path = ?").bind(path).run() }
+        lock.withLock {
+            _ = try? db.prepare("DELETE FROM opens WHERE path = ?").bind(path).run()
+            usageCache = nil
+        }
     }
 }

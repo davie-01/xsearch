@@ -201,3 +201,13 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     }
     #expect(Date().timeIntervalSince(start) < 30)
 }
+
+@Test func workerOverItsMemoryLimitIsKilled() throws {
+    let txt = tmp("hog.txt")
+    try "x".write(toFile: txt, atomically: true, encoding: .utf8)
+    let worker = ExtractionWorker(executable: workerURL, environment: ["XS_EXTRACT_FAULTS": "1"])
+    defer { worker.stop() }
+    worker.memoryLimit = 100 << 20
+    #expect(worker.extract(path: txt, limits: ExtractionLimits(), timeout: 20, fault: "hog") == .tooMuchMemory)
+    #expect(worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) != .crashed, "the next file gets a new process")
+}

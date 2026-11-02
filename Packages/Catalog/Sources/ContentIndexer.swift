@@ -106,11 +106,17 @@ public final class ContentIndexer: @unchecked Sendable {
         var sha = SHA256()
         while true {
             if cancelled() { return nil }
-            let read: Data?
-            do { read = try h.read(upToCount: 1 << 20) } catch { return nil }
-            // nil is the end of the file.
-            guard let chunk = read, !chunk.isEmpty else { break }
-            sha.update(data: chunk)
+            // Each chunk goes back at once: without the pool a file's whole size piles up here.
+            let more: Bool? = autoreleasepool { () -> Bool? in
+                let read: Data?
+                do { read = try h.read(upToCount: 1 << 20) } catch { return nil }
+                // nil is the end of the file.
+                guard let chunk = read, !chunk.isEmpty else { return false }
+                sha.update(data: chunk)
+                return true
+            }
+            guard let more else { return nil }
+            if !more { break }
         }
         return sha.finalize().map { String(format: "%02x", $0) }.joined()
     }
@@ -581,10 +587,11 @@ public final class ContentIndexer: @unchecked Sendable {
         // Extract in parallel, one file per worker at a time.
         var results = [Staged?](repeating: nil, count: toExtract.count)
         let lock = NSLock()
+        let items = toExtract
         DispatchQueue.concurrentPerform(iterations: min(workerCount, max(1, toExtract.count))) { w in
             var i = w
             while i < toExtract.count {
-                let r = extract(toExtract[i], worker: workers[w])
+                let r = autoreleasepool { extract(items[i], worker: workers[w]) }
                 lock.lock(); results[i] = r; lock.unlock()
                 i += workerCount
             }
@@ -640,6 +647,8 @@ public final class ContentIndexer: @unchecked Sendable {
             return .failed(message)
         case .cancelled:
             return interrupted
+        case .tooMuchMemory:
+            return .failed("解析占用内存过多，已隔离")
         case .timedOut, .crashed:
             let reason = outcome == .timedOut ? "解析超时" : "解析器崩溃"
             if p.task.attempts + 1 >= maxAttempts { return .failed("\(reason)，已隔离") }

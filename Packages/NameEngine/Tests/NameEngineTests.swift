@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 @testable import NameEngine
 import XSearchCore
 
@@ -270,7 +271,21 @@ func check(_ view: NameView, _ o: Oracle, _ label: String) {
     #expect(view.search(NameQuery.parse("采购合同 | 租赁", home: "/"), limit: 10).hits.first?.fileId == a)
 }
 
-@Test func tabOnAppScopesToItsDocuments() throws {
+/// Test runners may see only dynamic types (no launch-services database for them).
+private var systemTypesAvailable: Bool { UTType(filenameExtension: "pdf")?.isDynamic == false }
+
+@Test func documentTypesFromPlainExtensions() throws {
+    let app = FileManager.default.temporaryDirectory.appendingPathComponent("xs-ext-\(UUID().uuidString)/Plain.app")
+    try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
+    let plist: [String: Any] = ["CFBundleName": "Plain", "CFBundleDocumentTypes": [["CFBundleTypeRole": "Editor", "CFBundleTypeExtensions": ["OFD", "*"]]]]
+    try (plist as NSDictionary).write(to: app.appendingPathComponent("Contents/Info.plist"))
+    let types = DocumentTypes(appPath: app.path)
+    #expect(types.appName == "Plain" && types.extensions == ["ofd"])
+    #expect(types.allows(extension: "ofd") && !types.allows(extension: "app"))
+}
+
+@Test(.enabled(if: systemTypesAvailable)) func tabOnAppScopesToItsDocuments() throws {
     // A fake app declaring PDF and images (UTIs), a legacy extension, and a role-None type.
     let app = FileManager.default.temporaryDirectory.appendingPathComponent("xs-app-\(UUID().uuidString)/Viewer.app")
     try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents"), withIntermediateDirectories: true)
@@ -301,4 +316,34 @@ func check(_ view: NameView, _ o: Oracle, _ label: String) {
     var all = NameQuery.parse("", home: "/")
     all.documentTypes = types
     #expect(!all.isEmpty && Set(view.search(all, limit: 10).hits.map(\.fileId)) == [pdf, img])
+}
+
+@Test func topResultsAreAPrefixOfTheFullOrderOnTies() {
+    // Same level, use and time: the deepest entries have the smallest ids.
+    var records = [NameRecord(fileId: 100, parentId: 0, name: "/", flags: .directory, size: 0, mtime: 5, rootPath: "/")]
+    records.append(NameRecord(fileId: 90, parentId: 100, name: "z", flags: .directory, size: 0, mtime: 5, rootPath: nil))
+    for i in 1...30 { records.append(NameRecord(fileId: Int64(i), parentId: 90, name: "dup\(i).txt", flags: [], size: 0, mtime: 5, rootPath: nil)) }
+    for i in 31...60 { records.append(NameRecord(fileId: Int64(i), parentId: 100, name: "dup\(i).txt", flags: [], size: 0, mtime: 5, rootPath: nil)) }
+    let view = NameView(base: NameSnapshot.build(records, seq: 1, fingerprint: "t"))
+    let q = NameQuery.parse("dup", home: "/")
+    let all = view.search(q, limit: 1000).hits.map(\.path)
+    #expect(all.count == 60)
+    for limit in [1, 2, 7, 30, 59] { #expect(view.search(q, limit: limit).hits.map(\.path) == Array(all.prefix(limit)), "limit \(limit)") }
+}
+
+@Test func sparseIdsUseTheDictionaryAndSearchAlike() {
+    let records = [NameRecord(fileId: 1, parentId: 0, name: "/", flags: .directory, size: 0, mtime: 1, rootPath: "/"),
+                   NameRecord(fileId: 50_000_000_000, parentId: 1, name: "far.txt", flags: [], size: 0, mtime: 1, rootPath: nil)]
+    let snap = NameSnapshot.build(records, seq: 1, fingerprint: "t")
+    #expect(snap.indexOfId.isEmpty && snap.index(of: 50_000_000_000) != nil && snap.index(of: 7) == nil)
+    #expect(NameView(base: snap).search(NameQuery.parse("far", home: "/"), limit: 5).hits.first?.path == "/far.txt")
+}
+
+@Test func structureChecksRejectBrokenSnapshots() {
+    #expect(treeIsConsistent(parents: [-1, 0, 1, 0], subtreeEnd: [4, 3, 3, 4]))
+    #expect(!treeIsConsistent(parents: [-1, 0], subtreeEnd: [2, 3]), "past the end")
+    #expect(!treeIsConsistent(parents: [-1, 0], subtreeEnd: [1, 2]), "child outside its parent's range")
+    #expect(!treeIsConsistent(parents: [1, -1], subtreeEnd: [2, 2]), "child before its parent")
+    #expect(offsetsAreConsistent([0, 2, 2, 5], byteCount: 5))
+    #expect(!offsetsAreConsistent([0, 3, 2, 5], byteCount: 5) && !offsetsAreConsistent([1, 5], byteCount: 5) && !offsetsAreConsistent([0, 4], byteCount: 5))
 }

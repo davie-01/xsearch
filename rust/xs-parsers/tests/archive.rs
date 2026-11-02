@@ -125,3 +125,17 @@ fn zip_names_without_utf8_flag() {
     let u = unpack(&p, out.path(), &docs, LIMITS).unwrap();
     assert_eq!(names(&u), vec!["合同.txt"]);
 }
+
+#[test]
+fn gz_without_a_size_stops_at_the_total_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("big.txt.gz");
+    let mut gz = flate2::write::GzEncoder::new(std::fs::File::create(&p).unwrap(), flate2::Compression::default());
+    gz.write_all(&vec![b'x'; 100_000]).unwrap();
+    gz.finish().unwrap();
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap();
+    let u = unpack(&p, &out, &|_| true, ArchiveLimits { max_member_bytes: 1 << 20, max_total_bytes: 1000, max_members: 10 }).unwrap();
+    assert!(u.members.is_empty() && u.truncated, "{:?}", u.members);
+    assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing beyond the budget stays on disk");
+}

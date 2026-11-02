@@ -20,7 +20,10 @@ public final class NameSnapshot: @unchecked Sendable {
     let keys: StringPool
     let rootPaths: [Int64: String]
     /// fileId → base index (-1 when absent). File ids are dense SQLite rowids.
+    /// File id → index. Direct while ids are dense (4 bytes per id ever used); a dictionary
+    /// when most ids are gone, where the array would cost more and follows one large id.
     let indexOfId: [Int32]
+    let sparseIndexOfId: [Int64: Int32]?
     /// Directory base indices sorted by (parent index, key id): child lookup for `dir:`.
     let dirTable: [Int32]
 
@@ -42,9 +45,16 @@ public final class NameSnapshot: @unchecked Sendable {
         self.nameKeyIds = nameKeyIds
         self.keys = keys
         self.rootPaths = rootPaths
-        var index = [Int32](repeating: -1, count: Int((fileIds.max() ?? 0) + 1))
-        for (i, id) in fileIds.enumerated() { index[Int(id)] = Int32(i) }
-        indexOfId = index
+        let maxId = fileIds.max() ?? 0
+        if maxId / 4 > Int64(fileIds.count) {
+            indexOfId = []
+            sparseIndexOfId = Dictionary(uniqueKeysWithValues: fileIds.enumerated().map { ($1, Int32($0)) })
+        } else {
+            var index = [Int32](repeating: -1, count: Int(maxId + 1))
+            for (i, id) in fileIds.enumerated() { index[Int(id)] = Int32(i) }
+            indexOfId = index
+            sparseIndexOfId = nil
+        }
         var dirs = (0..<fileIds.count).filter { flags[$0] & EntryFlags.directory.rawValue != 0 }.map(Int32.init)
         dirs.sort { a, b in
             let pa = parents[Int(a)], pb = parents[Int(b)]
@@ -58,6 +68,7 @@ public final class NameSnapshot: @unchecked Sendable {
     }
 
     func index(of id: Int64) -> Int? {
+        if let sparseIndexOfId { return sparseIndexOfId[id].map(Int.init) }
         guard id >= 0, id < indexOfId.count else { return nil }
         let i = indexOfId[Int(id)]
         return i < 0 ? nil : Int(i)
@@ -266,12 +277,34 @@ public final class NameSnapshot: @unchecked Sendable {
               names.offsets.last.map({ Int($0) == names.bytes.count }) ?? false,
               keys.offsets.last.map({ Int($0) == keys.bytes.count }) ?? false,
               nameIds.allSatisfy({ Int($0) < names.count }), nameKeyIds.allSatisfy({ Int($0) < keys.count }),
-              parents.allSatisfy({ $0 >= -1 && Int($0) < n }), fileIds.allSatisfy({ $0 > 0 })
+              fileIds.allSatisfy({ $0 > 0 }), Set(fileIds).count == n,
+              treeIsConsistent(parents: parents, subtreeEnd: subtreeEnd),
+              offsetsAreConsistent(names.offsets, byteCount: names.bytes.count), offsetsAreConsistent(keys.offsets, byteCount: keys.bytes.count)
         else { throw LoadError.badFormat }
         return NameSnapshot(seq: seq, fingerprint: expectedFingerprint, fileIds: fileIds, parents: parents, nameIds: nameIds,
                             flags: flags, sizes: sizes, mtimes: mtimes, subtreeEnd: subtreeEnd, names: names,
                             nameKeyIds: nameKeyIds, keys: keys, rootPaths: rootPaths)
     }
+}
+
+/// Preorder: a parent comes before its children and each subtree range holds only its own
+/// nodes. A checksum says the bytes are as written, not that they were written correctly.
+func treeIsConsistent(parents: [Int32], subtreeEnd: [Int32]) -> Bool {
+    let n = parents.count
+    guard subtreeEnd.count == n else { return false }
+    for i in 0..<n {
+        let end = Int(subtreeEnd[i]), p = Int(parents[i])
+        guard end > i, end <= n else { return false }
+        if p != -1 {
+            guard p >= 0, p < i, i < Int(subtreeEnd[p]), end <= Int(subtreeEnd[p]) else { return false }
+        }
+    }
+    return true
+}
+
+func offsetsAreConsistent<T: FixedWidthInteger>(_ offsets: [T], byteCount: Int) -> Bool {
+    guard offsets.first == 0, Int(offsets.last ?? 0) == byteCount else { return false }
+    return zip(offsets, offsets.dropFirst()).allSatisfy { $0 <= $1 }
 }
 
 private struct Writer {
@@ -302,8 +335,8 @@ private struct Reader {
     mutating func string() throws -> String { String(decoding: try raw(Int(try int())), as: UTF8.self) }
     mutating func array<T: FixedWidthInteger>() throws -> [T] {
         let n = Int(try int())
-        let bytes = n * MemoryLayout<T>.stride
-        guard n >= 0, offset + bytes <= data.endIndex else { throw NameSnapshot.LoadError.badFormat }
+        let (bytes, overflow) = n.multipliedReportingOverflow(by: MemoryLayout<T>.stride)
+        guard n >= 0, !overflow, bytes <= data.endIndex - offset else { throw NameSnapshot.LoadError.badFormat }
         defer { offset += bytes }
         return [T](unsafeUninitializedCapacity: n) { buf, count in
             data[offset..<offset + bytes].withUnsafeBytes { src in

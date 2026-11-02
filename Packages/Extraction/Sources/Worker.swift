@@ -7,7 +7,7 @@ public struct WorkerRequest: Codable, Sendable {
     public var id: UInt64
     public var path: String
     public var limits: ExtractionLimits
-    /// Fault injection for tests ("hang", "crash"); honoured only when the worker runs with
+    /// Fault injection for tests ("hang", "crash", "hog"); honoured only when the worker runs with
     /// XS_EXTRACT_FAULTS=1.
     public var fault: String?
 
@@ -32,6 +32,8 @@ public struct WorkerResponse: Codable, Sendable {
 }
 
 public enum Framing {
+    static let maxFrameBytes: UInt32 = 2 << 30
+
     public static func write(_ data: Data, to fd: Int32) -> Bool {
         var len = UInt32(data.count).littleEndian
         let header = Data(bytes: &len, count: 4)
@@ -54,6 +56,8 @@ public enum Framing {
     public static func read(from fd: Int32) -> Data? {
         guard let header = readExactly(4, fd) else { return nil }
         let len = header.withUnsafeBytes { UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self)) }
+        // Well above any result (text is limited to 256 MB), so a corrupt length cannot allocate 4 GB.
+        guard len <= maxFrameBytes else { return nil }
         return readExactly(Int(len), fd)
     }
 
@@ -87,6 +91,8 @@ public final class ExtractionWorker: @unchecked Sendable {
         case crashed
         /// `cancel()` stopped it; says nothing about the file.
         case cancelled
+        /// Killed for using more memory than `memoryLimit`.
+        case tooMuchMemory
     }
 
     private let executable: URL
@@ -102,6 +108,8 @@ public final class ExtractionWorker: @unchecked Sendable {
     private let cancelLock = NSLock()
     private var cancelled = false
     private var activePid: Int32?
+    /// A single file may not take the machine down with it.
+    public var memoryLimit: UInt64 = 2 << 30
 
     public init(executable: URL, environment: [String: String] = [:]) {
         self.executable = executable
@@ -130,6 +138,14 @@ public final class ExtractionWorker: @unchecked Sendable {
 
     public func resume() {
         cancelLock.withLock { cancelled = false }
+    }
+
+    private static func footprint(of pid: Int32) -> UInt64 {
+        var info = rusage_info_v4()
+        let rc = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+        }
+        return rc == 0 ? info.ri_phys_footprint : 0
     }
 
     private func beginRequest(_ pid: Int32) -> Bool {
@@ -199,13 +215,20 @@ public final class ExtractionWorker: @unchecked Sendable {
             reply = Framing.read(from: fd)
             done.signal()
         }
-        if done.wait(timeout: .now() + timeout) == .timedOut {
+        // Watched from here: macOS does not enforce memory rlimits.
+        let deadline = DispatchTime.now() + timeout
+        var finished = false, overLimit = false
+        while !finished && !overLimit && DispatchTime.now() < deadline {
+            finished = done.wait(timeout: min(deadline, .now() + 0.25)) == .success
+            if !finished { overLimit = Self.footprint(of: p.processIdentifier) > memoryLimit }
+        }
+        if !finished {
             _ = endRequest()
             kill(p.processIdentifier, SIGKILL)
             Self.awaitExit(p)
             done.wait()  // the read returns once the pipe closes
             stop()
-            return .timedOut
+            return overLimit ? .tooMuchMemory : .timedOut
         }
         let wasCancelled = endRequest()
         guard let reply, let response = try? JSONDecoder().decode(WorkerResponse.self, from: reply), response.id == id else {

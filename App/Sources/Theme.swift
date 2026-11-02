@@ -1,4 +1,5 @@
 import AppKit
+import os
 import XSearchCore
 
 /// Values from docs/design/UI-SPEC.md §2. System semantic colors where the spec allows them,
@@ -52,14 +53,27 @@ enum Theme {
     static let chipBackground = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua]) == .darkAqua ? NSColor.white.withAlphaComponent(0.12) : hex(0xEFEFF2) }
 
     /// "今天 14:20" / "10月28日" / "2024/3/1" (§9: spaces between Chinese and digits where needed).
+    /// Creating a formatter is the slow part (a result list asks for one per row).
+    nonisolated private static let formatters = OSAllocatedUnfairLock(initialState: [String: DateFormatter]())
+
+    nonisolated private static func formatter(_ format: String) -> DateFormatter {
+        formatters.withLock { cache in
+            if let f = cache[format] { return f }
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "zh_CN")
+            f.dateFormat = format
+            cache[format] = f
+            return f
+        }
+    }
+
     nonisolated static func shortDate(_ seconds: Int64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(seconds))
         let cal = Calendar.current
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        if cal.isDateInToday(date) { f.dateFormat = "今天 HH:mm" } else if cal.isDateInYesterday(date) { f.dateFormat = "昨天 HH:mm" }
-        else if cal.component(.year, from: date) == cal.component(.year, from: Date()) { f.dateFormat = "M月d日" } else { f.dateFormat = "yyyy/M/d" }
-        return f.string(from: date)
+        let format: String
+        if cal.isDateInToday(date) { format = "今天 HH:mm" } else if cal.isDateInYesterday(date) { format = "昨天 HH:mm" }
+        else if cal.component(.year, from: date) == cal.component(.year, from: Date()) { format = "M月d日" } else { format = "yyyy/M/d" }
+        return formatter(format).string(from: date)
     }
 
     nonisolated static func count(_ n: Int) -> String {

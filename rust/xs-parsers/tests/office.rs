@@ -218,3 +218,13 @@ fn unreadable_sheet_makes_the_workbook_partial() {
     assert_eq!(e.state, ExtractState::Partial);
     assert!(e.warnings.iter().any(|w| w.contains("坏")), "{:?}", e.warnings);
 }
+
+#[test]
+fn workbook_declaring_too_much_is_refused_before_reading() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("t.xlsx");
+    let big = "x".repeat(10_000);
+    zip(&p, &[("xl/workbook.xml", big)]);
+    let small = Limits { max_file_bytes: 1 << 20, max_unpacked_bytes: 1000 };
+    assert!(office::spreadsheet(&p, small).unwrap_err().to_string().contains("uncompressed size limit"));
+}

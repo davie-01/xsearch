@@ -69,6 +69,14 @@ pub fn spreadsheet(path: &Path, limits: Limits) -> Result<Extraction> {
     let known = path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
         ["xlsx", "xlsm", "xlsb", "xls", "xla", "ods"].contains(&e.to_ascii_lowercase().as_str())
     });
+    // The reader unpacks a whole sheet before the text budget can apply: go by the package's
+    // declared sizes first (a binary .xls is no package and is bound by the file limit).
+    if let Ok(z) = zip::ZipArchive::new(File::open(path)?) {
+        // None: the package does not say. Not a reason to refuse it.
+        if z.decompressed_size().is_some_and(|total| total > limits.max_unpacked_bytes as u128) {
+            bail!("uncompressed size limit");
+        }
+    }
     let mut wb = if known {
         open_workbook_auto(path).context("spreadsheet unreadable")?
     } else {
@@ -346,11 +354,14 @@ impl<T: Read + std::io::Seek> ReadSeek for T {}
 /// Opens a zip; when the end-of-central-directory record claims the wrong number of entries
 /// (seen in real ePubs from buggy writers; Python accepts them, the zip crate does not), the
 /// file is read into memory with the count corrected from the actual central directory.
+const REPAIR_MAX_BYTES: u64 = 512 << 20;
+
 pub(crate) fn open_zip(path: &Path, limits: Limits) -> Result<AnyZip> {
     let first = zip::ZipArchive::new(Box::new(File::open(path)?) as Box<dyn ReadSeek>);
     let Err(err) = first else { return Ok(first?) };
     let size = std::fs::metadata(path)?.len();
-    if size > limits.max_unpacked_bytes.max(limits.max_file_bytes) {
+    // The repair reads the whole file into memory; callers may pass no file limit of their own.
+    if size > limits.max_unpacked_bytes.max(limits.max_file_bytes).min(REPAIR_MAX_BYTES) {
         return Err(err.into());
     }
     let mut data = std::fs::read(path)?;

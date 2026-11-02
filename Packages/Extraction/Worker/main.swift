@@ -28,6 +28,14 @@ while let data = Framing.read(from: STDIN_FILENO) {
     if faultsAllowed {
         switch request.fault {
         case "hang": while true { sleep(60) }
+        case "hog":
+            var pages: [UnsafeMutableRawPointer] = []
+            while true {
+                let p = malloc(32 << 20)!
+                memset(p, 1, 32 << 20)
+                pages.append(p)
+                usleep(10_000)
+            }
         // SIGKILL rather than abort(): the supervisor sees the same death, and no crash
         // report is written to ~/Library/Logs/DiagnosticReports on every test run.
         case "crash": kill(getpid(), SIGKILL)
