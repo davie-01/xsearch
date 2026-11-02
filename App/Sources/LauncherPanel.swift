@@ -164,6 +164,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         panel.setContentSize(root.frame.size)
 
         mainGlass.style = .regular
+        mainGlass.cornerRadius = Shell.cornerRadius
         // Plain glass lets bright windows behind it wash out the text; a tint keeps the depth.
         mainGlass.tintColor = Theme.panelTint
         let mainContent = FlippedView()
@@ -337,7 +338,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         driver?.stop()
         guard animated && !reduceMotion && panel.isVisible else {
-            mainGlass.cornerRadius = bodyHeight > 0 ? Shell.bodyRadius : Shell.barRadius
             setMainFrame(targetMain)
             body.isHidden = bodyHeight == 0
             body.alphaValue = 1
@@ -352,8 +352,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // Spotlight: content gone in ~25 ms, a ~0.1 s hold, then a quick height snap (~0.1 s).
         let heightCurve: SpringCurve = collapsing ? .init(response: 0.2, damping: 0.95, delay: 0.1) : .init(response: 0.28, damping: 0.82)
         if expanding { body.isHidden = false }
-        // Round ends while the body is (nearly) gone; rounded rectangle once it has height.
-        let endRadius = targetH > Shell.bar + 0.5 ? Shell.bodyRadius : Shell.barRadius
 
         var duration = max(widthCurve.settle, heightCurve.settle)
         if collapsing { duration = max(duration, 0.2) }
@@ -362,7 +360,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             let w = from.width + (targetW - from.width) * CGFloat(widthCurve.value(t))
             let x = from.minX + (targetMain.minX - from.minX) * CGFloat(widthCurve.value(t))
             let h = from.height + (targetH - from.height) * CGFloat(heightCurve.value(t))
-            self.mainGlass.cornerRadius = h > Shell.bar + 10 ? Shell.bodyRadius : min(Shell.bodyRadius + (Shell.barRadius - Shell.bodyRadius) * (1 - (h - Shell.bar) / 10), Shell.barRadius)
             self.setMainFrame(NSRect(x: x, y: 0, width: w, height: max(Shell.bar, h)))
             // Body content: fade out quickly before collapsing, fade in while expanding.
             if collapsing {
@@ -372,7 +369,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             }
         } completion: { [weak self] in
             guard let self else { return }
-            self.mainGlass.cornerRadius = endRadius
             self.setMainFrame(targetMain)
             if self.bodyHeight == 0 { self.body.isHidden = true }
             self.body.alphaValue = 1
@@ -1432,9 +1428,9 @@ enum Shell {
     static let bar: CGFloat = 58
     /// Glass shapes closer than this melt together.
     static let mergeDistance: CGFloat = 12
-    /// Measured from Spotlight: a rounded bar with straight ends, not a full capsule.
-    static let barRadius: CGFloat = 22
-    static let bodyRadius: CGFloat = 26
+    /// One radius for the bar and the expanded panel, as in Spotlight: the corners never change
+    /// shape while the height animates.
+    static let cornerRadius: CGFloat = 26
     static let maxHeight: CGFloat = 760
     /// Content mode widens to two columns (UI-SPEC §3): list 420 + preview.
     static let contentWidth: CGFloat = 1120
