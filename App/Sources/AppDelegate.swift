@@ -272,7 +272,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "XSearch")
+        // Template: the system colours it for the menu bar. Not bundled under `swift run`.
+        let symbol = Bundle.main.image(forResource: "XSearchTemplate-18") ?? NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "XSearch")
+        symbol?.isTemplate = true
+        symbol?.accessibilityDescription = "XSearch"
+        statusItem.button?.image = symbol
         let menu = NSMenu()
         menu.delegate = self
         indexStatusItem.isEnabled = false

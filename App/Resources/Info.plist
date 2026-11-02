@@ -14,6 +14,7 @@
 	<key>LSMinimumSystemVersion</key><string>26.0</string>
 	<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
 	<key>LSUIElement</key><true/>
+	<key>CFBundleIconFile</key><string>XSearch</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>NSDesktopFolderUsageDescription</key><string>XSearch 需要读取“桌面”中的文件名来建立本机搜索索引。文件名不会离开这台 Mac。</string>
 	<key>NSDocumentsFolderUsageDescription</key><string>XSearch 需要读取“文稿”中的文件名来建立本机搜索索引。文件名不会离开这台 Mac。</string>

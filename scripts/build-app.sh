@@ -14,6 +14,7 @@ app="$PWD/target/XSearch.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp App/Resources/Info.plist "$app/Contents/Info.plist"
+cp App/Resources/XSearch.icns App/Resources/XSearchTemplate-18.png App/Resources/XSearchTemplate-18@2x.png "$app/Contents/Resources/"
 # Auto-update: the public EdDSA key always; the feed only when XS_FEED_URL is given (e.g.
 # https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml). No feed = updates off.
 /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $(cat App/Resources/sparkle-public-key.txt)" "$app/Contents/Info.plist"

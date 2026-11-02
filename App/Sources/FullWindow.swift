@@ -1,7 +1,6 @@
 import AppKit
 import Catalog
 import ContentEngine
-import Quartz
 import XSearchCore
 
 /// Window whose key equivalents go to the controller first.
@@ -45,8 +44,11 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private let countLabel = NSTextField(labelWithString: "")
     private let table = ResultTable()
     private let tableScroll = NSScrollView()
-    private let quickLook = QLPreviewView(frame: .zero, style: .normal)!
     private let textPreview = PreviewPane()
+    private var previewArea: NSView?
+    private let previewDivider = NSBox()
+    private lazy var previewWidth = previewArea!.widthAnchor.constraint(equalToConstant: 440)
+    private lazy var previewDividerWidth = previewDivider.widthAnchor.constraint(equalToConstant: 1)
     private let sidebar = NSStackView()
     private let timePopup = NSPopUpButton()
     private let matchPopup = NSPopUpButton()
@@ -143,6 +145,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         table.rowHeight = 24
         table.dataSource = self
         table.delegate = self
+        // The table's width changes with the mode (no preview for names): columns share it.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.doubleAction = #selector(doubleClicked)
         table.target = self
         table.onReturn = { [weak self] flags in self?.openSelected(reveal: flags.contains(.command)) }
@@ -153,7 +157,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         textPreview.locate.title = "阅读窗口 ⌘↵"
         textPreview.onLocate = { [weak self] in self?.openReader() }
         let preview = NSView()
-        for v in [quickLook, textPreview] as [NSView] {
+        for v in [textPreview] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             preview.addSubview(v)
             NSLayoutConstraint.activate([
@@ -161,7 +165,6 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
                 v.topAnchor.constraint(equalTo: preview.topAnchor), v.bottomAnchor.constraint(equalTo: preview.bottomAnchor),
             ])
         }
-        textPreview.isHidden = true
 
         for v in [sidebarBox, sidebarScroll, top, tableScroll, preview] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -170,7 +173,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         root.addSubview(sidebarBox)
         sidebarBox.addSubview(sidebarScroll)
         for v in [top, tableScroll, preview] as [NSView] { root.addSubview(v) }
-        let divider = NSBox()
+        previewArea = preview
+        let divider = previewDivider
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(divider)
@@ -198,13 +202,14 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
             divider.topAnchor.constraint(equalTo: top.bottomAnchor),
             divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: tableScroll.trailingAnchor),
-            divider.widthAnchor.constraint(equalToConstant: 1),
+            previewDividerWidth,
             preview.topAnchor.constraint(equalTo: top.bottomAnchor),
             preview.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             preview.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             preview.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            preview.widthAnchor.constraint(equalToConstant: 440),
+            previewWidth,
         ])
+        updatePreviewVisibility()
 
         timePopup.addItems(withTitles: Self.times.map(\.0))
         timePopup.target = self
@@ -292,6 +297,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         if mode != self.mode {
             self.mode = mode
             modeControl.selectedSegment = mode == .content ? 1 : 0
+            updatePreviewVisibility()
             rebuildSidebar()
         }
         showWindow(nil)
@@ -302,8 +308,22 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     func controlTextDidChange(_ obj: Notification) { runSearch() }
 
+    /// The preview belongs to content search; file names get the whole width for the table.
+    private func updatePreviewVisibility() {
+        let shown = mode == .content
+        previewArea?.isHidden = !shown
+        previewDivider.isHidden = !shown
+        previewWidth.constant = shown ? 440 : 0
+        previewDividerWidth.constant = shown ? 1 : 0
+        if !shown {
+            previewToken += 1
+            textPreview.clear()
+        }
+    }
+
     @objc private func modeChanged() {
         mode = modeControl.selectedSegment == 1 ? .content : .name
+        updatePreviewVisibility()
         rebuildSidebar()
         runSearch()
     }
@@ -472,23 +492,14 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
 
     private func showPreview(_ row: Row?) {
         previewToken += 1
-        guard let row else {
-            quickLook.previewItem = nil
+        guard let row, let hit = row.hit else {
             textPreview.clear()
             return
         }
-        if let hit = row.hit {
-            quickLook.isHidden = true
-            textPreview.isHidden = false
-            let token = previewToken
-            content.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
-                guard let self, token == self.previewToken else { return }
-                if let data { self.textPreview.show(data, path: row.path, location: hit.isMember ? hit.displayLocation : nil) } else { self.textPreview.clear() }
-            }
-        } else {
-            textPreview.isHidden = true
-            quickLook.isHidden = false
-            quickLook.previewItem = URL(fileURLWithPath: row.path) as NSURL
+        let token = previewToken
+        content.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
+            guard let self, token == self.previewToken else { return }
+            if let data { self.textPreview.show(data, path: row.path, location: hit.isMember ? hit.displayLocation : nil) } else { self.textPreview.clear() }
         }
     }
 

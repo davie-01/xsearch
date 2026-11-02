@@ -45,7 +45,7 @@ final class ResultCellView: NSTableCellView {
             addSubview(v)
         }
         icon.imageScaling = .scaleProportionallyUpOrDown
-        name.lineBreakMode = .byTruncatingMiddle
+        name.lineBreakMode = .byTruncatingTail
         path.lineBreakMode = .byTruncatingMiddle
         // One line each: a long name wrapped and pushed the path line out of the row.
         for f in [name, path] {
@@ -93,7 +93,10 @@ final class ResultCellView: NSTableCellView {
 
     /// Matched parts semibold in the accent color (§4.2).
     static func highlight(_ text: String, terms: [String]) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: text, attributes: [.font: Theme.nameFont, .foregroundColor: NSColor.labelColor])
+        // An attributed string brings its own line breaking: a long name ends in "…".
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let s = NSMutableAttributedString(string: text, attributes: [.font: Theme.nameFont, .paragraphStyle: style, .foregroundColor: NSColor.labelColor])
         let ns = text as NSString
         for term in terms where !term.isEmpty {
             // Display-only approximation of the folded-key match; the index decides membership.
