@@ -16,29 +16,39 @@ pub(crate) struct Out {
     pub(crate) anchors: Vec<Anchor>,
     pub(crate) partial: bool,
     pub(crate) warnings: Vec<String>,
-    max_chars: usize,
+    max_bytes: usize,
+    /// The text was cut: nothing later may follow it, even if a short piece would still fit.
+    full: bool,
 }
 
 impl Out {
     pub(crate) fn new(limits: Limits) -> Self {
-        // Unpacked byte budget doubles as a text budget (scalars ≤ bytes).
-        Self { text: String::new(), chars: 0, anchors: vec![], partial: false, warnings: vec![], max_chars: limits.max_unpacked_bytes as usize }
+        // The unpacked byte budget doubles as the budget for the UTF-8 text produced.
+        Self { text: String::new(), chars: 0, anchors: vec![], partial: false, warnings: vec![], max_bytes: limits.max_unpacked_bytes as usize, full: false }
     }
     pub(crate) fn anchor(&mut self, kind: AnchorKind) {
         self.anchors.push(Anchor { start: self.chars as u32, kind });
     }
-    /// Returns false once the text budget is exhausted.
+    /// Appends what fits, ending on a character boundary. Returns false once the budget is
+    /// exhausted: the text is then marked partial and never exceeds the budget.
     pub(crate) fn push(&mut self, s: &str) -> bool {
-        if self.chars >= self.max_chars {
-            if !self.partial {
-                self.partial = true;
-                self.warnings.push("内容超过上限，后续部分未索引".into());
-            }
+        if self.full {
             return false;
         }
-        self.text.push_str(s);
-        self.chars += s.chars().count();
-        true
+        let room = self.max_bytes.saturating_sub(self.text.len());
+        let fits = s.len() <= room;
+        let mut end = s.len().min(room);
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.text.push_str(&s[..end]);
+        self.chars += s[..end].chars().count();
+        if !fits {
+            self.full = true;
+            self.partial = true;
+            self.warnings.push("内容超过上限，后续部分未索引".into());
+        }
+        fits
     }
     pub(crate) fn done(self, method: &str) -> Extraction {
         Extraction {
@@ -652,4 +662,34 @@ fn ppt_by_persist(d: &[u8], slides: &mut BTreeMap<u32, Vec<String>>, notes: &mut
     }
     slides.retain(|_, v| !v.is_empty());
     true
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn out(max: u64) -> Out {
+        Out::new(Limits { max_file_bytes: 1 << 20, max_unpacked_bytes: max })
+    }
+
+    #[test]
+    fn text_never_exceeds_the_byte_budget() {
+        let mut o = out(4);
+        assert!(!o.push("中文ABC"));
+        assert_eq!((o.text.as_str(), o.chars), ("中", 1), "cut on a character boundary");
+        assert_eq!(o.done("t").state, ExtractState::Partial);
+
+        let mut o = out(6);
+        assert!(o.push("中文"), "exactly the budget fits");
+        assert!(!o.partial);
+        assert!(!o.push("中文"));
+        assert_eq!(o.text, "中文");
+        assert_eq!(o.done("t").state, ExtractState::Partial);
+
+        let mut o = out(5);
+        assert!(!o.push("😀😀"));
+        assert_eq!(o.text, "😀");
+        assert!(!o.push("x"), "one byte is free, but text after the cut would leave a hole");
+        assert_eq!(o.text, "😀");
+    }
 }

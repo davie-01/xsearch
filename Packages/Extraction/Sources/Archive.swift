@@ -31,9 +31,11 @@ extension Extractor {
         var scalars = 0
         var anchors: [[String: Any]] = []
         var warnings = listing.warnings
-        var failed = 0, incomplete = 0, timedOut = false
+        var failed = 0, incomplete = 0, timedOut = false, full = false
         for m in listing.members {
             if Date() > deadline { timedOut = true; break }
+            // Members are small on disk but can unfold into much more text.
+            if text.utf8.count >= limits.maxUnpackedBytes { full = true; break }
             guard let r = try? extract(path: m.extractedPath, limits: limits) else { failed += 1; continue }
             try? FileManager.default.removeItem(atPath: m.extractedPath)
             if r.state != "complete" {
@@ -56,8 +58,9 @@ extension Extractor {
         }
         if failed > 0 { warnings.append("\(failed) 个文件无法提取") }
         if incomplete > 0 { warnings.append("\(incomplete) 个文件只提取了一部分") }
+        if full { warnings.append("压缩包正文超过上限，后续文件未读取") }
         if timedOut { warnings.append("压缩包处理超时，后续文件未读取") }
-        let partial = failed > 0 || incomplete > 0 || timedOut || listing.truncated || listing.encrypted > 0 || listing.skippedTooLarge > 0
+        let partial = failed > 0 || incomplete > 0 || full || timedOut || listing.truncated || listing.encrypted > 0 || listing.skippedTooLarge > 0
         return ExtractionResult(text: text, anchorsJSON: json(anchors), pagesJSON: "[]", state: partial ? "partial" : "complete",
                                 warnings: warnings, method: "archive", extractorVersion: archiveVersion)
     }

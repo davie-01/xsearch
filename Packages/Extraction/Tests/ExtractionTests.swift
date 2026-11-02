@@ -211,3 +211,24 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(worker.extract(path: txt, limits: ExtractionLimits(), timeout: 20, fault: "hog") == .tooMuchMemory)
     #expect(worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) != .crashed, "the next file gets a new process")
 }
+
+@Test func everyKindRespectsTheTextBudget() throws {
+    let limits = ExtractionLimits(maxFileBytes: 1 << 20, maxUnpackedBytes: 40)
+    // Plain RTF, more text than the budget; 中 is three bytes, so the cut lands inside a character.
+    let rtf = tmp("budget-\(UUID().uuidString).rtf")
+    let long = NSAttributedString(string: String(repeating: "中文段落内容\n", count: 50))
+    try long.rtf(from: NSRange(location: 0, length: long.length))!.write(to: URL(fileURLWithPath: rtf))
+    let r = try Extractor.extract(path: rtf, limits: limits)
+    #expect(r.text.utf8.count <= 40 && !r.text.isEmpty)
+    #expect(r.state == "partial" && r.warnings.contains { $0.contains("超过上限") })
+    let anchors = try JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8)) as! [[String: Any]]
+    #expect(anchors.allSatisfy { ($0["start"] as! Int) < r.text.unicodeScalars.count })
+    // PDF: stops between pages.
+    let pdf = tmp("budget-\(UUID().uuidString).pdf")
+    makePDF(pdf)
+    let p = try Extractor.extract(path: pdf, limits: ExtractionLimits(maxFileBytes: 1 << 20, maxUnpackedBytes: 10))
+    #expect(p.text.utf8.count <= 10 && p.state == "partial")
+    // Enough room: untouched.
+    let whole = try Extractor.extract(path: pdf, limits: ExtractionLimits())
+    #expect(whole.text.utf8.count > 10 && !whole.warnings.contains { $0.contains("超过上限") })
+}

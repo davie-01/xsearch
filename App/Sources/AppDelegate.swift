@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var indexer: IndexServiceClient?
     private var statusTimer: Timer?
     private var menuOpen = false
+    private var rebuildingNames = false
     private let contentStatusItem = NSMenuItem(title: "内容索引：正在打开", action: nil, keyEquivalent: "")
     private var usage: UsageStore?
     private var session: SearchSession!
@@ -160,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MemberOpener.removeOldExtractions()
         let data = dataDirectory
+        IndexFiles.removeRetired(in: data)
         // A first launch has no catalog yet; installs that predate the guide skip it.
         let fresh = !FileManager.default.fileExists(atPath: data.appendingPathComponent("catalog.sqlite").path)
         names = NameService(directory: data)
@@ -211,6 +213,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Dev: open a settings tab directly (XS_SETTINGS_TAB=搜索语法).
         if let tab = env["XS_SETTINGS_TAB"].flatMap(SettingsTab.init(rawValue:)) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.openSettings(tab: tab) }
+        }
+        // Dev: XS_REBUILD_NAMES=1 rebuilds the name index shortly after launch, as the settings do.
+        if env["XS_REBUILD_NAMES"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.rebuildNameIndex() }
         }
         // Dev: open the full window directly (XS_FULL_MODE=content for content mode).
         if let text = env["XS_FULL_TEXT"] {
@@ -394,13 +400,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Deletes the rebuildable name index (catalog + snapshot) and scans again. user.sqlite stays.
     func rebuildNameIndex() {
-        indexer?.stop()
+        guard !rebuildingNames else { return }
+        rebuildingNames = true
+        guard let indexer else { finishNameRebuild(); return }
+        contentStatusItem.title = "内容索引：正在停止…"
+        indexer.stopAndConfirm { [weak self] closed in
+            guard let self else { return }
+            guard closed else {
+                // The old writer may still be working: its files stay where they are.
+                self.rebuildingNames = false
+                indexer.resume()
+                let alert = NSAlert()
+                alert.messageText = "暂时无法重建文件名索引"
+                alert.informativeText = "内容索引还在收尾，没有删除任何文件。请稍后再试。"
+                NSApp.activate()
+                alert.runModal()
+                return
+            }
+            self.finishNameRebuild()
+        }
+    }
+
+    private func finishNameRebuild() {
+        rebuildingNames = false
         names.shutdown()
         let data = dataDirectory
         // File ids are catalog ids: the content index is rebuilt together with the catalog.
-        for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "names", "content"] {
-            try? FileManager.default.removeItem(at: data.appendingPathComponent(name))
-        }
+        IndexFiles.retire(in: data)
         names = NameService(directory: data)
         names.onStatus = { [weak self] _ in Task { @MainActor in self?.statusChanged() } }
         session = SearchSession(names: names, usage: usage)

@@ -5,6 +5,11 @@ import Foundation
 /// the latest snapshot for the status line and the readers, reconnects and restarts the
 /// indexer when the service dies. Without the bundled service (swift run, tests) the indexer
 /// runs in-process instead, with the same interface.
+private struct UncheckedConnection: @unchecked Sendable {
+    let connection: NSXPCConnection
+    init(_ connection: NSXPCConnection) { self.connection = connection }
+}
+
 @MainActor
 final class IndexServiceClient {
     private let dataDirectory: URL
@@ -165,7 +170,45 @@ final class IndexServiceClient {
         }
     }
 
-    /// Waits for the writer to close before the app quits or deletes the index, at most 2 s so
+    /// For deleting the index: reports whether the service answered that its writer is closed
+    /// (or the connection died with it), without blocking the main thread. false after `timeout`:
+    /// the writer may still be working, so nothing may be deleted; `resume` reconnects.
+    func stopAndConfirm(timeout: TimeInterval = 20, done: @escaping @MainActor @Sendable (Bool) -> Void) {
+        stopping = true
+        generation += 1
+        if let local {
+            local.stop()
+            self.local = nil
+            done(true)
+            return
+        }
+        guard let c = connection else { done(true); return }
+        let answered = DispatchSemaphore(value: 0)
+        let remote = c.remoteObjectProxyWithErrorHandler { @Sendable _ in answered.signal() } as? IndexServiceProtocol
+        remote?.stop { @Sendable in answered.signal() }
+        let box = UncheckedConnection(c)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let closed = answered.wait(timeout: .now() + timeout) == .success
+            DispatchQueue.main.async {
+                if closed {
+                    box.connection.invalidate()
+                    self?.connection = nil
+                    self?.setPath(nil)
+                }
+                done(closed)
+            }
+        }
+    }
+
+    /// After a `stopAndConfirm` that timed out: back to normal.
+    func resume() {
+        stopping = false
+        connection?.invalidate()
+        connection = nil
+        start()
+    }
+
+    /// Waits for the writer to close before the app quits, at most 2 s so
     /// quitting never hangs; the service stops by itself when the connection goes away, and
     /// the next start recovers anything left unfinished.
     func stop() {

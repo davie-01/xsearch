@@ -56,7 +56,8 @@ public enum Framing {
     public static func read(from fd: Int32) -> Data? {
         guard let header = readExactly(4, fd) else { return nil }
         let len = header.withUnsafeBytes { UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self)) }
-        // Well above any result (text is limited to 256 MB), so a corrupt length cannot allocate 4 GB.
+        // Well above any result (text is cut at `maxUnpackedBytes`, then encoded as JSON), so a
+        // corrupt length cannot allocate 4 GB.
         guard len <= maxFrameBytes else { return nil }
         return readExactly(Int(len), fd)
     }

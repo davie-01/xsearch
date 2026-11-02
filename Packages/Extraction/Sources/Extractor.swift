@@ -76,6 +76,25 @@ public enum Extractor {
     }
 
     public static func extract(path: String, limits: ExtractionLimits) throws -> ExtractionResult {
+        limited(try extractAny(path: path, limits: limits), to: limits.maxUnpackedBytes)
+    }
+
+    /// The one budget every kind ends with: UTF-8 text, cut on a character boundary, partial.
+    static func limited(_ result: ExtractionResult, to maxBytes: UInt64) -> ExtractionResult {
+        guard result.text.utf8.count > maxBytes else { return result }
+        var end = result.text.utf8.index(result.text.utf8.startIndex, offsetBy: Int(maxBytes))
+        while end.samePosition(in: result.text.unicodeScalars) == nil { end = result.text.utf8.index(before: end) }
+        var r = result
+        r.text = String(result.text[..<end])
+        let scalars = r.text.unicodeScalars.count
+        let anchors = (try? JSONSerialization.jsonObject(with: Data(r.anchorsJSON.utf8)) as? [[String: Any]]) ?? []
+        r.anchorsJSON = json(anchors.filter { ($0["start"] as? Int ?? 0) < scalars })
+        r.state = "partial"
+        r.warnings.append("内容超过上限，后续部分未索引")
+        return r
+    }
+
+    private static func extractAny(path: String, limits: ExtractionLimits) throws -> ExtractionResult {
         guard let kind = ExtractionKind.of(path: path) else { throw ExtractionError.unsupported((path as NSString).pathExtension) }
         switch kind {
         case .text:
@@ -85,7 +104,7 @@ public enum Extractor {
             return try rust { try extractDocx(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
         case .pdf:
             try checkSize(path, limits)
-            return try pdf(path)
+            return try pdf(path, maxBytes: limits.maxUnpackedBytes)
         case .doc:
             try checkSize(path, limits)
             return try doc(path)
@@ -146,16 +165,19 @@ public enum Extractor {
     /// blank → waiting_ocr (§14), NUL / U+FFFD present → partial (the layer lost characters;
     /// M0 found 𠀀 turning into NUL). Raw page text is kept unchanged so PDFKit selections
     /// still line up for highlighting.
-    static func pdf(_ path: String) throws -> ExtractionResult {
+    /// Stops at `maxBytes` of text: a small file can hold far more text than its size suggests.
+    static func pdf(_ path: String, maxBytes: UInt64) throws -> ExtractionResult {
         guard let doc = PDFDocument(url: URL(fileURLWithPath: path)) else { throw ExtractionError.unreadable("PDF 无法打开") }
         if doc.isLocked || doc.isEncrypted && !doc.unlock(withPassword: "") { throw ExtractionError.encrypted }
         var text = ""
         var scalars = 0
         var anchors: [[String: Any]] = []
         var pages: [[String: Any]] = []
-        var waiting = 0, partial = 0
+        var waiting = 0, partial = 0, stopped = false
         for i in 0..<doc.pageCount {
-            let s = doc.page(at: i)?.string ?? ""
+            if text.utf8.count >= maxBytes { stopped = true; break }
+            // Each page's objects go back at once.
+            let s = autoreleasepool { doc.page(at: i)?.string ?? "" }
             let state: String
             if s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 state = "waiting_ocr"; waiting += 1
@@ -172,7 +194,8 @@ public enum Extractor {
         var warnings: [String] = []
         if waiting > 0 { warnings.append("\(waiting) 页没有文字层，等待 OCR") }
         if partial > 0 { warnings.append("\(partial) 页文字层有缺失字符") }
-        let state = doc.pageCount > 0 && waiting == doc.pageCount ? "waiting_ocr" : (waiting + partial > 0 ? "partial" : "complete")
+        let state = doc.pageCount > 0 && waiting == doc.pageCount ? "waiting_ocr" : (waiting + partial > 0 || stopped ? "partial" : "complete")
+        if stopped { warnings.append("内容超过上限，后续页面未索引") }
         return ExtractionResult(text: text, anchorsJSON: json(anchors), pagesJSON: json(pages), state: state,
                                 warnings: warnings, method: "pdfkit", extractorVersion: pdfVersion)
     }

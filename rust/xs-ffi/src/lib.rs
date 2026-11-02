@@ -617,11 +617,17 @@ pub struct LiveText {
 impl LiveScan {
     /// Decoded text (BOM / UTF-8 / GB18030), None when unreadable, too large or binary.
     fn read(&self, path: &str) -> Option<String> {
-        let meta = std::fs::metadata(path).ok()?;
+        // The size comes from the open file and the read is bounded: it may be growing.
+        let file = std::fs::File::open(path).ok()?;
+        let meta = file.metadata().ok()?;
         if !meta.is_file() || meta.len() > self.max_file_bytes {
             return None;
         }
-        let bytes = std::fs::read(path).ok()?;
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        std::io::Read::read_to_end(&mut std::io::Read::take(file, self.max_file_bytes + 1), &mut bytes).ok()?;
+        if bytes.len() as u64 > self.max_file_bytes {
+            return None;
+        }
         // Binary data posing as text: a NUL in the first 8 KB.
         if bytes.iter().take(8192).any(|&b| b == 0) && !bytes.starts_with(&[0xFF, 0xFE]) && !bytes.starts_with(&[0xFE, 0xFF]) {
             return None;

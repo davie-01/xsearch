@@ -671,3 +671,80 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     usleep(800_000)
     #expect(count.withLock { $0 } == 1, "once per burst")
 }
+
+// MARK: Follow-up review (step 1)
+
+@Test func healthyBatchOutlastingItsLeaseIsCommitted() throws {
+    let extractions = OSAllocatedUnfairLock(initialState: 0)
+    let p = try Pipeline("long-batch") { i in
+        i.leaseSeconds = 0.05
+        i.afterExtract = { _ in
+            extractions.withLock { $0 += 1 }
+            usleep(80_000)  // longer than the lease
+        }
+    }
+    defer { p.stop() }
+    try p.box.write("docs/slow.txt", "缓慢 zeta99")
+    try p.start()
+    #expect(p.until { try p.search("zeta99") == ["slow.txt"] })
+    #expect(extractions.withLock { $0 } == 1, "extracted once, not over and over")
+    #expect(p.indexer.status.committedBatches >= 1)
+}
+
+@Test func supersededTaskStillRollsTheBatchBack() throws {
+    // A newer version arriving during extraction must win, lease or no lease.
+    nonisolated(unsafe) var catalog: FileCatalog?
+    nonisolated(unsafe) var fired = false
+    let p = try Pipeline("superseded") { i in
+        i.afterExtract = { _ in
+            guard !fired, let c = catalog else { return }
+            fired = true
+            _ = try? c.db.exec("UPDATE files SET op_seq = op_seq + 100000 WHERE name = 'x.txt'")
+        }
+    }
+    defer { p.stop() }
+    try p.box.write("docs/x.txt", "旧版 eta98")
+    try FileManager.default.createDirectory(atPath: p.box.p("docs"), withIntermediateDirectories: true)
+    p.names.start(scope: p.box.scope, content: ContentScope(folders: [p.box.p("docs")]))
+    #expect(p.names.waitUntilIdle())
+    catalog = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    try p.indexer.start()
+    #expect(p.indexer.waitUntilIdle(timeout: 20), "the cycle ends")
+    #expect(fired)
+    #expect(try p.search("eta98").isEmpty, "the stale result was not published")
+}
+
+@Test func shutdownStopsWatcherRetries() throws {
+    let p = try Pipeline("watch-stop")
+    p.names.failWatcherStarts = 99
+    p.names.watcherDelay = 0.05
+    try p.start()
+    usleep(200_000)
+    p.stop()
+    let left = p.names.failWatcherStarts
+    usleep(500_000)
+    #expect(p.names.failWatcherStarts == left, "no retry after shutdown")
+}
+
+@Test func retiredIndexFilesLeaveAtOnceAndPersonalDataStays() throws {
+    let box = try Sandbox("retire")
+    let fm = FileManager.default
+    try fm.createDirectory(at: box.data, withIntermediateDirectories: true)
+    for name in ["catalog.sqlite", "catalog.sqlite-wal", "user.sqlite"] { try "x".write(to: box.data.appendingPathComponent(name), atomically: true, encoding: .utf8) }
+    try fm.createDirectory(at: box.data.appendingPathComponent("content/old"), withIntermediateDirectories: true)
+    // Held open like a writer still shutting down: it keeps working on the moved file.
+    let open = try FileHandle(forWritingTo: box.data.appendingPathComponent("catalog.sqlite"))
+    defer { try? open.close() }
+    IndexFiles.retire(in: box.data)
+    #expect(!fm.fileExists(atPath: box.data.appendingPathComponent("catalog.sqlite").path))
+    #expect(!fm.fileExists(atPath: box.data.appendingPathComponent("content").path))
+    #expect(fm.fileExists(atPath: box.data.appendingPathComponent("user.sqlite").path))
+    try open.write(contentsOf: Data("late".utf8))
+    #expect(!fm.fileExists(atPath: box.data.appendingPathComponent("catalog.sqlite").path), "a late write does not come back")
+    // A crash left one behind: the next launch collects it.
+    let left = box.data.appendingPathComponent("retired-crash")
+    try fm.createDirectory(at: left, withIntermediateDirectories: true)
+    IndexFiles.removeRetired(in: box.data)
+    #expect(!fm.fileExists(atPath: left.path))
+    #expect(fm.fileExists(atPath: box.data.appendingPathComponent("user.sqlite").path))
+}

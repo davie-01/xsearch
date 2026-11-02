@@ -33,6 +33,8 @@ public final class NameService: @unchecked Sendable {
     private var catalog: FileCatalog?
     private var watcher: FSEventsWatcher?
     private var watcherRetry: DispatchWorkItem?
+    /// Set on `queue`: a retry already scheduled or running must not watch for a stopped service.
+    private var isShutDown = false
     var watcherDelay: TimeInterval = 5
     /// Test hook: this many watcher starts fail.
     var failWatcherStarts = 0
@@ -123,6 +125,8 @@ public final class NameService: @unchecked Sendable {
     /// Stops watching, folds the overlay and writes the snapshot. Safe to call more than once.
     public func shutdown() {
         queue.sync {
+            isShutDown = true
+            watcherRetry?.cancel(); watcherRetry = nil
             persistTimer?.cancel(); persistTimer = nil
             watcher?.stop(); watcher = nil
             saveCursor()
@@ -256,6 +260,8 @@ public final class NameService: @unchecked Sendable {
     /// Test hook: stop like a crash (no merge, no snapshot write, no catalog close).
     func simulateCrash() {
         queue.sync {
+            isShutDown = true
+            watcherRetry?.cancel(); watcherRetry = nil
             persistTimer?.cancel(); persistTimer = nil
             watcher?.stop(); watcher = nil
             catalog = nil
@@ -373,6 +379,7 @@ public final class NameService: @unchecked Sendable {
     }
 
     private func restartWatcher(since: UInt64) {
+        guard !isShutDown else { return }
         watcher?.stop()
         watcherRetry?.cancel()
         watcherRetry = nil
@@ -572,5 +579,35 @@ public final class NameService: @unchecked Sendable {
 
     private func fail(_ error: Error) {
         updateStatus { $0.phase = .failed(String(describing: error)) }
+    }
+}
+
+/// The rebuildable files of a data directory. They are moved aside as one step and deleted in
+/// the background: a writer that is still shutting down keeps its open files and cannot touch
+/// what replaces them. A crash before the deletion is cleaned up at the next launch.
+public enum IndexFiles {
+    private static let names = ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "names", "content"]
+    private static let prefix = "retired-"
+
+    /// Everything but personal data (`user.sqlite`) leaves the way for a new index.
+    public static func retire(in directory: URL) {
+        let fm = FileManager.default
+        let aside = directory.appendingPathComponent(prefix + UUID().uuidString)
+        try? fm.createDirectory(at: aside, withIntermediateDirectories: true)
+        for name in names where fm.fileExists(atPath: directory.appendingPathComponent(name).path) {
+            do {
+                try fm.moveItem(at: directory.appendingPathComponent(name), to: aside.appendingPathComponent(name))
+            } catch {
+                try? fm.removeItem(at: directory.appendingPathComponent(name))
+            }
+        }
+        DispatchQueue.global(qos: .utility).async { removeRetired(in: directory) }
+    }
+
+    public static func removeRetired(in directory: URL) {
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasPrefix(prefix) {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
     }
 }

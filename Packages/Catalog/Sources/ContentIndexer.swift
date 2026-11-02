@@ -12,8 +12,10 @@ import XSearchCore
 /// 1. tasks carry the file's op_seq; results whose op_seq is not newer than the writer's
 ///    sequence table (committed + staged) are dropped;
 /// 2. the file version is checked before and after extraction;
-/// 3. before committing, every staged task must still be the file's latest op and hold a valid
-///    lease, otherwise the whole batch is rolled back and the sequence table rebuilt;
+/// 3. before committing, every staged task must still be the file's latest op, otherwise the
+///    whole batch is rolled back and the sequence table rebuilt. Leases are not checked here:
+///    this process is the only writer and holds its batch; a lease only tells a later start or
+///    cycle that a task was abandoned, however long healthy extraction takes;
 /// 4. batch members are recorded in SQLite, then the index commits with (instance, batch) in
 ///    its payload, then SQLite confirms. At most one unconfirmed batch exists; on restart the
 ///    payload tells whether it was committed.
@@ -683,21 +685,20 @@ public final class ContentIndexer: @unchecked Sendable {
         guard !staged.isEmpty else { return }
         try check(.afterStage)
 
-        // Re-validate before publishing: still the latest op, lease still valid.
-        let now = Date().timeIntervalSince1970
+        // Re-validate before publishing: still the latest op.
         var invalid = false
         for (t, _) in staged {
             let s = try catalog.db.prepare("""
-                SELECT COALESCE(f.op_seq, t.op_seq), t.lease_until FROM content_tasks t LEFT JOIN files f ON f.id = t.file_id
+                SELECT COALESCE(f.op_seq, t.op_seq) FROM content_tasks t LEFT JOIN files f ON f.id = t.file_id
                 WHERE t.file_id = ? AND t.op_seq = ? AND t.kind = ?
                 """).bind(t.fileId, t.opSeq, t.kind.rawValue)
-            let ok = try s.first { s in s.int(0) == t.opSeq && s.double(1) > now } ?? false
+            let ok = try s.first { s in s.int(0) == t.opSeq } ?? false
             if !ok { invalid = true; break }
         }
         if invalid {
             try writer.rollback()
             committedSeq = try writer.appliedSeqs()
-            // Superseded ones are dropped by the next claim's op_seq check; expired leases requeue.
+            // Superseded ones are dropped by the next claim's op_seq check.
             try catalog.db.exec("UPDATE content_tasks SET state = 0 WHERE state = 1")
             return
         }
