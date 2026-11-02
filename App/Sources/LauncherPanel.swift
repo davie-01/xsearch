@@ -106,6 +106,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private let contentChip = NSButton(title: "内容  ×", target: nil, action: nil)
     /// Spotlight-style scope: Tab on an app (its documents) or a folder (its contents).
     private let scopeChip = NSButton(title: "", target: nil, action: nil)
+    private var scopeChipWidth: NSLayoutConstraint!
+    /// Tokens in the input, measured from Spotlight: 30 pt high, nearly the input's own text size.
+    private static let tokenFont = NSFont.systemFont(ofSize: 24)
     private enum Scope { case app(DocumentTypes), folder(String), kind(FileKind) }
     private var scope: Scope?
     private let chips = NSStackView()
@@ -185,11 +188,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentChip.bezelStyle = .inline
         contentChip.isBordered = false
         contentChip.wantsLayer = true
-        contentChip.layer?.cornerRadius = 9
+        contentChip.layer?.cornerRadius = 8
         contentChip.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
         contentChip.contentTintColor = .controlAccentColor
-        contentChip.font = .systemFont(ofSize: 14, weight: .medium)
-        contentChip.title = "  内容  ×  "
+        contentChip.font = Self.tokenFont
+        contentChip.title = "内容"
+        contentChip.widthAnchor.constraint(equalToConstant: ceil(("内容" as NSString).size(withAttributes: [.font: Self.tokenFont]).width) + 24).isActive = true
+        contentChip.heightAnchor.constraint(equalToConstant: 30).isActive = true
         contentChip.target = self
         contentChip.action = #selector(removeContentPrefix)
         contentChip.setAccessibilityLabel("移除内容前缀")
@@ -198,11 +203,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         scopeChip.bezelStyle = .inline
         scopeChip.isBordered = false
         scopeChip.wantsLayer = true
-        scopeChip.layer?.cornerRadius = 9
-        scopeChip.layer?.backgroundColor = NSColor.secondaryLabelColor.withAlphaComponent(0.16).cgColor
+        scopeChip.layer?.cornerRadius = 8
+        scopeChip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
         scopeChip.contentTintColor = .labelColor
-        scopeChip.font = .systemFont(ofSize: 14, weight: .medium)
+        scopeChip.font = Self.tokenFont
+        scopeChip.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        scopeChipWidth = scopeChip.widthAnchor.constraint(equalToConstant: 0)
+        scopeChipWidth.isActive = true
         scopeChip.imagePosition = .imageLeading
+        scopeChip.imageHugsTitle = true
         scopeChip.target = self
         scopeChip.action = #selector(removeScope)
         scopeChip.isHidden = true
@@ -328,7 +337,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         driver?.stop()
         guard animated && !reduceMotion && panel.isVisible else {
-            mainGlass.cornerRadius = bodyHeight > 0 ? Shell.bodyRadius : Shell.bar / 2
+            mainGlass.cornerRadius = bodyHeight > 0 ? Shell.bodyRadius : Shell.barRadius
             setMainFrame(targetMain)
             body.isHidden = bodyHeight == 0
             body.alphaValue = 1
@@ -344,7 +353,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let heightCurve: SpringCurve = collapsing ? .init(response: 0.2, damping: 0.95, delay: 0.1) : .init(response: 0.28, damping: 0.82)
         if expanding { body.isHidden = false }
         // Round ends while the body is (nearly) gone; rounded rectangle once it has height.
-        let endRadius = targetH > Shell.bar + 0.5 ? Shell.bodyRadius : Shell.bar / 2
+        let endRadius = targetH > Shell.bar + 0.5 ? Shell.bodyRadius : Shell.barRadius
 
         var duration = max(widthCurve.settle, heightCurve.settle)
         if collapsing { duration = max(duration, 0.2) }
@@ -353,7 +362,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             let w = from.width + (targetW - from.width) * CGFloat(widthCurve.value(t))
             let x = from.minX + (targetMain.minX - from.minX) * CGFloat(widthCurve.value(t))
             let h = from.height + (targetH - from.height) * CGFloat(heightCurve.value(t))
-            self.mainGlass.cornerRadius = h > Shell.bar + 10 ? Shell.bodyRadius : min(Shell.bodyRadius + (Shell.bar / 2 - Shell.bodyRadius) * (1 - (h - Shell.bar) / 10), Shell.bar / 2)
+            self.mainGlass.cornerRadius = h > Shell.bar + 10 ? Shell.bodyRadius : min(Shell.bodyRadius + (Shell.barRadius - Shell.bodyRadius) * (1 - (h - Shell.bar) / 10), Shell.barRadius)
             self.setMainFrame(NSRect(x: x, y: 0, width: w, height: max(Shell.bar, h)))
             // Body content: fade out quickly before collapsing, fade in while expanding.
             if collapsing {
@@ -518,9 +527,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func setScope(_ s: Scope?, icon: NSImage? = nil, title: String = "", keepText: Bool = false) {
         scope = s
         if s != nil {
-            icon?.size = NSSize(width: 16, height: 16)
+            icon?.size = NSSize(width: 24, height: 24)
             scopeChip.image = icon
-            scopeChip.title = " \(title)  ×  "
+            scopeChip.title = title
+            // Icon and text sit together, centred, with about Spotlight's padding around them.
+            let textWidth = ceil((title as NSString).size(withAttributes: [.font: Self.tokenFont]).width)
+            scopeChipWidth.constant = textWidth + (icon == nil ? 24 : 46)
             scopeChip.setAccessibilityLabel("移除范围 \(title)")
             if !keepText { field.stringValue = "" }
         }
@@ -648,7 +660,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
         var offers: [(String, () -> Void)] = []
         for (kind, label) in Self.kindLabels.sorted(by: { (kinds[$0.0] ?? 0) > (kinds[$1.0] ?? 0) }) where kinds[kind] != nil {
-            offers.append((label, { [weak self] in self?.applyFilter(.kind(kind), title: label) }))
+            offers.append((label, { [weak self] in self?.applyFilter(.kind(kind), title: label, icon: Self.icon(for: kind)) }))
         }
         var seen = Set<String>()
         for ext in exts.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }).prefix(4).map(\.key) {
@@ -676,6 +688,24 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             filters.addArrangedSubview(chip)
             filterActions.append(action)
         }
+    }
+
+    private static func icon(for kind: FileKind) -> NSImage? {
+        let type: UTType? = switch kind {
+        case .folder: .folder
+        case .app: .application
+        case .pdf: .pdf
+        case .word: UTType(filenameExtension: "docx")
+        case .sheet: UTType(filenameExtension: "xlsx")
+        case .slide: UTType(filenameExtension: "pptx")
+        case .text: .plainText
+        case .image: .png
+        case .video: .movie
+        case .audio: .audio
+        case .archive: .zip
+        case .ofd, .other: nil
+        }
+        return NSWorkspace.shared.icon(for: type ?? .data)
     }
 
     private func defaultApp(for ext: String) -> URL? {
@@ -1402,6 +1432,8 @@ enum Shell {
     static let bar: CGFloat = 58
     /// Glass shapes closer than this melt together.
     static let mergeDistance: CGFloat = 12
+    /// Measured from Spotlight: a rounded bar with straight ends, not a full capsule.
+    static let barRadius: CGFloat = 22
     static let bodyRadius: CGFloat = 26
     static let maxHeight: CGFloat = 760
     /// Content mode widens to two columns (UI-SPEC §3): list 420 + preview.
