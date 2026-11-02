@@ -2,6 +2,7 @@ import AppKit
 import Catalog
 import ContentEngine
 import Quartz
+import UniformTypeIdentifiers
 import XSearchCore
 
 /// Non-activating panel: it takes keyboard focus without activating XSearch, so closing it
@@ -44,12 +45,30 @@ final class LauncherField: NSTextField {
 final class ResultTable: NSTableView {
     var onSpace: (() -> Void)?
     var onReturn: ((NSEvent.ModifierFlags) -> Void)?
+    /// Replaces the default arrow handling (lists with rows that cannot be selected).
+    var onMove: ((Int) -> Void)?
+    /// ↑ on the first row leaves the list for the input.
+    var isAtTop: (() -> Bool)?
+    var onLeave: (() -> Void)?
+    /// A character typed in the list: it belongs to the input.
+    var onTyping: ((NSEvent) -> Void)?
+
+    private func isTyping(_ event: NSEvent) -> Bool {
+        if !event.modifierFlags.intersection([.command, .control]).isEmpty { return false }
+        if event.keyCode == 51 { return true }  // delete
+        guard let c = event.characters?.unicodeScalars.first else { return false }
+        return c.value >= 32 && c.value != 127 && !(0xF700...0xF8FF).contains(c.value)
+    }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 49: onSpace?()                                      // space: Quick Look (list focused only)
         case 36, 76: onReturn?(event.modifierFlags)              // return / enter
-        default: super.keyDown(with: event)
+        case 126 where isAtTop?() == true: onLeave?()
+        case 125 where onMove != nil: onMove?(1)
+        case 126 where onMove != nil: onMove?(-1)
+        default:
+            if let onTyping, isTyping(event) { onTyping(event) } else { super.keyDown(with: event) }
         }
     }
 
@@ -70,7 +89,7 @@ final class ResultTable: NSTableView {
 }
 
 @MainActor
-final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, QLPreviewPanelDataSource {
+final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     let panel = LauncherPanel()
     private let session: SearchSession
     private let usage: UsageStore?
@@ -87,9 +106,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private let contentChip = NSButton(title: "内容  ×", target: nil, action: nil)
     /// Spotlight-style scope: Tab on an app (its documents) or a folder (its contents).
     private let scopeChip = NSButton(title: "", target: nil, action: nil)
-    private enum Scope { case app(DocumentTypes), folder(String) }
+    private enum Scope { case app(DocumentTypes), folder(String), kind(FileKind) }
     private var scope: Scope?
     private let chips = NSStackView()
+    /// Quick filters from the results (Spotlight): a click puts one in the input as a token.
+    private let filters = NSStackView()
+    private var filterActions: [() -> Void] = []
+    private var defaultApps: [String: URL?] = [:]
     private let table = ResultTable()
     private let scroll = NSScrollView()
     private let notice = NSStackView()
@@ -203,6 +226,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let ruleRow = NSStackView(views: [rule])
         ruleRow.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
 
+        filters.orientation = .horizontal
+        filters.spacing = 6
+        filters.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 2, right: 20)
+        filters.alignment = .centerY
+        filters.isHidden = true
         chips.orientation = .horizontal
         chips.spacing = 8
         chips.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 4, right: 20)
@@ -220,6 +248,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         table.target = self
         table.doubleAction = #selector(doubleClicked)
         table.onSpace = { [weak self] in self?.toggleQuickLook() }
+        table.onMove = { [weak self] in self?.moveSelection($0) }
+        table.isAtTop = { [weak self] in self?.selectionIsFirst ?? false }
+        table.onLeave = { [weak self] in self?.focusInput() }
+        table.onTyping = { [weak self] in self?.typeInInput($0) }
         table.onReturn = { [weak self] flags in self?.activate(flags.contains(.command) ? .reveal : .open) }
         table.setDraggingSourceOperationMask([.copy, .link, .generic], forLocal: false)
         table.setAccessibilityLabel("搜索结果")
@@ -249,17 +281,20 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         hints.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         contentPane = ContentPane(searcher: session.content)
+        contentPane.table.isAtTop = { [weak self] in (self?.contentPane.table.selectedRow ?? 0) <= 0 }
+        contentPane.table.onLeave = { [weak self] in self?.focusInput() }
+        contentPane.table.onTyping = { [weak self] in self?.typeInInput($0) }
         contentPane.onOpen = { [weak self] hit, reveal in self?.openContent(hit, reveal: reveal) }
         contentPane.onRead = { [weak self] hit, n in self?.openReader(hit, at: n) }
         contentPane.isHidden = true
         let stack = rootStack
-        for v in [ruleRow, chips, scroll, contentPane!, notice, footer] { stack.addArrangedSubview(v) }
+        for v in [ruleRow, filters, chips, scroll, contentPane!, notice, footer] { stack.addArrangedSubview(v) }
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
         body.addSubview(stack)
-        for v in [ruleRow, chips, scroll, contentPane!, notice, footer] { v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for v in [ruleRow, filters, chips, scroll, contentPane!, notice, footer] { v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         listHeight = scroll.heightAnchor.constraint(equalToConstant: 0)
         contentHeight = contentPane.heightAnchor.constraint(equalToConstant: 0)
         contentHeight.isActive = true
@@ -349,7 +384,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func toggle() { panel.isVisible ? hide() : show() }
 
     func show(mode requested: Preferences.Mode? = nil, text: String? = nil) {
-        if let text { field.stringValue = text } else if !Preferences.shared.keepLastQuery { field.stringValue = "" }
+        if let text {
+            field.stringValue = text
+        } else if !Preferences.shared.keepLastQuery {
+            field.stringValue = ""
+            scope = nil
+            scopeChip.isHidden = true
+            updatePlaceholder()
+        }
         session.refreshApps()
         let prefs = Preferences.shared
         setMode(requested ?? (prefs.summonMode == .rememberLast ? prefs.lastMode : .name))
@@ -401,6 +443,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentPane.isHidden = contentHeight.constant == 0
         scroll.isHidden = contentMode
         chipsHeight.constant = chips.arrangedSubviews.isEmpty ? 0 : 40
+        if mode == .content { filters.isHidden = true }
         let hasResults = contentMode ? !contentPane.hits.isEmpty : !rows.isEmpty
         let empty = !hasResults && notice.isHidden && chips.arrangedSubviews.isEmpty
         body.frame.size.width = mainWidth
@@ -429,6 +472,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         switch scope {
         case .app(let t)?: field.placeholderString = "在“\(t.appName)”可打开的文档中搜索"
         case .folder(let p)?: field.placeholderString = "在“\(FileManager.default.displayName(atPath: p))”中搜索"
+        case .kind?: field.placeholderString = "搜索应用和文件"
         case nil: field.placeholderString = mode == .name ? "搜索应用和文件" : "在文件内容中查找"
         }
     }
@@ -453,14 +497,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         return true
     }
 
-    private func setScope(_ s: Scope?, icon: NSImage? = nil, title: String = "") {
+    private func setScope(_ s: Scope?, icon: NSImage? = nil, title: String = "", keepText: Bool = false) {
         scope = s
         if s != nil {
             icon?.size = NSSize(width: 16, height: 16)
             scopeChip.image = icon
             scopeChip.title = " \(title)  ×  "
             scopeChip.setAccessibilityLabel("移除范围 \(title)")
-            field.stringValue = ""
+            if !keepText { field.stringValue = "" }
         }
         scopeChip.isHidden = s == nil
         updatePlaceholder()
@@ -472,6 +516,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     /// The scope as query text the parsers already understand (folder) and the app's types.
     private var scopeFolderClause: String {
         if case .folder(let p)? = scope { return " dir:\"\(p)\"" }
+        if case .kind(let k)? = scope { return " kind:" + k.rawValue }
         return ""
     }
 
@@ -479,6 +524,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func isScopeChip(_ label: String) -> Bool {
         switch scope {
         case .folder(let p)?: return label == "dir:" + p || label == "dir:\"\(p)\""
+        case .kind(let k)?: return label == "kind:" + k.rawValue
         case .app?: return false
         case nil: return false
         }
@@ -534,6 +580,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     private func apply(_ out: SearchOutput) {
+        // The same query again (the app list finished loading…): stay where the user is.
+        let keep = output?.text == out.text ? selectedItem?.path : nil
         output = out
         rows = []
         var lastGroup: ResultItem.Group?
@@ -542,16 +590,107 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             rows.append(.item(item))
         }
         setChips(out.query.chips)
+        setFilters(for: out)
         table.reloadData()
         // Start at the top so the first group header stays visible.
         scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
         scroll.reflectScrolledClipView(scroll.contentView)
-        if let first = rows.firstIndex(where: { if case .item = $0 { return true }; return false }) {
-            table.selectRowIndexes([first], byExtendingSelection: false)
+        let kept = keep.flatMap { path in rows.firstIndex { if case .item(let i) = $0 { return i.path == path }; return false } }
+        if let row = kept ?? rows.firstIndex(where: { if case .item = $0 { return true }; return false }) {
+            table.selectRowIndexes([row], byExtendingSelection: false)
+            if kept != nil { table.scrollRowToVisible(row) }
         }
         setNotice(for: out)
         updateStatus()
         resize()
+    }
+
+    private static let kindLabels: [(FileKind, String)] = [
+        (.folder, "文件夹"), (.app, "应用"), (.pdf, "PDF"), (.word, "文档"), (.sheet, "表格"), (.slide, "演示"), (.ofd, "OFD"),
+        (.text, "文本"), (.image, "图片"), (.video, "视频"), (.audio, "音频"), (.archive, "压缩包"),
+    ]
+
+    /// The kinds among the results, most frequent first, then the apps that open them, as many
+    /// as fit in one row. Offered only while nothing narrows the search yet.
+    private func setFilters(for out: SearchOutput) {
+        filters.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        filterActions = []
+        defer { filters.isHidden = filters.arrangedSubviews.isEmpty }
+        let found = out.items.filter { $0.group == .apps || $0.group == .files }
+        guard mode == .name, scope == nil, !out.query.isEmpty, !found.isEmpty else { return }
+        var kinds: [FileKind: Int] = [:]
+        var exts: [String: Int] = [:]
+        for item in found {
+            kinds[item.kind, default: 0] += 1
+            if item.kind != .folder, item.kind != .app, !item.ext.isEmpty { exts[item.ext, default: 0] += 1 }
+        }
+        var offers: [(String, () -> Void)] = []
+        for (kind, label) in Self.kindLabels.sorted(by: { (kinds[$0.0] ?? 0) > (kinds[$1.0] ?? 0) }) where kinds[kind] != nil {
+            offers.append((label, { [weak self] in self?.applyFilter(.kind(kind), title: label) }))
+        }
+        var seen = Set<String>()
+        for ext in exts.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }).prefix(4).map(\.key) {
+            guard let app = defaultApp(for: ext), seen.insert(app.path).inserted else { continue }
+            let name = (FileManager.default.displayName(atPath: app.path) as NSString).deletingPathExtension
+            offers.append((name, { [weak self] in self?.applyAppFilter(app, name: name) }))
+        }
+        var room = mainWidth - filters.edgeInsets.left - filters.edgeInsets.right
+        for (title, action) in offers {
+            let chip = NSButton(title: title, target: self, action: #selector(filterClicked(_:)))
+            chip.isBordered = false
+            chip.wantsLayer = true
+            chip.layer?.cornerRadius = 11
+            chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+            chip.attributedTitle = NSAttributedString(string: "  \(title)  ", attributes: [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.labelColor.withAlphaComponent(0.8)])
+            chip.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            let width = chip.fittingSize.width + filters.spacing
+            if width > room { continue }
+            room -= width
+            chip.tag = filterActions.count
+            chip.setAccessibilityLabel("筛选 \(title)")
+            filters.addArrangedSubview(chip)
+            filterActions.append(action)
+        }
+    }
+
+    private func defaultApp(for ext: String) -> URL? {
+        if let known = defaultApps[ext] { return known }
+        let app = UTType(filenameExtension: ext).flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) }
+        defaultApps[ext] = app
+        return app
+    }
+
+    @objc private func filterClicked(_ sender: NSButton) {
+        if filterActions.indices.contains(sender.tag) { filterActions[sender.tag]() }
+    }
+
+    private func applyFilter(_ s: Scope, title: String, icon: NSImage? = nil) {
+        setScope(s, icon: icon, title: title, keepText: true)
+        focusInput()
+    }
+
+    private func applyAppFilter(_ app: URL, name: String) {
+        var types = DocumentTypes(appPath: app.path)
+        if types.isEmpty { toast("“\(name)”没有声明可打开的文档类型"); return }
+        types.appName = name
+        applyFilter(.app(types), title: name, icon: NSWorkspace.shared.icon(forFile: app.path))
+    }
+
+    private var selectionIsFirst: Bool {
+        guard let first = rows.firstIndex(where: { if case .item = $0 { return true }; return false }) else { return true }
+        return table.selectedRow <= first
+    }
+
+    /// Back to the input with the caret at the end, ready to go on typing.
+    private func focusInput() {
+        panel.makeFirstResponder(field)
+        let end = (field.stringValue as NSString).length
+        field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+    }
+
+    private func typeInInput(_ event: NSEvent) {
+        focusInput()
+        field.currentEditor()?.keyDown(with: event)
     }
 
     private func setChips(_ list: [NameQuery.Chip]) {
@@ -857,11 +996,29 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         show()
         var delay = 0.3
         for chunk in script.split(separator: "|", omittingEmptySubsequences: false) {
+            delay += 0.15
             for ch in chunk {
-                delay += 0.15
+                // Long enough for what a key starts (Quick Look opening) to finish.
+                delay += "↓↑␣⌨◉".contains(ch) ? 1 : 0.15
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
                     if ch == "⇥" { _ = self.scopeToSelection(); return }
+                    // "↓" "↑" "␣" "⌨" (the letter x) are real key events through the window;
+                    // "◉" clicks the first quick filter. XS_TYPE_LOG records the state after each.
+                    let codes: [Character: (UInt16, String)] = ["↓": (125, "\u{F701}"), "↑": (126, "\u{F700}"), "␣": (49, " "), "⌨": (7, "x")]
+                    if let (code, text) = codes[ch] {
+                        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: self.panel.windowNumber,
+                                                    context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code) {
+                            (NSApp.keyWindow ?? self.panel).sendEvent(e)
+                        }
+                        self.logTestState(String(ch))
+                        return
+                    }
+                    if ch == "◉" {
+                        (self.filters.arrangedSubviews.first as? NSButton)?.performClick(nil)
+                        self.logTestState("◉")
+                        return
+                    }
                     if ch == "⌫" && self.field.stringValue.isEmpty {
                         if self.scope != nil { self.setScope(nil) } else if self.mode == .content { self.switchMode(.name) }
                         return
@@ -870,6 +1027,17 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                     self.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: self.field))
                 }
             }
+        }
+    }
+
+    private func logTestState(_ step: String) {
+        guard let path = ProcessInfo.processInfo.environment["XS_TYPE_LOG"] else { return }
+        // After the search started by this step has delivered.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
+            let focus = panel.firstResponder === table ? "list" : panel.firstResponder is NSTextView ? "input" : "other"
+            let ql = QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible
+            let line = "\(step) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
+            if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
         }
     }
 
@@ -892,7 +1060,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
         if mode == .content {
             switch selector {
-            case #selector(NSResponder.moveDown(_:)): contentPane.moveSelection(1); return true
+            case #selector(NSResponder.moveDown(_:)):
+                contentPane.moveSelection(1)
+                if !contentPane.hits.isEmpty { panel.makeFirstResponder(contentPane.table) }
+                return true
             case #selector(NSResponder.moveUp(_:)): contentPane.moveSelection(-1); return true
             case #selector(NSResponder.insertNewline(_:)):
                 if let h = contentPane.selected { openContent(h, reveal: false) }
@@ -904,7 +1075,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             }
         }
         switch selector {
-        case #selector(NSResponder.moveDown(_:)): moveSelection(1); return true
+        case #selector(NSResponder.moveDown(_:)):
+            // The list takes the keys from here on: space previews, ↑ on the first row comes back.
+            moveSelection(1)
+            if !rows.isEmpty { panel.makeFirstResponder(table) }
+            return true
         case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
         case #selector(NSResponder.insertNewline(_:)): activate(.open); return true
         case #selector(NSResponder.cancelOperation(_:)): hide(); return true
@@ -1077,6 +1252,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         previewURL = selectedItem.map { URL(fileURLWithPath: $0.path) as NSURL }
+    }
+
+    /// ↑ ↓ keep moving through the list while the panel is up.
+    nonisolated func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard event.type == .keyDown else { return false }
+        let code = event.keyCode
+        guard code == 125 || code == 126 else { return false }
+        MainActor.assumeIsolated { moveSelection(code == 125 ? 1 : -1) }
+        return true
     }
 
     nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { previewURL == nil ? 0 : 1 }

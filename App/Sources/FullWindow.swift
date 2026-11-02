@@ -152,6 +152,12 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         table.target = self
         table.onReturn = { [weak self] flags in self?.openSelected(reveal: flags.contains(.command)) }
         table.onSpace = { [weak self] in self?.toggleQuickLook() }
+        table.isAtTop = { [weak self] in (self?.table.selectedRow ?? 0) <= 0 }
+        table.onLeave = { [weak self] in self?.focusInput() }
+        table.onTyping = { [weak self] event in
+            self?.focusInput()
+            self?.field.currentEditor()?.keyDown(with: event)
+        }
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         tableScroll.documentView = table
         tableScroll.hasVerticalScroller = true
@@ -310,6 +316,22 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     }
 
     func controlTextDidChange(_ obj: Notification) { runSearch() }
+
+    /// ↓ takes the list: space previews there, ↑ on the first row comes back.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.moveDown(_:)), !textView.hasMarkedText(), !rows.isEmpty else { return false }
+        let next = min(table.selectedRow + 1, rows.count - 1)
+        table.selectRowIndexes([next], byExtendingSelection: false)
+        table.scrollRowToVisible(next)
+        window?.makeFirstResponder(table)
+        return true
+    }
+
+    private func focusInput() {
+        window?.makeFirstResponder(field)
+        let end = (field.stringValue as NSString).length
+        field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+    }
 
     /// The preview belongs to content search; file names get the whole width for the table.
     private func updatePreviewVisibility() {
