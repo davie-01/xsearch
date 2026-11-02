@@ -77,14 +77,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private let mainGlass = NSGlassEffectView()
     private let header = FlippedView()
     private let body = FlippedView()
-    private var modeButtons: [GlassCircleButton] = []
-    private var buttonsShown = false
-    private var mouseMonitors: [Any] = []
-    private var mouseTravel: CGFloat = 0
-    private var lastMouse: NSPoint?
     private var driver: FrameDriver?
-    /// What is on screen (may lag `buttonsShown` while animating).
-    private var buttonsVisible = false
     private let contentChip = NSButton(title: "内容  ×", target: nil, action: nil)
     /// Spotlight-style scope: Tab on an app (its documents) or a folder (its contents).
     private let scopeChip = NSButton(title: "", target: nil, action: nil)
@@ -146,18 +139,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         root.addSubview(mainGlass)
         mainContent.addSubview(header)
         mainContent.addSubview(body)
-
-        let modes: [(String, String, String)] = [
-            ("doc.on.doc", "名称", "按文件名搜索（⌘1）"),
-            ("text.magnifyingglass", "内容", "在文件内容中搜索（⌘2）"),
-        ]
-        for (i, m) in modes.enumerated() {
-            let b = GlassCircleButton(symbol: m.0, label: m.1, tip: m.2)
-            b.onPress = { [weak self] in self?.switchMode(Preferences.Mode(rawValue: i) ?? .name) }
-            b.isHidden = true
-            root.addSubview(b)
-            modeButtons.append(b)
-        }
 
         let icon = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "搜索")!)
         icon.symbolConfiguration = .init(pointSize: 22, weight: .medium)
@@ -293,26 +274,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     /// Left edge of the shell on the stage: the shell stays centred when it widens.
     private var originX: CGFloat { (Shell.contentWidth - shellWidth) / 2 }
 
-    private var mainWidth: CGFloat {
-        buttonsShown ? shellWidth - Shell.barGap - CGFloat(modeButtons.count) * Shell.button - CGFloat(modeButtons.count - 1) * Shell.gap : shellWidth
-    }
+    private var mainWidth: CGFloat { shellWidth }
 
-    /// Places the bar, the result body and the mode buttons, matching Spotlight's choreography
-    /// (measured frame by frame from a screen recording):
-    /// - reveal: the bar narrows at once with a visible bounce; ~50 ms later each button buds out
-    ///   of the bar's current right end at 30% size, staggered 25 ms, growing while it springs to
-    ///   place; icons fade in only after the drops have separated;
-    /// - hide: buttons shrink back into the bar's end, then the bar widens;
-    /// - results collapse: content fades out first, a short pause, then the height springs down;
-    ///   expand: height grows at once, content fades in.
-    /// Every part has its own spring; one display-link driver steps them all on real geometry.
+    /// Places the bar and the result body, matching Spotlight's choreography (measured frame by
+    /// frame from a screen recording): to collapse, content fades out first, a short pause, then
+    /// the height springs down; to expand, height grows at once and content fades in.
     private func layoutShell(animated: Bool) {
         let targetW = mainWidth
         let targetH = Shell.bar + bodyHeight
         let targetMain = NSRect(x: originX, y: 0, width: targetW, height: targetH)
-        let shownFrames = modeButtons.indices.map { i in
-            NSRect(x: originX + targetW + Shell.barGap + CGFloat(i) * (Shell.button + Shell.gap), y: 0, width: Shell.button, height: Shell.button)
-        }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         driver?.stop()
         guard animated && !reduceMotion && panel.isVisible else {
@@ -320,50 +290,21 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             setMainFrame(targetMain)
             body.isHidden = bodyHeight == 0
             body.alphaValue = 1
-            for (b, f) in zip(modeButtons, shownFrames) {
-                place(b, buttonsShown ? f : tucked(barEnd: originX + targetW))
-                b.iconAlpha = buttonsShown ? 1 : 0
-                b.isHidden = !buttonsShown
-            }
-            buttonsVisible = buttonsShown
             return
         }
 
         let from = mainGlass.frame.offsetBy(dx: -Shell.inset, dy: -Shell.inset)
-        let fromButtons = modeButtons.map { $0.frame.offsetBy(dx: -Shell.inset, dy: -Shell.inset) }
-        let fromIcons = modeButtons.map(\.iconAlpha)
         let fromBodyAlpha = body.alphaValue
-        let revealing = buttonsShown && !buttonsVisible
-        // A hide interrupted by another layout (results arriving right after typing) must keep
-        // fading the buttons out, not leave them half-visible over the widening bar.
-        let hiding = !buttonsShown && (buttonsVisible || modeButtons.contains { !$0.isHidden })
         let collapsing = targetH < from.height - 0.5
         let expanding = targetH > from.height + 0.5
-        buttonsVisible = buttonsShown
-
-        let widthCurve: SpringCurve = revealing ? .init(response: 0.36, damping: 0.5)
-            // Hide: the buttons vanish first (~80 ms); the bar only starts widening after that,
-            // so it never slides over them (Spotlight).
-            : hiding ? .init(response: 0.32, damping: 0.86, delay: 0.07) : .init(response: 0.3, damping: 0.86)
+        let widthCurve = SpringCurve(response: 0.3, damping: 0.86)
         // Spotlight: content gone in ~25 ms, a ~0.1 s hold, then a quick height snap (~0.1 s).
         let heightCurve: SpringCurve = collapsing ? .init(response: 0.2, damping: 0.95, delay: 0.1) : .init(response: 0.28, damping: 0.82)
-        let n = modeButtons.count
-        let buttonCurves: [SpringCurve] = (0..<n).map { i in
-            revealing ? .init(response: 0.34, damping: 0.38, delay: 0.02 + 0.018 * Double(i))
-                : .init(response: 0.28, damping: 0.92, delay: 0.015 * Double(n - 1 - i))
-        }
-        // Position wobbles left–right (low damping, ~27% overshoot then ~8% back) while the size
-        // settles more firmly, so the drops swing into place without ballooning.
-        let sizeCurves: [SpringCurve] = buttonCurves.map { c in
-            revealing ? .init(response: 0.3, damping: 0.62, delay: c.delay) : c
-        }
-        if revealing { modeButtons.forEach { $0.isHidden = false; $0.alphaValue = 1 } }
         if expanding { body.isHidden = false }
         // Round ends while the body is (nearly) gone; rounded rectangle once it has height.
         let endRadius = targetH > Shell.bar + 0.5 ? Shell.bodyRadius : Shell.bar / 2
 
         var duration = max(widthCurve.settle, heightCurve.settle)
-        for c in buttonCurves + sizeCurves { duration = max(duration, c.settle) }
         if collapsing { duration = max(duration, 0.2) }
         driver = FrameDriver(view: mainGlass, duration: duration) { [weak self] t in
             guard let self else { return }
@@ -378,49 +319,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             } else if expanding || fromBodyAlpha < 1 {
                 self.body.alphaValue = fromBodyAlpha + (1 - fromBodyAlpha) * CGFloat(min(1, max(0, (t - 0.04) / 0.12)))
             }
-            for (i, b) in self.modeButtons.enumerated() {
-                let c = buttonCurves[i]
-                if revealing {
-                    // Bud out of the bar's end as it is at the moment this button starts.
-                    let v = CGFloat(widthCurve.value(c.delay))
-                    let endAtStart = from.minX + (targetMain.minX - from.minX) * v + from.width + (targetW - from.width) * v
-                    self.place(b, circleLerp(self.tucked(barEnd: endAtStart), shownFrames[i], c.value(t), size: sizeCurves[i].value(t)))
-                    let fade = (t - 0.16 - 0.02 * Double(i)) / 0.1
-                    b.iconAlpha = CGFloat(min(1, max(0, fade)))
-                } else if hiding {
-                    // Shrink to nothing in place within ~80 ms, then hide at once. Glass ignores
-                    // alphaValue (the system composites it), so size is what makes it disappear.
-                    let k = CGFloat(min(1, t / 0.08))
-                    let f = fromButtons[i]
-                    let d = f.width * (1 - k) * (1 - k)
-                    self.place(b, NSRect(x: f.midX - d / 2, y: f.midY - d / 2, width: d, height: d))
-                    b.iconAlpha = fromIcons[i] * CGFloat(max(0, 1 - t / 0.03))
-                    if k >= 1 { b.isHidden = true }
-                } else if self.buttonsShown {
-                    self.place(b, circleLerp(fromButtons[i], shownFrames[i], widthCurve.value(t)))
-                }
-            }
         } completion: { [weak self] in
             guard let self else { return }
             self.mainGlass.cornerRadius = endRadius
             self.setMainFrame(targetMain)
             if self.bodyHeight == 0 { self.body.isHidden = true }
             self.body.alphaValue = 1
-            if !self.buttonsShown {
-                self.modeButtons.forEach { $0.isHidden = true; $0.alphaValue = 1 }
-            }
         }
         driver?.start()
-    }
-
-    private func place(_ b: GlassCircleButton, _ r: NSRect) {
-        b.frame = r.offsetBy(dx: Shell.inset, dy: Shell.inset)
-    }
-
-    /// A button tucked into the bar's right end: a small drop, fully inside the bar.
-    private func tucked(barEnd: CGFloat) -> NSRect {
-        let size = Shell.button * 0.3
-        return NSRect(x: barEnd - Shell.button * 0.35 - size / 2, y: (Shell.button - size) / 2, width: size, height: size)
     }
 
     /// The bar's inner header and body track the glass size exactly (no autoresizing drift).
@@ -428,43 +334,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         mainGlass.frame = frame.offsetBy(dx: Shell.inset, dy: Shell.inset)
         header.frame = NSRect(x: 0, y: 0, width: frame.width, height: Shell.bar)
         body.frame = NSRect(x: 0, y: Shell.bar, width: frame.width, height: max(0, frame.height - Shell.bar))
-    }
-
-    private func setButtonsShown(_ shown: Bool, animated: Bool) {
-        guard shown != buttonsShown else { return }
-        buttonsShown = shown
-        layoutShell(animated: animated)
-    }
-
-    /// Moving the mouse (not typing) reveals the mode buttons, as in Spotlight.
-    private func startMouseWatch() {
-        stopMouseWatch()
-        mouseTravel = 0
-        lastMouse = NSEvent.mouseLocation
-        let handler: (NSEvent) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.mouseMoved() }
-        }
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: handler) { mouseMonitors.append(g) }
-        if let l = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: { handler($0); return $0 }) { mouseMonitors.append(l) }
-    }
-
-    private func stopMouseWatch() {
-        mouseMonitors.forEach(NSEvent.removeMonitor)
-        mouseMonitors.removeAll()
-    }
-
-    /// Mode buttons appear only while the input is empty: moving the mouse over an empty bar
-    /// offers the modes; once there is text, the bar stays a plain search field.
-    private func mouseMoved() {
-        let now = NSEvent.mouseLocation
-        defer { lastMouse = now }
-        guard panel.isVisible, !buttonsShown, field.stringValue.isEmpty, !field.isComposing else {
-            mouseTravel = 0
-            return
-        }
-        if let last = lastMouse { mouseTravel += hypot(now.x - last.x, now.y - last.y) }
-        // Ignore sub-pixel jitter right after the panel appears.
-        if mouseTravel > 6 { setButtonsShown(true, animated: true) }
     }
 
     // MARK: Show / hide
@@ -478,26 +347,18 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         session.refreshApps()
         let prefs = Preferences.shared
         setMode(requested ?? (prefs.summonMode == .rememberLast ? prefs.lastMode : .name))
-        // Every summon starts as the single search bar.
-        buttonsShown = false
         driver?.stop()
         runSearch()
         resize(animated: false)
         position()
         panel.makeKeyAndOrderFront(nil)
         onVisibilityChange?()
-        startMouseWatch()
         if let delay = ProcessInfo.processInfo.environment["XS_CLEAR_AFTER"].flatMap(Double.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 MainActor.assumeIsolated {
                     self?.field.stringValue = ""
                     self?.runSearch()
                 }
-            }
-        }
-        if let delay = ProcessInfo.processInfo.environment["XS_REVEAL_BUTTONS"].flatMap(Double.init) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                MainActor.assumeIsolated { self?.setButtonsShown(true, animated: true) }
             }
         }
         panel.makeFirstResponder(field)
@@ -507,7 +368,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     func hide() {
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
-        stopMouseWatch()
         panel.orderOut(nil)
         // Nobody is looking: stop the query and any queued preview. `show` searches again.
         session.content.cancel()
@@ -555,7 +415,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             scopeChip.isHidden = true
         }
         Preferences.shared.lastMode = m
-        for (i, b) in modeButtons.enumerated() { b.isOn = i == m.rawValue }
         updatePlaceholder()
         updateHints()
     }
@@ -638,8 +497,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     func controlTextDidChange(_ obj: Notification) {
         pendingTrash = nil
-        // Typing (including IME composition) folds the mode buttons back into the bar.
-        if buttonsShown && (!field.stringValue.isEmpty || field.isComposing) { setButtonsShown(false, animated: true) }
         // While the input method composes, results stay as they were (§5.3).
         guard !field.isComposing else { return }
         runSearch()
@@ -649,7 +506,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // Typing `in ` turns into the “内容” token: the prefix leaves the input (§4.1).
         if field.stringValue.hasPrefix("in ") {
             field.stringValue = String(field.stringValue.dropFirst(3))
-            if mode != .content { setMode(.content) }
+            if mode != .content {
+                setMode(.content)
+                layoutShell(animated: panel.isVisible)
+            }
         }
         let text = field.stringValue
         contentChip.isHidden = mode != .content
@@ -860,7 +720,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func updateHints() {
         hints.attributedStringValue = Self.hintString(mode == .name
-            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⇧⌘C", "复制路径"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
+            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
             : [("↵", "打开"), ("⌘↵", "阅读窗口"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘E", "完整窗口")])
     }
 
@@ -1308,13 +1168,10 @@ final class RuleView: NSView {
 
 /// Geometry of the Spotlight-style shell.
 enum Shell {
-    static let width: CGFloat = 720
+    /// Default and name search; content mode widens to `contentWidth`.
+    static let width: CGFloat = 570
     static let bar: CGFloat = 58
-    static let button: CGFloat = 58
-    /// Bar → first button, and between buttons. Both exceed `mergeDistance`, so they end apart.
-    static let barGap: CGFloat = 20
-    static let gap: CGFloat = 14
-    /// Glass shapes closer than this melt together (the liquid "neck" while splitting).
+    /// Glass shapes closer than this melt together.
     static let mergeDistance: CGFloat = 12
     static let bodyRadius: CGFloat = 26
     static let maxHeight: CGFloat = 760
@@ -1333,85 +1190,6 @@ final class FlippedView: NSView {
 
 /// Round glass button (Spotlight's category buttons). Selected = accent-tinted glass.
 @MainActor
-final class GlassCircleButton: NSGlassEffectView {
-    var onPress: (() -> Void)?
-    private let button: NSButton
-
-    var isOn = false { didSet { restyle() } }
-    /// The selection tint fades with the icon, so a drop budding out of the bar is neutral glass.
-    var iconAlpha: CGFloat {
-        get { button.alphaValue }
-        set {
-            button.alphaValue = newValue
-            tintColor = isOn ? NSColor.controlAccentColor.withAlphaComponent(0.22 * newValue) : nil
-        }
-    }
-
-    init(symbol: String, label: String, tip: String) {
-        button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!, target: nil, action: nil)
-        super.init(frame: .zero)
-        style = .regular
-        cornerRadius = Shell.button / 2
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.symbolConfiguration = .init(pointSize: 21, weight: .medium)
-        button.toolTip = tip
-        button.setAccessibilityLabel(label + "模式")
-        button.target = self
-        button.action = #selector(pressed)
-        let content = NSView()
-        button.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(button)
-        NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            button.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            button.topAnchor.constraint(equalTo: content.topAnchor),
-            button.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-        ])
-        contentView = content
-        restyle()
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    @objc private func pressed() { onPress?() }
-
-    /// Always a circle: the radius follows the diameter while the drop grows or overshoots.
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        cornerRadius = min(newSize.width, newSize.height) / 2
-    }
-
-    func animateIcon(visible: Bool, delay: TimeInterval) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = visible ? 0.22 : 0.12
-                    self.button.animator().alphaValue = visible ? 1 : 0
-                }
-            }
-        }
-    }
-
-    private func restyle() {
-        tintColor = isOn ? NSColor.controlAccentColor.withAlphaComponent(0.22 * button.alphaValue) : nil
-        button.contentTintColor = isOn ? .controlAccentColor : .labelColor
-        button.setAccessibilityValue(isOn ? "已选中" : "")
-    }
-}
-
-/// Interpolates a circle by center and diameter, keeping it centered on the bar's midline, so
-/// an overshooting spring grows it evenly on all sides instead of pushing past one edge.
-func circleLerp(_ a: NSRect, _ b: NSRect, _ t: Double, size: Double? = nil) -> NSRect {
-    let s = CGFloat(size ?? t)
-    let t = CGFloat(t)
-    let d = max(0, a.width + (b.width - a.width) * s)
-    let cx = a.midX + (b.midX - a.midX) * t
-    let cy = a.midY + (b.midY - a.midY) * t
-    return NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d)
-}
-
 func lerp(_ a: NSRect, _ b: NSRect, _ t: Double) -> NSRect {
     let t = CGFloat(t)
     return NSRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t,
