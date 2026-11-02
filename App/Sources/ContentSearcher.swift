@@ -45,6 +45,8 @@ final class ContentSearcher: @unchecked Sendable {
     private let previewQueue = DispatchQueue(label: "xsearch.preview", qos: .userInitiated)
     private let lock = NSLock()
     private var generation = 0
+    /// Only the newest preview is worth computing: older ones waiting in the queue are skipped.
+    private var previewGeneration = 0
     private var current: ContentSearch?
     private var pendingWork: DispatchWorkItem?
     private var index: ContentIndex?
@@ -77,6 +79,7 @@ final class ContentSearcher: @unchecked Sendable {
     func cancel() {
         lock.lock()
         generation += 1
+        previewGeneration += 1
         current?.cancel()
         current = nil
         pendingWork?.cancel()
@@ -100,6 +103,19 @@ final class ContentSearcher: @unchecked Sendable {
         pendingWork = work
         lock.unlock()
         queue.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    private func nextPreview() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        previewGeneration += 1
+        return previewGeneration
+    }
+
+    private func isCurrentPreview(_ gen: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return gen == previewGeneration
     }
 
     private func isCurrent(_ gen: Int) -> Bool {
@@ -175,6 +191,10 @@ final class ContentSearcher: @unchecked Sendable {
             first = false
             if out.done { break }
         }
+        // Finished or replaced: its snapshot is not needed any more.
+        lock.lock()
+        if gen == generation { current = nil }
+        lock.unlock()
     }
 
     private let liveQueue = DispatchQueue(label: "xsearch.live", qos: .userInitiated)
@@ -237,7 +257,9 @@ final class ContentSearcher: @unchecked Sendable {
     /// Preview of a live hit: the file itself, decoded, with every hit.
     func livePreview(path: String, expression: String, deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
         let mode = self.mode, maxFileBytes = self.maxFileBytes
-        previewQueue.async {
+        let gen = nextPreview()
+        previewQueue.async { [weak self] in
+            guard self?.isCurrentPreview(gen) == true else { return }
             guard let scan = try? LiveScan(query: expression, mode: mode, maxFileBytes: maxFileBytes), let t = scan.preview(path: path) else {
                 DispatchQueue.main.async { deliver(nil) }
                 return
@@ -259,7 +281,9 @@ final class ContentSearcher: @unchecked Sendable {
     func preview(fileId: UInt64, expression: String, mode: MatchMode? = nil, member: String = "", memberStart: UInt32 = 0,
                  deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
         let mode = mode ?? self.mode
+        let gen = nextPreview()
         previewQueue.async { [weak self] in
+            guard self?.isCurrentPreview(gen) == true else { return }
             guard let index = self?.openIndex() else {
                 DispatchQueue.main.async { deliver(nil) }
                 return

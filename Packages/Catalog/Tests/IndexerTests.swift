@@ -748,3 +748,21 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     #expect(!fm.fileExists(atPath: left.path))
     #expect(fm.fileExists(atPath: box.data.appendingPathComponent("user.sqlite").path))
 }
+
+@Test func byteBudgetSplitsBatchesWithoutLosingWork() throws {
+    let extractions = OSAllocatedUnfairLock(initialState: 0)
+    let p = try Pipeline("byte-budget") { i in
+        i.batchBytes = 1  // every text fills a batch
+        i.afterExtract = { _ in extractions.withLock { $0 += 1 } }
+    }
+    defer { p.stop() }
+    for i in 1...9 { try p.box.write("docs/b\(i).txt", "分批 theta\(i)x") }
+    try p.start()
+    #expect(p.settle())
+    for i in 1...9 { #expect(try p.search("theta\(i)x") == ["b\(i).txt"]) }
+    #expect(p.indexer.status.committedBatches >= 4, "split, not one batch of nine")
+    #expect(extractions.withLock { $0 } == 9, "what went back to the queue was not extracted twice")
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let s = try c.db.prepare("SELECT COUNT(*) FROM files WHERE name LIKE 'b%.txt' AND content_state = 1")
+    #expect(try s.first { $0.int(0) } == 9)
+}

@@ -14,6 +14,9 @@
 	<key>LSMinimumSystemVersion</key><string>26.0</string>
 	<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
 	<key>LSUIElement</key><true/>
+	<!-- macOS keeps freed large blocks for reuse, counted as ours: a text-heavy search or batch
+	     left hundreds of MB behind. Measured in docs/m5/修复复核核实-2026-11-03.md. -->
+	<key>LSEnvironment</key><dict><key>MallocLargeCache</key><string>0</string></dict>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundleIconName</key><string>AppIcon</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>

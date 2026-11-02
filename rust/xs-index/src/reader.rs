@@ -109,8 +109,10 @@ impl ContentReader {
             .reader_builder()
             // No file watcher (it polls meta.json twice a second): callers reload before a query.
             .reload_policy(ReloadPolicy::Manual)
-            // M0-B 5.3: a doc store block cache makes repeated reads of hot documents cheap.
-            .doc_store_cache_num_blocks(100)
+            // No doc store block cache: it counts blocks, and a large document is one block of
+            // its whole size, so 100 blocks kept 250 MB after one search over 32 documents of
+            // 8 MiB. Reads cost about 4% more on small documents (regression benchmark).
+            .doc_store_cache_num_blocks(0)
             .try_into()?;
         Ok(Self { index, reader, f })
     }

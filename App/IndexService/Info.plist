@@ -13,6 +13,8 @@
 	<key>LSMinimumSystemVersion</key><string>26.0</string>
 	<key>XPCService</key>
 	<dict>
+		<!-- See the note in the app's Info.plist. Inherited by the extraction workers. -->
+		<key>EnvironmentVariables</key><dict><key>MallocLargeCache</key><string>0</string></dict>
 		<key>ServiceType</key><string>Application</string>
 	</dict>
 </dict>

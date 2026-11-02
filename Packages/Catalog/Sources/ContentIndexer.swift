@@ -82,6 +82,12 @@ public final class ContentIndexer: @unchecked Sendable {
     var backoffBase: TimeInterval = 30
     var maxAttempts = 3
     var batchSize = 64
+    /// A batch ends when this much text has been extracted: it all stays in memory until staged.
+    /// What was not reached goes back to the queue. One text can exceed it, so a batch always
+    /// makes progress. Measured: 64 texts of 20 MiB took 3.4 GB without this.
+    var batchBytes = 64 << 20
+    /// Files above this size are extracted one at a time, whichever worker gets them.
+    var largeFileBytes: Int64 = 32 << 20
     /// Per-file extraction timeout = base + 2 s per MB.
     var baseTimeout: TimeInterval = 30
     var limits = ExtractionLimits()
@@ -478,6 +484,8 @@ public final class ContentIndexer: @unchecked Sendable {
 
     enum Staged {
         case put(ContentInput)
+        /// Handed to the writer: only what confirming the batch needs, the text is gone.
+        case written(ExtractStateKind)
         case remove
         /// Superseded / stale: finish the task without touching the index.
         case drop
@@ -589,17 +597,27 @@ public final class ContentIndexer: @unchecked Sendable {
         // Extract in parallel, one file per worker at a time.
         var results = [Staged?](repeating: nil, count: toExtract.count)
         let lock = NSLock()
+        let largeFile = NSLock()
+        let extracted = OSAllocatedUnfairLock(initialState: 0)
         let items = toExtract
+        let budget = batchBytes, large = largeFileBytes
         DispatchQueue.concurrentPerform(iterations: min(workerCount, max(1, toExtract.count))) { w in
             var i = w
             while i < toExtract.count {
+                defer { i += workerCount }
+                if extracted.withLock({ $0 >= budget }) { continue }  // stays nil: back to the queue
+                let isLarge = items[i].version.size > large
+                if isLarge { largeFile.lock() }
                 let r = autoreleasepool { extract(items[i], worker: workers[w]) }
+                if isLarge { largeFile.unlock() }
+                let bytes = if case .put(let doc) = r { doc.text.utf8.count } else { 0 }
+                extracted.withLock { $0 += bytes }
                 lock.lock(); results[i] = r; lock.unlock()
-                i += workerCount
             }
         }
-        for (p, r) in zip(toExtract, results) { outcomes.append((p.task, r ?? .retry(after: 1, error: nil, countAttempt: false))) }
-        try stageAndCommit(outcomes)
+        for (p, r) in zip(toExtract, results) { outcomes.append((p.task, r ?? .retry(after: 0, error: nil, countAttempt: false))) }
+        results = []  // `outcomes` is now the only owner of the texts; staging releases them
+        try stageAndCommit(&outcomes)
     }
 
     private func diskVersion(_ path: String) -> FileVersion? {
@@ -660,23 +678,30 @@ public final class ContentIndexer: @unchecked Sendable {
 
     // MARK: Commit protocol
 
-    private func stageAndCommit(_ outcomes: [(Task, Staged)]) throws {
+    private func stageAndCommit(_ outcomes: inout [(Task, Staged)]) throws {
         guard let catalog, let writer else { return }
         var staged: [(Task, Staged)] = []
         var stagedSeq: [UInt64: UInt64] = [:]
         var finished: [(Task, Staged)] = []
-        for (t, s) in outcomes {
+        for i in outcomes.indices {
+            let (t, s) = outcomes[i]
+            outcomes[i].1 = .drop  // this entry's text must not outlive the call below
             let fid = UInt64(t.fileId), seq = UInt64(t.opSeq)
             switch s {
             case .put, .remove, .failed:
                 // Sequence fence: never apply an op that is not newer than what the index has.
                 if seq <= max(committedSeq[fid] ?? 0, stagedSeq[fid] ?? 0) { finished.append((t, .drop)); continue }
-                switch s {
-                case .put(let doc): try writer.put(doc: doc)
-                default: try writer.remove(fileId: fid, opSeq: seq)  // failed: stale text must not stay
-                }
                 stagedSeq[fid] = seq
-                staged.append((t, s))
+                switch s {
+                case .put(let doc):
+                    try writer.put(doc: doc)
+                    staged.append((t, .written(doc.state)))
+                default:
+                    try writer.remove(fileId: fid, opSeq: seq)  // failed: stale text must not stay
+                    staged.append((t, s))
+                }
+            case .written:
+                break  // only ever made here
             case .drop, .retry:
                 finished.append((t, s))
             }
@@ -709,7 +734,7 @@ public final class ContentIndexer: @unchecked Sendable {
             let ins = try catalog.db.prepare("INSERT INTO content_batch(file_id, op_seq, kind, state, error) VALUES(?, ?, ?, ?, ?)")
             for (t, s) in staged {
                 let (code, error): (Int64, String?) = switch s {
-                case .put(let doc): (Self.stateCode(doc.state), nil)
+                case .written(let state): (Self.stateCode(state), nil)
                 case .failed(let msg): (4, msg)
                 default: (0, nil)
                 }
