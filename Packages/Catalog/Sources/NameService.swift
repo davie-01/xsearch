@@ -163,9 +163,9 @@ public final class NameService: @unchecked Sendable {
                 let parent = (path as NSString).deletingLastPathComponent
                 if let (dirRow, dp) = try? catalog.nearest(parent, root: root), dp == parent { row = try? catalog.child(of: dirRow.id, named: name) }
             }
-            if !inRoots {
+            if !context.nameRoots.contains(where: { PathUtil.isWithin(path, $0) }) {
                 out.append(.init(label: "文件名范围", level: .problem, detail: "不在文件名索引范围内。在 设置 › 索引范围 中把它所在的文件夹加入。"))
-            } else if !probe.isIndexable(path) || ((name.hasPrefix(".")) && !context.rules.includeHidden) {
+            } else if !probe.isInNameScope(path) || ((name.hasPrefix(".")) && !context.rules.includeHidden) {
                 out.append(.init(label: "文件名范围", level: .problem, detail: "被排除规则排除（或是隐藏文件）。在 设置 › 索引范围 › 排除规则 中调整。"))
             } else if row == nil {
                 out.append(.init(label: "文件名范围", level: .warning, detail: "在范围内，但还没有进入索引：可能正在扫描，稍后再试。"))
@@ -291,12 +291,13 @@ public final class NameService: @unchecked Sendable {
             roots.removeAll { PathUtil.isWithin($0, r) }
             roots.append(r)
         }
-        return .init(roots: roots.sorted(), rules: ExclusionRules(s, home: home), home: home,
+        return .init(roots: roots.sorted(), nameRoots: scope.roots(home: home), rules: ExclusionRules(s, home: home), home: home,
                      content: contentScope.map { ContentRules($0, home: home) })
     }
 
     private func fingerprint() -> String {
-        scope.fingerprint(home: home) + "\u{3}" + (contentScope?.fingerprint(home: home) ?? "no-content")
+        // "m2": rows carry the content-only flag; older catalogs need one pass to set it.
+        "m2\u{3}" + scope.fingerprint(home: home) + "\u{3}" + (contentScope?.fingerprint(home: home) ?? "no-content")
     }
 
     private func open(scope: NameScope, content: ContentScope?) throws {

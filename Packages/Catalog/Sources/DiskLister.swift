@@ -14,6 +14,8 @@ struct DiskEntry {
     var hidden: Bool
     var bundleBit: Bool
     var isMount: Bool
+    /// Set by the reconciler: kept for the content scope only.
+    var contentOnly = false
 
     var isDirectory: Bool { type == UInt32(XS_TYPE_DIR) }
     var isSymlink: Bool { type == UInt32(XS_TYPE_SYMLINK) }
@@ -55,6 +57,7 @@ struct DiskEntry {
         if isDirectory { f.insert(.directory) }
         if isPackage { f.insert(.package) }
         if isSymlink { f.insert(.symlink) }
+        if contentOnly { f.insert(.contentOnly) }
         return f
     }
 }

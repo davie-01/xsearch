@@ -553,3 +553,100 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     again.bindCatalog("B")
     #expect(again.favorites().contains(.init(path: "/b/fav", fileId: 9)))
 }
+
+// MARK: Name and content scopes (R09)
+
+private func nameHits(_ names: NameService, _ text: String) -> Set<String> {
+    Set(names.search(NameQuery.parse(text, home: "/nonexistent-home"), limit: 100).hits.map(\.name))
+}
+
+/// Name scope `names/`, content scope `other/`, side by side.
+private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
+    NameScope(wholeDisk: false, folders: [box.p("names")], excludes: excludes, includeHidden: false, includePackageContents: false)
+}
+
+@Test func contentFolderOutsideNameScopeStaysOutOfNameResults() throws {
+    let p = try Pipeline("r09-split")
+    defer { p.stop() }
+    try p.box.write("names/alpha-name.txt", "x")
+    try p.box.write("other/alpha-content.txt", "正文 kappa77")
+    let content = ContentScope(folders: [p.box.p("other")])
+    p.names.start(scope: splitScopes(p.box), content: content)
+    #expect(p.names.waitUntilIdle())
+    try p.indexer.start()
+    #expect(p.settle())
+    #expect(nameHits(p.names, "alpha") == ["alpha-name.txt"])
+    #expect(nameHits(p.names, "other").isEmpty, "not its folder either")
+    #expect(try p.search("kappa77") == ["alpha-content.txt"])
+    // A file arriving there: content yes, name no.
+    try p.box.write("other/alpha-later.txt", "正文 kappa78")
+    #expect(p.until { try p.search("kappa78") == ["alpha-later.txt"] })
+    #expect(nameHits(p.names, "alpha") == ["alpha-name.txt"])
+    // Survives a restart from the snapshot.
+    p.indexer.stop()
+    p.names.shutdown()
+    let again = NameService(directory: p.box.data, home: "/nonexistent-home")
+    again.start(scope: splitScopes(p.box), content: content)
+    #expect(again.waitUntilIdle())
+    #expect(nameHits(again, "alpha") == ["alpha-name.txt"])
+    // Adding the folder to the name scope shows it; removing hides it again. Content stays.
+    var both = splitScopes(p.box)
+    both.folders.append(p.box.p("other"))
+    again.setScope(both)
+    #expect(again.waitUntilIdle())
+    #expect(nameHits(again, "alpha") == ["alpha-name.txt", "alpha-content.txt", "alpha-later.txt"])
+    again.setScope(splitScopes(p.box))
+    #expect(again.waitUntilIdle())
+    #expect(nameHits(again, "alpha") == ["alpha-name.txt"])
+    again.shutdown()
+}
+
+@Test func chosenContentFolderOutranksAnExcludedLocation() throws {
+    let p = try Pipeline("r09-prefix")
+    defer { p.stop() }
+    try p.box.write("names/secret/chosen/in-chosen.txt", "正文 lambda77")
+    try p.box.write("names/secret/chosen/node_modules/in-modules.txt", "正文 lambda78")
+    try p.box.write("names/secret/chosen/.hidden/in-hidden.txt", "正文 lambda79")
+    try p.box.write("names/secret/elsewhere.txt", "正文 lambda80")
+    try p.box.write("names/plain.txt", "正文 lambda81")
+    let scope = splitScopes(p.box, excludes: [p.box.p("names/secret"), "node_modules"])
+    p.names.start(scope: scope, content: ContentScope(folders: [p.box.p("names/secret/chosen")]))
+    #expect(p.names.waitUntilIdle())
+    try p.indexer.start()
+    #expect(p.settle())
+    #expect(try p.search("lambda77") == ["in-chosen.txt"], "the chosen folder is indexed")
+    #expect(try p.search("lambda78").isEmpty, "node_modules stays out")
+    #expect(try p.search("lambda79").isEmpty, "hidden folders stay out")
+    #expect(try p.search("lambda80").isEmpty, "only the way to the folder, not its neighbours")
+    #expect(nameHits(p.names, "in-chosen").isEmpty && nameHits(p.names, "secret").isEmpty && nameHits(p.names, "elsewhere").isEmpty)
+    #expect(nameHits(p.names, "plain") == ["plain.txt"])
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let s = try c.db.prepare("SELECT COUNT(*) FROM files WHERE name = 'elsewhere.txt' AND deleted = 0")
+    #expect(try s.first { $0.int(0) } == 0, "neighbours are not even scanned")
+    // Content events reach it too.
+    try p.box.write("names/secret/chosen/new.txt", "正文 lambda82")
+    #expect(p.until { try p.search("lambda82") == ["new.txt"] })
+    #expect(nameHits(p.names, "new.txt").isEmpty)
+}
+
+@Test func movingBetweenScopesFollowsTheNewPlace() throws {
+    let p = try Pipeline("r09-move")
+    defer { p.stop() }
+    try p.box.write("names/keep.txt", "x")
+    try p.box.write("other/mover.txt", "正文 mu77")
+    try p.box.write("other/folder/inner-mover.txt", "正文 mu78")
+    p.names.start(scope: splitScopes(p.box), content: ContentScope(folders: [p.box.p("other")]))
+    #expect(p.names.waitUntilIdle())
+    try p.indexer.start()
+    #expect(p.settle())
+    #expect(nameHits(p.names, "mover").isEmpty)
+    let fm = FileManager.default
+    try fm.moveItem(atPath: p.box.p("other/mover.txt"), toPath: p.box.p("names/mover.txt"))
+    try fm.moveItem(atPath: p.box.p("other/folder"), toPath: p.box.p("names/folder"))
+    #expect(p.until { nameHits(p.names, "mover") == ["mover.txt", "inner-mover.txt"] }, "visible by name after moving in")
+    #expect(p.until { try p.search("mu77").isEmpty && p.search("mu78").isEmpty }, "left the content scope")
+    try fm.moveItem(atPath: p.box.p("names/mover.txt"), toPath: p.box.p("other/mover.txt"))
+    try fm.moveItem(atPath: p.box.p("names/folder"), toPath: p.box.p("other/folder"))
+    #expect(p.until { nameHits(p.names, "mover").isEmpty }, "hidden again after moving back")
+    #expect(p.until { try p.search("mu78") == ["inner-mover.txt"] && p.search("mu77") == ["mover.txt"] })
+}

@@ -303,6 +303,7 @@ public struct NameView: Sendable {
                     }
                     if level == 0 { continue }
                     let f = EntryFlags(rawValue: base.flags[i])
+                    if f.contains(.contentOnly) { continue }
                     if !matcher.kindAllowed(f, extAllowed: level & 0x80 != 0) { continue }
                     if !matcher.metaAllowed(f, size: base.sizes[i], mtime: base.mtimes[i]) { continue }
                     if !overlayEmpty && overlay[id] != nil { continue }
@@ -314,7 +315,7 @@ public struct NameView: Sendable {
             }
         }
         for (id, node) in overlay {
-            guard let r = node.record else { continue }
+            guard let r = node.record, !r.flags.contains(.contentOnly) else { continue }
             let level = node.key.withUnsafeBufferPointer { matcher.level($0, 0..<$0.count) { self.path(id).map(NameKey.bytes) } }
             if level == 0 || !matcher.kindAllowed(r.flags, extAllowed: level & 0x80 != 0) { continue }
             if !matcher.metaAllowed(r.flags, size: r.size, mtime: r.mtime) { continue }

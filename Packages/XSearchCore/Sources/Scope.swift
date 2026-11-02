@@ -80,13 +80,15 @@ public struct ExclusionRules: Sendable {
     }
 
     /// `path` is the child's absolute path, `nameKey` its folded name.
-    public func excludes(path: String, nameKey: [UInt8], isDirectory: Bool, isHidden: Bool) -> Bool {
+    /// `ignoringPrefixes`: for a folder chosen by absolute path, which outranks a rule that
+    /// excludes that location as such; name, extension and hidden rules still apply inside.
+    public func excludes(path: String, nameKey: [UInt8], isDirectory: Bool, isHidden: Bool, ignoringPrefixes: Bool = false) -> Bool {
         if isHidden && !includeHidden { return true }
         var segmentKeys: [[UInt8]]?
         for rule in rules {
             switch rule {
             case .prefix(let p):
-                if PathUtil.isWithin(path, p) { return true }
+                if !ignoringPrefixes && PathUtil.isWithin(path, p) { return true }
             case .component(let c):
                 if nameKey == c { return true }
             case .ext(let e):

@@ -101,6 +101,17 @@ public struct ContentRules: Sendable {
         types = scope.types
     }
 
+    /// A folder above a content root: walked only to reach the root.
+    public func isAboveRoot(_ path: String) -> Bool {
+        roots.contains { $0 != path && PathUtil.isWithin($0, path) }
+    }
+
+    /// A folder inside a root that the content scope's own rules keep.
+    public func keepsDirectory(path: String, name: String) -> Bool {
+        roots.contains { PathUtil.isWithin(path, $0) }
+            && !exclusions.excludes(path: path, nameKey: NameKey.bytes(name), isDirectory: true, isHidden: false)
+    }
+
     /// `path` is the file's absolute path; directories and packages are never content.
     public func eligible(path: String, name: String, isDirectory: Bool) -> Bool {
         guard !isDirectory, let type = ContentType.of(name: name), types.contains(type) else { return false }

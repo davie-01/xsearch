@@ -11,7 +11,9 @@ import XSearchCore
 /// - a listing failure is never treated as an empty directory (§9.2): children are kept.
 final class Reconciler {
     struct Context {
+        /// What is scanned: the union of the name roots and the content roots.
         var roots: [String]
+        var nameRoots: [String]
         var rules: ExclusionRules
         var home: String
         /// nil: content indexing off.
@@ -196,17 +198,55 @@ final class Reconciler {
 
     /// Whether an event path can concern the index at all (inside a root, no excluded ancestor).
     func isIndexable(_ path: String) -> Bool {
-        guard let root = ctx.roots.filter({ PathUtil.isWithin(path, $0) }).max(by: { $0.count < $1.count }) else { return false }
+        isInNameScope(path) || contentCovers(path)
+    }
+
+    /// Below a name root with no component excluded. Components count as directories, so
+    /// extension rules (files only) never drop an event that might concern a directory.
+    func isInNameScope(_ path: String) -> Bool {
+        guard let root = ctx.nameRoots.filter({ PathUtil.isWithin(path, $0) }).max(by: { $0.count < $1.count }) else { return false }
         var current = root
         let rest = root == "/" ? Substring(path.dropFirst()) : path.dropFirst(root.count + 1)
         for component in rest.split(separator: "/") {
             current = (current == "/" ? "" : current) + "/" + component
-            // Ancestors are directories; for the leaf we also assume a directory so extension rules
-            // (files only) never drop an event that might concern a directory.
             if ctx.rules.excludes(path: current, nameKey: NameKey.bytes(String(component)), isDirectory: true,
                                   isHidden: component.hasPrefix(".")) { return false }
         }
         return true
+    }
+
+    /// The content scope needs this path: on the way to a root, or inside one with no component
+    /// excluded. Hidden items and name or extension exclusions apply there too (the defaults
+    /// keep `node_modules` and `.git` out, and the content scope has no such rules of its own).
+    private func contentCovers(_ path: String) -> Bool {
+        guard let content = ctx.content else { return false }
+        if content.isAboveRoot(path) { return true }
+        guard let root = content.roots.filter({ PathUtil.isWithin(path, $0) }).max(by: { $0.count < $1.count }) else { return false }
+        var current = root
+        let rest = root == "/" ? Substring(path.dropFirst()) : path.dropFirst(root.count + 1)
+        for component in rest.split(separator: "/") {
+            current = (current == "/" ? "" : current) + "/" + component
+            let name = String(component)
+            if ctx.rules.excludes(path: current, nameKey: NameKey.bytes(name), isDirectory: true, isHidden: component.hasPrefix("."), ignoringPrefixes: true)
+                || !content.keepsDirectory(path: current, name: name) { return false }
+        }
+        return true
+    }
+
+    /// Decides one listed entry: in the name scope, kept for the content scope only, or dropped
+    /// (nil). `parent` is the directory it was listed in.
+    private func classify(_ e: DiskEntry, path: String, parent: Row) -> DiskEntry? {
+        // Below a content-only directory the name rules were not walked yet.
+        let inName = parent.flags.contains(.contentOnly) ? isInNameScope(path) && !excluded(path, e) : !excluded(path, e)
+        if inName { return e }
+        guard let content = ctx.content else { return nil }
+        var kept = e
+        kept.contentOnly = true
+        if e.isDirectory && content.isAboveRoot(path) { return kept }
+        guard content.roots.contains(where: { PathUtil.isWithin(path, $0) }),
+              !ctx.rules.excludes(path: path, nameKey: NameKey.bytes(e.name), isDirectory: e.isDirectory, isHidden: e.hidden, ignoringPrefixes: true) else { return nil }
+        let wanted = e.isDirectory ? content.keepsDirectory(path: path, name: e.name) : content.eligible(path: path, name: e.name, isDirectory: false)
+        return wanted ? kept : nil
     }
 
     /// Creates rows for new roots and deletes roots no longer in scope (with their subtrees).
@@ -216,8 +256,17 @@ final class Reconciler {
             for id in try catalog.deleteSubtree(r.id, seq: seq) { try wrote(.remove(id)) }
         }
         for path in ctx.roots where !existing.contains(where: { $0.name == path }) {
-            guard case .success(let e) = DiskLister.stat(path), e.isDirectory else { continue }
+            guard case .success(var e) = DiskLister.stat(path), e.isDirectory else { continue }
+            e.contentOnly = !ctx.nameRoots.contains { PathUtil.isWithin(path, $0) }
             let r = try catalog.insert(parent: 0, name: path, e, seq: seq)
+            try wrote(.upsert(FileCatalog.record(r)))
+        }
+        // A kept root can change sides when the scopes change.
+        for var r in existing where ctx.roots.contains(r.name) {
+            let contentOnly = !ctx.nameRoots.contains { PathUtil.isWithin(r.name, $0) }
+            guard r.flags.contains(.contentOnly) != contentOnly else { continue }
+            if contentOnly { r.flags.insert(.contentOnly) } else { r.flags.remove(.contentOnly) }
+            try catalog.update(r, seq: seq)
             try wrote(.upsert(FileCatalog.record(r)))
         }
     }
@@ -272,7 +321,7 @@ final class Reconciler {
                     try wrote(.upsert(FileCatalog.record(dir)))
                 }
             case .success(let listing):
-                let entries = listing.entries
+                let entries = listing.entries.compactMap { classify($0, path: childPath(job.path, $0.name), parent: dir) }
                 if dir.flags.contains(.noAccess) {
                     dir.flags.remove(.noAccess)
                     try catalog.update(dir, seq: seq)
@@ -287,7 +336,6 @@ final class Reconciler {
     private func insertAll(_ entries: [DiskEntry], into dir: Row, path: String) throws {
         for e in entries {
             let p = childPath(path, e.name)
-            if excluded(p, e) { continue }
             // Something may already have been moved into this new directory in this batch.
             guard let r = try catalog.insertIfAbsent(parent: dir.id, name: e.name, e, seq: seq) else { continue }
             try wrote(.upsert(FileCatalog.record(r)))
@@ -299,7 +347,6 @@ final class Reconciler {
         var existing = Dictionary(try catalog.children(of: dir.id).map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
         for e in entries {
             let p = childPath(job.path, e.name)
-            if excluded(p, e) { continue }
             guard var r = existing.removeValue(forKey: e.name) else {
                 pendingNew.append((dir, job.path, e))
                 continue

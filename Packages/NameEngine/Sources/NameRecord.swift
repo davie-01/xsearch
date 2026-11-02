@@ -9,6 +9,8 @@ public struct EntryFlags: OptionSet, Sendable, Hashable {
     public static let symlink = EntryFlags(rawValue: 4)
     /// Listing this directory failed (permission): its old children are kept, not deleted.
     public static let noAccess = EntryFlags(rawValue: 8)
+    /// Scanned for the content scope only (§6.2): in the catalog, never in name results.
+    public static let contentOnly = EntryFlags(rawValue: 16)
 
     public var isApp: Bool { contains(.package) }
 }
