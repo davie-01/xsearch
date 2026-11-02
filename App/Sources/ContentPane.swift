@@ -513,6 +513,14 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// Hits found by the live scan (preview reads the file, not the index).
     private(set) var liveIds = Set<UInt64>()
 
+    func clearResults() {
+        hits = []
+        liveIds = []
+        table.reloadData()
+        invalidatePreview()
+        preview.clear()
+    }
+
     /// A preview still queued must not fill the pane any more.
     func invalidatePreview() { previewToken += 1 }
 

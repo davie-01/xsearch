@@ -6,7 +6,7 @@ import XSearchCore
 /// so dark appearance follows automatically (§2.3).
 @MainActor
 enum Theme {
-    static let panelWidth: CGFloat = 720
+    static let panelWidth: CGFloat = 640
     static let maxListHeight: CGFloat = 470
     static let rowHeight: CGFloat = 52
     static let groupHeight: CGFloat = 26

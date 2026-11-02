@@ -227,8 +227,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         ruleRow.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
 
         filters.orientation = .horizontal
-        filters.spacing = 6
-        filters.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 2, right: 20)
+        // Measured from Spotlight on macOS 26: 26 pt pills, 14.5 pt text, 8.5 pt padding, 8 pt apart.
+        filters.spacing = 8
+        filters.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 4, right: 20)
         filters.alignment = .centerY
         filters.isHidden = true
         chips.orientation = .horizontal
@@ -384,6 +385,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func toggle() { panel.isVisible ? hide() : show() }
 
     func show(mode requested: Preferences.Mode? = nil, text: String? = nil) {
+        let previous = field.stringValue
         if let text {
             field.stringValue = text
         } else if !Preferences.shared.keepLastQuery {
@@ -392,6 +394,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             scopeChip.isHidden = true
             updatePlaceholder()
         }
+        // The search below answers asynchronously: results of another query must not decide the
+        // height the panel appears with, or it opens large and collapses a moment later.
+        if field.stringValue != previous { forgetResults() }
         session.refreshApps()
         let prefs = Preferences.shared
         setMode(requested ?? (prefs.summonMode == .rememberLast ? prefs.lastMode : .name))
@@ -421,6 +426,19 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         session.content.cancel()
         contentPane.invalidatePreview()
         onVisibilityChange?()
+    }
+
+    private func forgetResults() {
+        output = nil
+        contentOutput = nil
+        contentShown = 0
+        rows = []
+        table.reloadData()
+        contentPane.clearResults()
+        setChips([])
+        filters.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        filters.isHidden = true
+        clearNotice()
     }
 
     private func position() {
@@ -586,7 +604,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         rows = []
         var lastGroup: ResultItem.Group?
         for item in out.items {
-            if item.group != lastGroup { rows.append(.group(item.group.rawValue)); lastGroup = item.group }
+            // Plain results need no heading (Spotlight); favorites and recents keep theirs.
+            if item.group != lastGroup {
+                if item.group != .files { rows.append(.group(item.group.rawValue)) }
+                lastGroup = item.group
+            }
             rows.append(.item(item))
         }
         setChips(out.query.chips)
@@ -639,11 +661,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             let chip = NSButton(title: title, target: self, action: #selector(filterClicked(_:)))
             chip.isBordered = false
             chip.wantsLayer = true
-            chip.layer?.cornerRadius = 11
+            chip.layer?.cornerRadius = 13
             chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
-            chip.attributedTitle = NSAttributedString(string: "  \(title)  ", attributes: [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.labelColor.withAlphaComponent(0.8)])
-            chip.heightAnchor.constraint(equalToConstant: 24).isActive = true
-            let width = chip.fittingSize.width + filters.spacing
+            let text = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 14.5), .foregroundColor: NSColor.labelColor.withAlphaComponent(0.85)])
+            chip.attributedTitle = text
+            let chipWidth = ceil(text.size().width) + 17
+            chip.widthAnchor.constraint(equalToConstant: chipWidth).isActive = true
+            chip.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            let width = chipWidth + filters.spacing
             if width > room { continue }
             room -= width
             chip.tag = filterActions.count
@@ -865,7 +890,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func updateHints() {
         hints.attributedStringValue = Self.hintString(mode == .name
-            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
+            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⇧⌘C", "复制路径"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
             : [("↵", "打开"), ("⌘↵", "阅读窗口"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘E", "完整窗口")])
     }
 
@@ -1014,6 +1039,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                         self.logTestState(String(ch))
                         return
                     }
+                    // "⎋": Esc, then the hotkey at once. Logs the height the panel appears with.
+                    if ch == "⎋" {
+                        self.hide()
+                        self.show()
+                        self.logShownHeight()
+                        return
+                    }
                     if ch == "◉" {
                         (self.filters.arrangedSubviews.first as? NSButton)?.performClick(nil)
                         self.logTestState("◉")
@@ -1030,13 +1062,20 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
     }
 
+    private func logShownHeight() {
+        guard let path = ProcessInfo.processInfo.environment["XS_TYPE_LOG"] else { return }
+        let line = "⎋ shown body=\(bodyHeight) text=\(field.stringValue) rows=\(rows.count)\n"
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
+        logTestState("⎋ settled")
+    }
+
     private func logTestState(_ step: String) {
         guard let path = ProcessInfo.processInfo.environment["XS_TYPE_LOG"] else { return }
         // After the search started by this step has delivered.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
             let focus = panel.firstResponder === table ? "list" : panel.firstResponder is NSTextView ? "input" : "other"
             let ql = QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible
-            let line = "\(step) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
+            let line = "\(step) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
             if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
         }
     }
@@ -1359,7 +1398,7 @@ final class RuleView: NSView {
 /// Geometry of the Spotlight-style shell.
 enum Shell {
     /// Default and name search; content mode widens to `contentWidth`.
-    static let width: CGFloat = 570
+    static let width: CGFloat = 640
     static let bar: CGFloat = 58
     /// Glass shapes closer than this melt together.
     static let mergeDistance: CGFloat = 12
