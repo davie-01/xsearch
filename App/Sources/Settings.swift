@@ -459,6 +459,7 @@ struct ContentCard: View {
     var statusLine: String {
         guard let st = model.contentStatus else { return "内容索引未启动" }
         var parts = ["\(Theme.count(st.indexed)) 个文件"]
+        if st.lastError != nil { parts.append("写入暂时出错，正在自动重试") }
         if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
         if st.failed > 0 { parts.append("\(st.failed) 个提取失败") }
         return parts.joined(separator: " · ")

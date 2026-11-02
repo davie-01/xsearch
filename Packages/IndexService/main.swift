@@ -44,10 +44,12 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
 
     func stop(reply: @escaping () -> Void) {
         lock.lock()
-        indexer?.stop()
+        let ix = indexer
         indexer = nil
         directory = nil
         lock.unlock()
+        // Outside the lock: snapshots must not wait for the stop.
+        ix?.stop()
         reply()
     }
 }

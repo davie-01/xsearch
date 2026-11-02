@@ -30,7 +30,9 @@ struct LiveFile: Sendable {
 
 struct PreviewData: @unchecked Sendable {
     var document: ContentDocument
+    /// The first hits, at most `ContentSearcher.previewHitCap`.
     var highlights: [Utf16Range]
+    var totalHits: UInt64
 }
 
 /// Content QuerySession (ARCHITECTURE §5, UI-SPEC §6.1): starts ~80 ms after typing stops, a
@@ -50,6 +52,8 @@ final class ContentSearcher: @unchecked Sendable {
     var mode: MatchMode = .loose
 
     static let resultCap = 1000
+    /// A one-letter query can hit millions of times; only this many are mapped and listed.
+    static let previewHitCap: UInt64 = 5000
 
     /// Opens (or reopens after an instance switch) the reader. nil until the indexer committed once.
     func openIndex() -> ContentIndex? {
@@ -213,24 +217,25 @@ final class ContentSearcher: @unchecked Sendable {
             let doc = ContentDocument(fileId: 0, opSeq: 0, revision: UInt64(bitPattern: ns), name: url.lastPathComponent,
                                       dir: url.deletingLastPathComponent().path, mtime: Int64(st.st_mtimespec.tv_sec), size: Int64(st.st_size),
                                       text: t.text, anchorsJson: "[]", pagesJson: "[]", state: .complete)
-            let data = PreviewData(document: doc, highlights: t.highlights)
+            let data = PreviewData(document: doc, highlights: t.highlights, totalHits: t.totalHits)
             DispatchQueue.main.async { deliver(data) }
         }
     }
 
-    /// Stored text + all hit ranges for the preview (background queue).
-    func preview(fileId: UInt64, expression: String, member: String = "", memberStart: UInt32 = 0,
+    /// Stored text + hit ranges for the preview, from one snapshot (background queue). `mode`
+    /// is the one the hit was found with, when another searcher found it.
+    func preview(fileId: UInt64, expression: String, mode: MatchMode? = nil, member: String = "", memberStart: UInt32 = 0,
                  deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
-        let mode = self.mode
+        let mode = mode ?? self.mode
         previewQueue.async { [weak self] in
-            guard let index = self?.openIndex(), let doc = try? index.document(fileId: fileId) else {
+            guard let index = self?.openIndex(),
+                  let p = try? index.preview(fileId: fileId, query: expression, mode: mode, memberStart: member.isEmpty ? nil : memberStart, maxHits: Self.previewHitCap) else {
                 DispatchQueue.main.async { deliver(nil) }
                 return
             }
-            let hl = (try? index.highlights(fileId: fileId, query: expression, mode: mode)) ?? []
-            var data = PreviewData(document: doc, highlights: hl)
-            if !member.isEmpty { data = data.member(member, startingAt: memberStart) }
-            let result = data
+            var doc = p.document
+            if !member.isEmpty { doc.name = (member as NSString).lastPathComponent }
+            let result = PreviewData(document: doc, highlights: p.highlights, totalHits: p.totalHits)
             DispatchQueue.main.async { deliver(result) }
         }
     }

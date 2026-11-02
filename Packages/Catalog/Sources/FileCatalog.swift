@@ -279,9 +279,13 @@ final class FileCatalog {
         return out
     }
 
-    /// Tombstones are needed only until a snapshot at or after their sequence is on disk.
+    /// Tombstones are needed only until a snapshot at or after their sequence is on disk, and
+    /// until the indexer has processed their tasks.
     func purgeTombstones(upTo seq: Int64) throws {
-        try db.prepare("DELETE FROM files WHERE deleted = 1 AND change_seq <= ?").bind(seq).run()
+        try db.prepare("""
+            DELETE FROM files WHERE deleted = 1 AND change_seq <= ?
+              AND NOT EXISTS (SELECT 1 FROM content_tasks t WHERE t.file_id = files.id)
+            """).bind(seq).run()
     }
 
     func liveCount() throws -> Int {

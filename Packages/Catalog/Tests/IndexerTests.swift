@@ -228,7 +228,7 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
 }
 
 @Test func rebuildSwitchesInstanceAfterCatchingUp() throws {
-    let p = try Pipeline("rebuild")
+    let p = try Pipeline("rebuild") { $0.oldInstanceGrace = 0 }
     defer { p.stop() }
     for i in 1...5 { try p.box.write("docs/r\(i).txt", "重建 文件\(i) lambda\(i)") }
     try p.start()
@@ -266,4 +266,148 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(tasks == ["t.txt"], "\(tasks)")
     #expect(p.settle())
     #expect(try p.search("mu") == ["t.txt"] && p.search("nu") == ["d.pdf"])
+}
+
+// MARK: Consistency (review batch 1)
+
+@Test func deletionWhileStoppedSurvivesTombstonePurge() throws {
+    let p = try Pipeline("purge")
+    defer { p.stop() }
+    try p.box.write("docs/gone.txt", "残留 omega")
+    try p.start()
+    #expect(p.settle())
+    #expect(try p.search("omega") == ["gone.txt"])
+    p.indexer.stop()
+    try FileManager.default.removeItem(atPath: p.box.p("docs/gone.txt"))
+    #expect(p.until { p.names.contentTasks().count == 1 })
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    try c.purgeTombstones(upTo: .max)
+    // The tombstone stays while its task waits.
+    let rows = try c.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 1 AND name = 'gone.txt'")
+    #expect(try rows.first { $0.int(0) } == 1)
+    // Even a row removed anyway (older versions did) must not keep its text.
+    try c.db.exec("DELETE FROM files WHERE name = 'gone.txt'")
+    try p.restartIndexer()
+    #expect(p.settle())
+    #expect(try p.search("omega").isEmpty)
+}
+
+@Test func orphanDocumentsAreRemovedOnce() throws {
+    let p = try Pipeline("orphan")
+    defer { p.stop() }
+    try p.box.write("docs/kept.txt", "保留 sigma")
+    try p.box.write("docs/orphan.txt", "孤儿 sigma")
+    try p.start()
+    #expect(p.settle())
+    p.indexer.stop()
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    try c.db.exec("DELETE FROM files WHERE name = 'orphan.txt'; DELETE FROM meta WHERE key = 'content_orphans_checked';")
+    try p.restartIndexer()
+    #expect(p.settle())
+    #expect(try p.search("sigma") == ["kept.txt"])
+    #expect(try c.meta("content_orphans_checked") == "1")
+}
+
+@Test func interruptedRebuildNeverPublishesAnEmptyIndex() throws {
+    let p = try Pipeline("rebuild-crash") { $0.oldInstanceGrace = 0 }
+    defer { p.stop() }
+    for i in 1...5 { try p.box.write("docs/k\(i).txt", "重建 kappa\(i)") }
+    try p.start()
+    #expect(p.settle())
+    let data = p.box.data
+    let junk = data.appendingPathComponent("content/leftover")
+    try FileManager.default.createDirectory(at: junk, withIntermediateDirectories: true)
+    // Stopped right after the rebuild began; nothing extracted yet.
+    p.indexer.workerFault = { _ in "hang" }
+    try p.indexer.rebuildContentIndex()
+    try p.restartIndexer { $0.oldInstanceGrace = 0 }
+    #expect(!FileManager.default.fileExists(atPath: junk.path), "unknown directory collected")
+    #expect(p.until { !p.indexer.isRebuilding })
+    for i in 1...5 { #expect(try p.search("kappa\(i)") == ["k\(i).txt"]) }
+}
+
+@Test func stalePendingBatchIsResolvedByTheIndexAlone() throws {
+    let p = try Pipeline("pending")
+    defer { p.stop() }
+    try p.box.write("docs/a.txt", "批次 tau")
+    try p.start()
+    #expect(p.settle())
+    p.indexer.stop()
+    // A lower pending number than confirmed, as batch numbers restarting after a rebuild left.
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    try c.setMeta("content_batch_confirmed", "500")
+    try c.setMeta("content_batch_pending", "400")
+    try p.restartIndexer()
+    #expect(try c.meta("content_batch_pending") == nil)
+    #expect(try p.search("tau") == ["a.txt"])
+}
+
+@Test func failedConfirmRecoversWithoutRestart() throws {
+    let p = try Pipeline("sql-error") { $0.errorBackoff = 0.05 }
+    defer { p.stop() }
+    try p.start()
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    try c.db.exec("""
+        CREATE TRIGGER fail_confirm BEFORE UPDATE OF state ON content_tasks WHEN NEW.state = 2
+        BEGIN SELECT RAISE(ABORT, 'injected'); END
+        """)
+    try p.box.write("docs/e.txt", "恢复 upsilon")
+    let deadline = Date().addingTimeInterval(20)
+    while p.indexer.status.lastError == nil && Date() < deadline {
+        p.names.waitUntilIdle(timeout: 1)
+        p.indexer.waitUntilIdle(timeout: 0.2)
+        usleep(50_000)
+    }
+    #expect(p.indexer.status.lastError != nil)
+    try c.db.exec("DROP TRIGGER fail_confirm")
+    #expect(p.until { p.indexer.status.lastError == nil && p.indexer.status.pending == 0 })
+    #expect(try p.search("upsilon") == ["e.txt"])
+    #expect(try c.meta("content_batch_pending") == nil)
+    p.indexer.waitUntilIdle()
+    #expect(p.indexer.status.running)
+}
+
+@Test func expiredLeaseIsClaimedAgain() throws {
+    let p = try Pipeline("lease")
+    defer { p.stop() }
+    try p.box.write("docs/l.txt", "租约 phi")
+    try p.start()
+    #expect(p.settle())
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let q = try c.db.prepare("SELECT id, op_seq FROM files WHERE name = 'l.txt'")
+    let (id, seq) = try #require(try q.first { ($0.int(0), $0.int(1)) })
+    q.reset()
+    try c.setContent(id, inContent: true, opSeq: seq + 1000)
+    try c.db.prepare("INSERT INTO content_tasks(file_id, op_seq, kind, priority, state, lease_until) VALUES(?, ?, ?, 0, 1, 1)").bind(id, seq + 1000, FileCatalog.TaskKind.index.rawValue).run()
+    #expect(p.until { p.indexer.status.pending == 0 })
+    #expect(try p.search("phi") == ["l.txt"])
+}
+
+@Test func unknownTaskKindDoesNotSpinTheCycle() throws {
+    let p = try Pipeline("kind")
+    defer { p.stop() }
+    try p.start()
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    try c.db.exec("INSERT INTO content_tasks(file_id, op_seq, kind, priority) VALUES(999, 1, 0, 0)")
+    #expect(p.settle())
+}
+
+@Test func stopDoesNotWaitForHungParsers() throws {
+    let p = try Pipeline("stop") { $0.workerFault = { _ in "hang" } }
+    for i in 1...8 { try p.box.write("docs/h\(i).txt", "挂起 psi\(i)") }
+    try p.start()
+    usleep(800_000)
+    let t0 = Date()
+    p.indexer.stop()
+    let elapsed = Date().timeIntervalSince(t0)
+    #expect(elapsed < 1, "stop took \(elapsed) s")
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let s = try c.db.prepare("SELECT COUNT(*), MAX(attempts) FROM content_tasks")
+    let (tasks, attempts) = try #require(try s.first { ($0.int(0), $0.int(1)) })
+    s.reset()
+    #expect(tasks == 8 && attempts == 0, "an interrupted file is not the file's fault")
+    try p.restartIndexer()
+    defer { p.stop() }
+    #expect(p.settle())
+    for i in 1...8 { #expect(try p.search("psi\(i)") == ["h\(i).txt"]) }
 }

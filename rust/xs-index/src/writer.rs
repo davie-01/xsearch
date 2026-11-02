@@ -141,6 +141,22 @@ impl ContentWriter {
         Ok(out)
     }
 
+    /// Files with a live document (tombstones excluded): finds documents the catalog forgot.
+    pub fn live_file_ids(&self) -> Result<Vec<u64>> {
+        let searcher = self.reader.searcher();
+        let mut out = vec![];
+        for seg in searcher.segment_readers() {
+            let ids = seg.fast_fields().u64("file_id")?;
+            let live = seg.fast_fields().u64("live")?;
+            for doc in seg.doc_ids_alive() {
+                if live.first(doc) == Some(1) {
+                    out.extend(ids.first(doc));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Committed text of one file (tests and diagnostics).
     pub fn committed_text(&self, file_id: u64) -> Result<Option<String>> {
         let searcher = self.reader.searcher();

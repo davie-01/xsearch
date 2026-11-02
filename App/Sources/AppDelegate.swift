@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var full: FullWindowController {
         if let fullWindow { return fullWindow }
         let f = FullWindowController(session: session, usage: usage)
-        f.onRead = { [weak self] hit, expression, n in self?.reader.show(hit, expression: expression, startAt: n) }
+        f.onRead = { [weak self, weak f] hit, expression, n in self?.reader.show(hit, expression: expression, mode: f?.matchMode, startAt: n) }
         f.nameScope = { Preferences.shared.nameScope }
         f.contentScope = { [weak self] in self?.currentContentScope ?? .default }
         fullWindow = f

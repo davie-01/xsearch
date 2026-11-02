@@ -281,6 +281,11 @@ RustBuffer uniffi_xs_ffi_fn_method_contentindex_highlights(void*_Nonnull ptr, ui
 uint64_t uniffi_xs_ffi_fn_method_contentindex_live_count(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEX_PREVIEW
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEX_PREVIEW
+RustBuffer uniffi_xs_ffi_fn_method_contentindex_preview(void*_Nonnull ptr, uint64_t file_id, RustBuffer query, RustBuffer mode, RustBuffer member_start, uint64_t max_hits, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEX_RELOAD
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEX_RELOAD
 void uniffi_xs_ffi_fn_method_contentindex_reload(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -334,6 +339,11 @@ RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_instance_id(void*_Nonnull 
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_LAST_COMMIT
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_LAST_COMMIT
 RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_last_commit(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_LIVE_FILE_IDS
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_LIVE_FILE_IDS
+RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_live_file_ids(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_PUT
@@ -815,6 +825,12 @@ uint16_t uniffi_xs_ffi_checksum_method_contentindex_live_count(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEX_PREVIEW
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEX_PREVIEW
+uint16_t uniffi_xs_ffi_checksum_method_contentindex_preview(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEX_RELOAD
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEX_RELOAD
 uint16_t uniffi_xs_ffi_checksum_method_contentindex_reload(void
@@ -860,6 +876,12 @@ uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_instance_id(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_LAST_COMMIT
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_LAST_COMMIT
 uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_last_commit(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_LIVE_FILE_IDS
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_LIVE_FILE_IDS
+uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_live_file_ids(void
     
 );
 #endif

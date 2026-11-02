@@ -96,20 +96,6 @@ func input(_ id: UInt64, _ text: String, dir: String = "/Users/t/下载", name: 
     #expect(p.highlights.count == 1 && (p.text as NSString).substring(with: NSRange(location: Int(p.highlights[0].start), length: 2)) == "合同")
 }
 
-@Test func memberSliceKeepsOnlyThatMember() throws {
-    // Members start at scalars 0 and 5; "😀" is one scalar but two UTF-16 units.
-    let text = "😀甲乙\n\n丙丁 戊\n"
-    let anchors = #"[{"start":0,"kind":"member","name":"a.txt"},{"start":5,"kind":"member","name":"b.docx"},{"start":5,"kind":"paragraph","index":1}]"#
-    let hl = [Utf16Range(start: 2, end: 3), Utf16Range(start: 6, end: 8)]
-    let second = memberSlice(text: text, anchorsJson: anchors, highlights: hl, start: 5)
-    #expect(second.text == "丙丁 戊\n")
-    #expect(second.highlights == [Utf16Range(start: 0, end: 2)])
-    let a = try JSONSerialization.jsonObject(with: Data(second.anchorsJson.utf8)) as! [[String: Any]]
-    #expect(a.count == 1 && a[0]["kind"] as? String == "paragraph" && a[0]["start"] as? Int == 0)
-    let first = memberSlice(text: text, anchorsJson: anchors, highlights: hl, start: 0)
-    #expect(first.text == "😀甲乙\n\n" && first.highlights == [Utf16Range(start: 2, end: 3)])
-}
-
 @Test func extractsOneArchiveMemberUnderItsName() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xs-member-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir.appendingPathComponent("src/资料"), withIntermediateDirectories: true)

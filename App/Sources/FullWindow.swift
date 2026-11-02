@@ -38,6 +38,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     private let usage: UsageStore?
     /// Its own searcher: the launcher's may be cancelled or reused independently.
     private let content = ContentSearcher()
+    /// The match mode of this window's results (the reader needs the same one).
+    var matchMode: MatchMode { content.mode }
     private let field = NSSearchField()
     private let modeControl = NSSegmentedControl(labels: ["名称", "内容"], trackingMode: .selectOne, target: nil, action: nil)
     private let countLabel = NSTextField(labelWithString: "")

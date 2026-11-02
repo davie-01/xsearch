@@ -323,6 +323,7 @@ final class PreviewPane: NSView {
         // Anchors are scalar offsets; convert to UTF-16 once.
         fullText = doc.text as NSString
         let length = fullText.length
+        totalHits = data.totalHits
         hits = stale ? [] : data.highlights.map { NSRange(location: Int($0.start), length: Int($0.end - $0.start)) }.filter { NSMaxRange($0) <= length }
         let decoded = (try? JSONDecoder().decode([AnchorInfo].self, from: Data(doc.anchorsJson.utf8))) ?? []
         anchors = Self.utf16(decoded, in: doc.text)
@@ -341,6 +342,8 @@ final class PreviewPane: NSView {
         next.isEnabled = hits.count > 1
     }
 
+    /// All hits in the document; `hits` holds the first ones when there are very many.
+    private var totalHits: UInt64 = 0
     /// The whole stored text; the text view shows `shownRange` of it.
     private var fullText: NSString = ""
     private var shownRange = NSRange(location: NSNotFound, length: 0)
@@ -389,7 +392,7 @@ final class PreviewPane: NSView {
         }
         marks.current = currentHit
         // A hit longer than the window is shown from its start.
-        position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处" + (r.length < target.length ? "（命中过长，只显示开头）" : "")
+        position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处" + (totalHits > UInt64(hits.count) ? "（共 \(Theme.count(Int(totalHits))) 处）" : "") + (r.length < target.length ? "（命中过长，只显示开头）" : "")
         let loc = anchors.last { $0.utf16 <= target.location }?.info.location
         subtitle.stringValue = [locationOverride ?? PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
         ruler.needsDisplay = true

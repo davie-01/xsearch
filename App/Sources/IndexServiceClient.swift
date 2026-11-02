@@ -116,12 +116,16 @@ final class IndexServiceClient {
         }
     }
 
-    /// Synchronous: the writer is closed before the app quits or deletes the index.
+    /// Waits for the writer to close before the app quits or deletes the index, at most 2 s so
+    /// quitting never hangs; the service stops by itself when the connection goes away, and
+    /// the next start recovers anything left unfinished.
     func stop() {
         if let local { local.stop(); self.local = nil; return }
         guard let c = connection else { return }
-        let sync = c.synchronousRemoteObjectProxyWithErrorHandler { _ in } as? IndexServiceProtocol
-        sync?.stop {}
+        let done = DispatchSemaphore(value: 0)
+        let remote = c.remoteObjectProxyWithErrorHandler { @Sendable _ in done.signal() } as? IndexServiceProtocol
+        remote?.stop { @Sendable in done.signal() }
+        _ = done.wait(timeout: .now() + 2)
         c.invalidate()
         connection = nil
         setPath(nil)

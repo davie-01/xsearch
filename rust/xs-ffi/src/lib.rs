@@ -165,6 +165,33 @@ pub struct ContentDocument {
     pub state: ExtractStateKind,
 }
 
+impl From<idx::DocView> for ContentDocument {
+    fn from(d: idx::DocView) -> Self {
+        Self {
+            file_id: d.file_id,
+            op_seq: d.op_seq,
+            revision: d.revision,
+            name: d.name,
+            dir: d.dir,
+            mtime: d.mtime,
+            size: d.size,
+            text: d.text,
+            anchors_json: serde_json::to_string(&d.anchors).unwrap_or_else(|_| "[]".into()),
+            pages_json: serde_json::to_string(&d.pages).unwrap_or_else(|_| "[]".into()),
+            state: d.state.into(),
+        }
+    }
+}
+
+/// A document with its hits, read from one snapshot. At most the requested number of
+/// highlights; `total_hits` counts them all.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ContentPreview {
+    pub document: ContentDocument,
+    pub highlights: Vec<Utf16Range>,
+    pub total_hits: u64,
+}
+
 fn parse(query: &str) -> Result<idx::Expr, EngineError> {
     idx::parse(query).map_err(|e| EngineError::Query {
         message: e.to_string(),
@@ -241,18 +268,24 @@ impl ContentIndex {
     }
 
     pub fn document(&self, file_id: u64) -> Result<Option<ContentDocument>, EngineError> {
-        Ok(self.reader.document(file_id)?.map(|d| ContentDocument {
-            file_id: d.file_id,
-            op_seq: d.op_seq,
-            revision: d.revision,
-            name: d.name,
-            dir: d.dir,
-            mtime: d.mtime,
-            size: d.size,
-            text: d.text,
-            anchors_json: serde_json::to_string(&d.anchors).unwrap_or_else(|_| "[]".into()),
-            pages_json: serde_json::to_string(&d.pages).unwrap_or_else(|_| "[]".into()),
-            state: d.state.into(),
+        Ok(self.reader.document(file_id)?.map(Into::into))
+    }
+
+    /// Text and hits of one file from one snapshot. `member_start` narrows an archive document
+    /// to that member; only the first `max_hits` hits are mapped.
+    pub fn preview(
+        &self,
+        file_id: u64,
+        query: String,
+        mode: MatchMode,
+        member_start: Option<u32>,
+        max_hits: u64,
+    ) -> Result<Option<ContentPreview>, EngineError> {
+        let preview = self.reader.preview(file_id, &parse(&query)?, mode.into(), member_start, max_hits as usize)?;
+        Ok(preview.map(|p| ContentPreview {
+            document: p.doc.into(),
+            highlights: p.highlights.into_iter().map(range).collect(),
+            total_hits: p.total_hits,
         }))
     }
 
@@ -439,6 +472,11 @@ impl ContentIndexWriter {
         self.with(|w| w.applied_seqs())
     }
 
+    /// Files with a live document (tombstones excluded).
+    pub fn live_file_ids(&self) -> Result<Vec<u64>, EngineError> {
+        self.with(|w| w.live_file_ids())
+    }
+
     /// Committed document with this extraction cache key, for reuse without re-extracting.
     pub fn find_by_extract_key(&self, key: String) -> Result<Option<ContentDocument>, EngineError> {
         self.with(|w| {
@@ -557,11 +595,15 @@ pub struct LiveHit {
     pub snippet_highlights: Vec<Utf16Range>,
 }
 
-/// A text file read for preview: decoded text and every hit in it.
+/// Hits mapped for a live preview (the indexed preview passes its own limit).
+const LIVE_PREVIEW_MAX_HITS: usize = 5000;
+
+/// A text file read for preview: decoded text, its first hits and how many there are.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LiveText {
     pub text: String,
     pub highlights: Vec<Utf16Range>,
+    pub total_hits: u64,
 }
 
 impl LiveScan {
@@ -596,8 +638,8 @@ impl LiveScan {
 
     pub fn preview(&self, path: String) -> Option<LiveText> {
         let text = self.read(&path)?;
-        let highlights = self.matcher.highlights(&text).into_iter().map(range).collect();
-        Some(LiveText { text, highlights })
+        let (highlights, total_hits) = self.matcher.highlights(&text, LIVE_PREVIEW_MAX_HITS);
+        Some(LiveText { text, highlights: highlights.into_iter().map(range).collect(), total_hits })
     }
 }
 

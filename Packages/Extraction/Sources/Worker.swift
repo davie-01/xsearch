@@ -85,6 +85,8 @@ public final class ExtractionWorker: @unchecked Sendable {
         case timedOut
         /// The worker process died while handling the file.
         case crashed
+        /// `cancel()` stopped it; says nothing about the file.
+        case cancelled
     }
 
     private let executable: URL
@@ -96,6 +98,10 @@ public final class ExtractionWorker: @unchecked Sendable {
     private var nextId: UInt64 = 1
     public private(set) var restarts = 0
     private var started = false
+    /// Separate from `lock`, which `extract` holds for the whole request.
+    private let cancelLock = NSLock()
+    private var cancelled = false
+    private var activePid: Int32?
 
     public init(executable: URL, environment: [String: String] = [:]) {
         self.executable = executable
@@ -111,6 +117,36 @@ public final class ExtractionWorker: @unchecked Sendable {
         process = nil
         toWorker = nil
         fromWorker = nil
+    }
+
+    /// Kills the running request at once, from any thread; later requests return `.cancelled`
+    /// until `resume()`.
+    public func cancel() {
+        cancelLock.withLock {
+            cancelled = true
+            if let activePid { kill(activePid, SIGKILL) }
+        }
+    }
+
+    public func resume() {
+        cancelLock.withLock { cancelled = false }
+    }
+
+    private func beginRequest(_ pid: Int32) -> Bool {
+        cancelLock.withLock {
+            guard !cancelled else { return false }
+            activePid = pid
+            return true
+        }
+    }
+
+    /// Whether the request was cancelled. Called before the process is reaped, so `cancel` never
+    /// signals a reused pid.
+    private func endRequest() -> Bool {
+        cancelLock.withLock {
+            activePid = nil
+            return cancelled
+        }
     }
 
     private func ensureRunning() throws {
@@ -134,14 +170,17 @@ public final class ExtractionWorker: @unchecked Sendable {
     public func extract(path: String, limits: ExtractionLimits, timeout: TimeInterval, fault: String? = nil) -> Outcome {
         lock.lock()
         defer { lock.unlock() }
+        if cancelLock.withLock({ cancelled }) { return .cancelled }
         do { try ensureRunning() } catch { return .failed("提取进程无法启动：\(error)") }
         guard let toWorker, let fromWorker, let p = process else { return .crashed }
+        guard beginRequest(p.processIdentifier) else { return .cancelled }
         let id = nextId
         nextId += 1
         let request = WorkerRequest(id: id, path: path, limits: limits, fault: fault)
         guard let data = try? JSONEncoder().encode(request), Framing.write(data, to: toWorker.fileDescriptor) else {
+            let wasCancelled = endRequest()
             stop()
-            return .crashed
+            return wasCancelled ? .cancelled : .crashed
         }
         // Read on another thread so the timeout can fire while the worker is stuck.
         let done = DispatchSemaphore(value: 0)
@@ -153,15 +192,17 @@ public final class ExtractionWorker: @unchecked Sendable {
             done.signal()
         }
         if done.wait(timeout: .now() + timeout) == .timedOut {
+            _ = endRequest()
             kill(p.processIdentifier, SIGKILL)
             p.waitUntilExit()
             done.wait()  // the read returns once the pipe closes
             stop()
             return .timedOut
         }
+        let wasCancelled = endRequest()
         guard let reply, let response = try? JSONDecoder().decode(WorkerResponse.self, from: reply), response.id == id else {
             stop()
-            return .crashed
+            return wasCancelled ? .cancelled : .crashed
         }
         if let r = response.result { return .extracted(r) }
         return .failed(response.error ?? "未知错误")

@@ -16,7 +16,7 @@ use tantivy::{
     schema::{IndexRecordOption, Value},
 };
 use xs_core::{
-    normalize::{Mode, Normalized, normalize, normalize_prefix, normalize_text},
+    normalize::{Mode, Normalized, normalize, normalize_text, source_spans_at},
     query::{Expr, name_key, near_match, regex_for, required_literal},
 };
 
@@ -133,42 +133,95 @@ impl ContentReader {
     }
 
     pub fn document(&self, file_id: u64) -> Result<Option<DocView>> {
-        let searcher = self.reader.searcher();
-        let q = live_file(self.f, file_id);
-        let Some(addr) = searcher.search(&q, &DocSetCollector)?.into_iter().next() else {
-            return Ok(None);
-        };
-        let d = searcher.doc::<TantivyDocument>(addr)?;
-        let f = self.f;
-        Ok(Some(DocView {
-            file_id,
-            op_seq: u64_of(&d, f.op_seq),
-            revision: u64_of(&d, f.revision),
-            name: str_of(&d, f.name),
-            dir: str_of(&d, f.dir),
-            mtime: i64_of(&d, f.mtime),
-            size: i64_of(&d, f.size),
-            text: str_of(&d, f.text),
-            anchors: serde_json::from_slice(bytes_of(&d, f.anchors)).unwrap_or_default(),
-            pages: serde_json::from_slice(bytes_of(&d, f.pages)).unwrap_or_default(),
-            state: ExtractState::from_code(u64_of(&d, f.state)),
-        }))
+        document_in(&self.reader.searcher(), self.f, file_id)
     }
 
     /// Every occurrence of the query's positive literals in a file, as UTF-16 ranges of its
-    /// display text (preview highlighting and "第 n/N 处").
+    /// display text.
     pub fn highlights(&self, file_id: u64, expr: &Expr, mode: Mode) -> Result<Vec<Range<u32>>> {
         let Some(doc) = self.document(file_id)? else {
             return Ok(vec![]);
         };
         let compiled = Compiled::new(expr, mode);
-        let ranges = hit_ranges(&normalize(&doc.text, mode), &compiled.positives());
-        let utf16 = utf16_offsets(&doc.text);
-        Ok(ranges
-            .into_iter()
-            .map(|r| utf16[r.start] as u32..utf16[r.end] as u32)
-            .collect())
+        Ok(bounded_highlights(&doc.text, mode, &compiled.positives(), usize::MAX).0)
     }
+
+    /// What a preview shows, read from one snapshot so text and hits always belong together:
+    /// the document (only that member's part when `member_start` names an archive member, its
+    /// anchors shifted), its first `max_hits` hits and their total.
+    pub fn preview(
+        &self,
+        file_id: u64,
+        expr: &Expr,
+        mode: Mode,
+        member_start: Option<u32>,
+        max_hits: usize,
+    ) -> Result<Option<Preview>> {
+        let searcher = self.reader.searcher();
+        let Some(mut doc) = document_in(&searcher, self.f, file_id)? else {
+            return Ok(None);
+        };
+        if let Some(start) = member_start {
+            let end = doc
+                .anchors
+                .iter()
+                .filter(|a| matches!(a.kind, AnchorKind::Member { .. }) && a.start > start)
+                .map(|a| a.start)
+                .min();
+            doc.text = doc
+                .text
+                .chars()
+                .skip(start as usize)
+                .take(end.map_or(usize::MAX, |e| (e - start) as usize))
+                .collect();
+            doc.anchors = std::mem::take(&mut doc.anchors)
+                .into_iter()
+                .filter(|a| !matches!(a.kind, AnchorKind::Member { .. }) && a.start >= start && end.is_none_or(|e| a.start < e))
+                .map(|a| Anchor { start: a.start - start, kind: a.kind })
+                .collect();
+        }
+        let compiled = Compiled::new(expr, mode);
+        let (highlights, total_hits) = bounded_highlights(&doc.text, mode, &compiled.positives(), max_hits);
+        Ok(Some(Preview { doc, highlights, total_hits }))
+    }
+}
+
+/// A document with its hits, from one snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preview {
+    pub doc: DocView,
+    /// UTF-16 ranges of `doc.text`, at most the requested number.
+    pub highlights: Vec<Range<u32>>,
+    pub total_hits: u64,
+}
+
+/// The first `max_hits` hits of `text` in UTF-16, and the total. Memory follows the text and
+/// the kept hits, not 30 bytes per byte as a full source map did (3.1 GB for 100 MiB, R07).
+fn bounded_highlights(text: &str, mode: Mode, patterns: &[Pat], max_hits: usize) -> (Vec<Range<u32>>, u64) {
+    let norm = normalize_text(text, mode);
+    let (total, kept) = collect_hits(&norm, patterns, max_hits);
+    (to_utf16(text, &map_hits(text, &norm, mode, &kept)), total)
+}
+
+fn document_in(searcher: &Searcher, f: Fields, file_id: u64) -> Result<Option<DocView>> {
+    let q = live_file(f, file_id);
+    let Some(addr) = searcher.search(&q, &DocSetCollector)?.into_iter().next() else {
+        return Ok(None);
+    };
+    let d = searcher.doc::<TantivyDocument>(addr)?;
+    Ok(Some(DocView {
+        file_id,
+        op_seq: u64_of(&d, f.op_seq),
+        revision: u64_of(&d, f.revision),
+        name: str_of(&d, f.name),
+        dir: str_of(&d, f.dir),
+        mtime: i64_of(&d, f.mtime),
+        size: i64_of(&d, f.size),
+        text: str_of(&d, f.text),
+        anchors: serde_json::from_slice(bytes_of(&d, f.anchors)).unwrap_or_default(),
+        pages: serde_json::from_slice(bytes_of(&d, f.pages)).unwrap_or_default(),
+        state: ExtractState::from_code(u64_of(&d, f.state)),
+    }))
 }
 
 fn live_file(f: Fields, file_id: u64) -> BooleanQuery {
@@ -499,9 +552,8 @@ impl SearchSession {
             }
             // Count in the normalized text we already have; map only the first hit back to the
             // source, by normalizing just the prefix that contains it.
-            let (hit_count, first_end) = count_hits(&norm, &self.positives);
-            let (snippet, snippet_highlights) =
-                snippet(text, self.mode, &self.positives, first_end);
+            let (hit_count, first) = count_hits(&norm, &self.positives);
+            let (snippet, snippet_highlights) = snippet(text, &norm, self.mode, &self.positives, first);
             hits.push(Hit {
                 file_id: u64_of(&d, f.file_id),
                 name: str_of(&d, f.name),
@@ -557,8 +609,8 @@ impl SearchSession {
             if !self.compiled.matches(&norm) {
                 continue;
             }
-            let (hit_count, first_end) = count_hits(&norm, &self.positives);
-            let (snippet, snippet_highlights) = snippet(segment, self.mode, &self.positives, first_end);
+            let (hit_count, first) = count_hits(&norm, &self.positives);
+            let (snippet, snippet_highlights) = snippet(segment, &norm, self.mode, &self.positives, first);
             hits.push(Hit {
                 file_id: u64_of(d, f.file_id),
                 name: str_of(d, f.name),
@@ -605,54 +657,149 @@ impl TextMatcher {
         if !self.compiled.matches(&norm) {
             return None;
         }
-        let (hit_count, first_end) = count_hits(&norm, &self.positives);
-        let (snippet, snippet_highlights) = snippet(text, self.mode, &self.positives, first_end);
+        let (hit_count, first) = count_hits(&norm, &self.positives);
+        let (snippet, snippet_highlights) = snippet(text, &norm, self.mode, &self.positives, first);
         Some(TextHit { hit_count, snippet, snippet_highlights })
     }
 
-    /// Every hit as a UTF-16 range of `text` (preview).
-    pub fn highlights(&self, text: &str) -> Vec<Range<u32>> {
-        let ranges = hit_ranges(&normalize(text, self.mode), &self.positives);
-        let utf16 = utf16_offsets(text);
-        ranges.into_iter().map(|r| utf16[r.start] as u32..utf16[r.end] as u32).collect()
+    /// The first `max_hits` hits as UTF-16 ranges of `text`, and how many there are (preview).
+    pub fn highlights(&self, text: &str, max_hits: usize) -> (Vec<Range<u32>>, u64) {
+        bounded_highlights(text, self.mode, &self.positives, max_hits)
     }
 }
 
-/// Normalized-byte ranges of every occurrence of `literals` (normalized for the mode), sorted,
-/// overlaps merged.
-fn occurrences(norm: &str, literals: &[Pat]) -> Vec<Range<usize>> {
-    let mut out: Vec<Range<usize>> = vec![];
-    for pat in literals {
-        let lit = match pat {
-            Pat::Lit(l) => l,
-            Pat::Re(r) => {
-                out.extend(r.find_iter(norm).filter(|m| !m.is_empty()).map(|m| m.range()));
-                continue;
+/// Next occurrences of one pattern, in order.
+enum PatIter<'a> {
+    Lit { norm: &'a str, lit: &'a str, from: usize },
+    Re(regex::Matches<'a, 'a>),
+}
+
+impl Iterator for PatIter<'_> {
+    type Item = Range<usize>;
+    fn next(&mut self) -> Option<Range<usize>> {
+        match self {
+            Self::Lit { norm, lit, from } => {
+                let b = *from + norm[*from..].find(*lit)?;
+                // Step one scalar so overlapping occurrences ("aa" in "aaa") are all found.
+                *from = b + norm[b..].chars().next().map_or(1, char::len_utf8);
+                Some(b..b + lit.len())
             }
-        };
-        let mut from = 0;
-        while let Some(pos) = norm[from..].find(lit.as_str()) {
-            let b = from + pos;
-            out.push(b..b + lit.len());
-            // Step one scalar so overlapping occurrences ("aa" in "aaa") are all found.
-            from = b + norm[b..].chars().next().map_or(1, char::len_utf8);
+            Self::Re(m) => m.find(|m| !m.is_empty()).map(|m| m.range()),
         }
     }
-    out.sort_by_key(|r| (r.start, r.end));
+}
+
+/// Visits every hit of the patterns as normalized-byte ranges: sorted, overlaps merged. Streams
+/// (one pending occurrence per pattern), so a one-letter query on 100 MiB of text does not
+/// build a list of tens of millions of ranges. `visit` returns false to stop.
+fn each_hit(norm: &str, patterns: &[Pat], mut visit: impl FnMut(Range<usize>) -> bool) {
+    let mut iters: Vec<PatIter> = patterns
+        .iter()
+        .map(|p| match p {
+            Pat::Lit(lit) => PatIter::Lit { norm, lit, from: 0 },
+            Pat::Re(r) => PatIter::Re(r.find_iter(norm)),
+        })
+        .collect();
+    let mut heads: Vec<Option<Range<usize>>> = iters.iter_mut().map(Iterator::next).collect();
+    let mut current: Option<Range<usize>> = None;
+    while let Some(i) = (0..heads.len())
+        .filter(|&i| heads[i].is_some())
+        .min_by_key(|&i| heads[i].as_ref().map(|r| (r.start, r.end)))
+    {
+        let r = heads[i].take().unwrap();
+        heads[i] = iters[i].next();
+        match &mut current {
+            Some(c) if r.start < c.end => c.end = c.end.max(r.end),
+            _ => {
+                if let Some(done) = current.replace(r)
+                    && !visit(done)
+                {
+                    return;
+                }
+            }
+        }
+    }
+    if let Some(done) = current {
+        visit(done);
+    }
+}
+
+/// Hit count and the first `keep` hits (normalized-byte ranges).
+fn collect_hits(norm: &str, patterns: &[Pat], keep: usize) -> (u64, Vec<Range<usize>>) {
+    let (mut total, mut kept) = (0u64, vec![]);
+    each_hit(norm, patterns, |r| {
+        total += 1;
+        if kept.len() < keep {
+            kept.push(r);
+        }
+        true
+    });
+    (total, kept)
+}
+
+/// Source scalar ranges of normalized-byte hits (sorted, not overlapping), without a source
+/// map for the whole text: only the hits' first and last output scalars are looked up. Merged
+/// after mapping, as expansions such as "ﬁ" → "fi" can map neighbours onto one source scalar.
+fn map_hits(text: &str, norm: &str, mode: Mode, hits: &[Range<usize>]) -> Vec<Range<usize>> {
+    if hits.is_empty() {
+        return vec![];
+    }
+    // Byte → output scalar index, in one pass over the sorted boundaries.
+    let mut scalars: Vec<(usize, usize)> = Vec::with_capacity(hits.len());
+    let (mut count, mut byte) = (0usize, 0usize);
+    let mut chars = norm.chars();
+    let mut advance = |to: usize| {
+        while byte < to {
+            byte += chars.next().map_or(1, char::len_utf8);
+            count += 1;
+        }
+        count
+    };
+    for h in hits {
+        let first = advance(h.start);
+        let end = advance(h.end);
+        scalars.push((first, end - 1));
+    }
+    let mut wanted: Vec<usize> = scalars.iter().flat_map(|&(a, b)| [a, b]).collect();
+    wanted.dedup();
+    let spans = source_spans_at(text, mode, &wanted);
+    let span = |s: usize| wanted.binary_search(&s).ok().and_then(|i| spans.get(i));
     let mut merged: Vec<Range<usize>> = vec![];
-    for r in out {
+    for &(a, b) in &scalars {
+        let (Some(first), Some(last)) = (span(a), span(b)) else { continue };
+        let r = first.start..last.end;
         match merged.last_mut() {
-            Some(last) if r.start < last.end => last.end = last.end.max(r.end),
+            Some(m) if r.start < m.end => m.end = m.end.max(r.end),
             _ => merged.push(r),
         }
     }
     merged
 }
 
-/// Hit count and the normalized byte offset where the first hit ends.
-fn count_hits(norm: &str, literals: &[Pat]) -> (u32, Option<usize>) {
-    let occ = occurrences(norm, literals);
-    (occ.len() as u32, occ.first().map(|r| r.end))
+/// UTF-16 offsets of sorted source scalar ranges, in one pass over the text.
+fn to_utf16(text: &str, ranges: &[Range<usize>]) -> Vec<Range<u32>> {
+    let (mut scalar, mut unit) = (0usize, 0u32);
+    let mut chars = text.chars();
+    let mut advance = |to: usize| {
+        while scalar < to {
+            unit += chars.next().map_or(0, |c| c.len_utf16() as u32);
+            scalar += 1;
+        }
+        unit
+    };
+    ranges
+        .iter()
+        .map(|r| {
+            let a = advance(r.start);
+            a..advance(r.end)
+        })
+        .collect()
+}
+
+/// Hit count and the normalized byte range of the first hit.
+fn count_hits(norm: &str, literals: &[Pat]) -> (u32, Option<Range<usize>>) {
+    let (total, first) = collect_hits(norm, literals, 1);
+    (total as u32, first.into_iter().next())
 }
 
 /// Source scalar ranges of every hit in an already normalized text (merged after mapping:
@@ -665,7 +812,8 @@ fn hit_ranges(n: &Normalized, literals: &[Pat]) -> Vec<Range<usize>> {
         count += 1;
     }
     scalar_at[n.text.len()] = count;
-    let mut out: Vec<Range<usize>> = occurrences(&n.text, literals)
+    let mut out: Vec<Range<usize>> = collect_hits(&n.text, literals, usize::MAX)
+        .1
         .into_iter()
         .filter_map(|r| n.source_range(scalar_at[r.start]..scalar_at[r.end]))
         .collect();
@@ -680,18 +828,6 @@ fn hit_ranges(n: &Normalized, literals: &[Pat]) -> Vec<Range<usize>> {
     merged
 }
 
-/// UTF-16 offset of each scalar boundary (index = scalar offset).
-fn utf16_offsets(text: &str) -> Vec<usize> {
-    let mut out = Vec::with_capacity(text.len() + 1);
-    let mut u = 0;
-    out.push(0);
-    for c in text.chars() {
-        u += c.len_utf16();
-        out.push(u);
-    }
-    out
-}
-
 const BEFORE: usize = 14;
 const AFTER: usize = 32;
 
@@ -700,11 +836,12 @@ const AFTER: usize = 32;
 /// Cost is proportional to the hit's position, not the document length.
 fn snippet(
     text: &str,
+    norm: &str,
     mode: Mode,
     literals: &[Pat],
-    first_end: Option<usize>,
+    first: Option<Range<usize>>,
 ) -> (String, Vec<Range<u32>>) {
-    let Some(first_end) = first_end else {
+    let Some(first) = first else {
         let s: String = text
             .chars()
             .take(BEFORE + AFTER)
@@ -713,18 +850,21 @@ fn snippet(
         return (s.trim().to_owned(), vec![]);
     };
     // 1. Locate the first hit in source scalars.
-    let head = normalize_prefix(text, mode, first_end, usize::MAX);
-    let Some(first) = hit_ranges(&head, literals).into_iter().next() else {
+    let Some(first) = map_hits(text, norm, mode, &[first]).into_iter().next() else {
         return (String::new(), vec![]);
     };
-    // 2. All hits inside the window.
+    // 2. All hits inside the window: only the window is normalized, however deep the hit is.
     let start = first.start.saturating_sub(BEFORE);
     let end = first.end + AFTER;
-    let window = normalize_prefix(text, mode, usize::MAX, end);
-    let ranges: Vec<Range<usize>> = hit_ranges(&window, literals)
+    let window: String = text.chars().skip(start).take(end - start).collect();
+    let mut ranges: Vec<Range<usize>> = hit_ranges(&normalize(&window, mode), literals)
         .into_iter()
-        .filter(|r| r.end > start)
+        .map(|r| r.start + start..r.end + start)
         .collect();
+    // The hit itself always shows, even if context-sensitive patterns differ on the excerpt.
+    if !ranges.iter().any(|r| r.start <= first.start && first.end <= r.end) {
+        ranges.push(first.clone());
+    }
     // 3. Render.
     let mut chars = text.chars().skip(start);
     let mut out = String::new();

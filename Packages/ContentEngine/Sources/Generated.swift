@@ -528,6 +528,12 @@ public protocol ContentIndexProtocol: AnyObject, Sendable {
     func liveCount() throws  -> UInt64
     
     /**
+     * Text and hits of one file from one snapshot. `member_start` narrows an archive document
+     * to that member; only the first `max_hits` hits are mapped.
+     */
+    func preview(fileId: UInt64, query: String, mode: MatchMode, memberStart: UInt32?, maxHits: UInt64) throws  -> ContentPreview?
+    
+    /**
      * Picks up commits made since the last reload (also happens automatically shortly after).
      */
     func reload() throws 
@@ -626,6 +632,22 @@ open func highlights(fileId: UInt64, query: String, mode: MatchMode)throws  -> [
 open func liveCount()throws  -> UInt64  {
     return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
     uniffi_xs_ffi_fn_method_contentindex_live_count(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Text and hits of one file from one snapshot. `member_start` narrows an archive document
+     * to that member; only the first `max_hits` hits are mapped.
+     */
+open func preview(fileId: UInt64, query: String, mode: MatchMode, memberStart: UInt32?, maxHits: UInt64)throws  -> ContentPreview?  {
+    return try  FfiConverterOptionTypeContentPreview.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_method_contentindex_preview(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(fileId),
+        FfiConverterString.lower(query),
+        FfiConverterTypeMatchMode_lower(mode),
+        FfiConverterOptionUInt32.lower(memberStart),
+        FfiConverterUInt64.lower(maxHits),$0
     )
 })
 }
@@ -730,6 +752,11 @@ public protocol ContentIndexWriterProtocol: AnyObject, Sendable {
     func instanceId() throws  -> String
     
     func lastCommit() throws  -> CommitRecord?
+    
+    /**
+     * Files with a live document (tombstones excluded).
+     */
+    func liveFileIds() throws  -> [UInt64]
     
     func put(doc: ContentInput) throws 
     
@@ -843,6 +870,16 @@ open func instanceId()throws  -> String  {
 open func lastCommit()throws  -> CommitRecord?  {
     return try  FfiConverterOptionTypeCommitRecord.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
     uniffi_xs_ffi_fn_method_contentindexwriter_last_commit(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Files with a live document (tombstones excluded).
+     */
+open func liveFileIds()throws  -> [UInt64]  {
+    return try  FfiConverterSequenceUInt64.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_method_contentindexwriter_live_file_ids(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -2040,6 +2077,88 @@ public func FfiConverterTypeContentInput_lower(_ value: ContentInput) -> RustBuf
 
 
 /**
+ * A document with its hits, read from one snapshot. At most the requested number of
+ * highlights; `total_hits` counts them all.
+ */
+public struct ContentPreview {
+    public var document: ContentDocument
+    public var highlights: [Utf16Range]
+    public var totalHits: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(document: ContentDocument, highlights: [Utf16Range], totalHits: UInt64) {
+        self.document = document
+        self.highlights = highlights
+        self.totalHits = totalHits
+    }
+}
+
+#if compiler(>=6)
+extension ContentPreview: Sendable {}
+#endif
+
+
+extension ContentPreview: Equatable, Hashable {
+    public static func ==(lhs: ContentPreview, rhs: ContentPreview) -> Bool {
+        if lhs.document != rhs.document {
+            return false
+        }
+        if lhs.highlights != rhs.highlights {
+            return false
+        }
+        if lhs.totalHits != rhs.totalHits {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(document)
+        hasher.combine(highlights)
+        hasher.combine(totalHits)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeContentPreview: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ContentPreview {
+        return
+            try ContentPreview(
+                document: FfiConverterTypeContentDocument.read(from: &buf), 
+                highlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf), 
+                totalHits: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ContentPreview, into buf: inout [UInt8]) {
+        FfiConverterTypeContentDocument.write(value.document, into: &buf)
+        FfiConverterSequenceTypeUtf16Range.write(value.highlights, into: &buf)
+        FfiConverterUInt64.write(value.totalHits, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeContentPreview_lift(_ buf: RustBuffer) throws -> ContentPreview {
+    return try FfiConverterTypeContentPreview.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeContentPreview_lower(_ value: ContentPreview) -> RustBuffer {
+    return FfiConverterTypeContentPreview.lower(value)
+}
+
+
+/**
  * Result of a Rust extractor. Anchors / pages are JSON in the `xs_index` formats.
  */
 public struct ExtractionOutput {
@@ -2231,17 +2350,19 @@ public func FfiConverterTypeLiveHit_lower(_ value: LiveHit) -> RustBuffer {
 
 
 /**
- * A text file read for preview: decoded text and every hit in it.
+ * A text file read for preview: decoded text, its first hits and how many there are.
  */
 public struct LiveText {
     public var text: String
     public var highlights: [Utf16Range]
+    public var totalHits: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(text: String, highlights: [Utf16Range]) {
+    public init(text: String, highlights: [Utf16Range], totalHits: UInt64) {
         self.text = text
         self.highlights = highlights
+        self.totalHits = totalHits
     }
 }
 
@@ -2258,12 +2379,16 @@ extension LiveText: Equatable, Hashable {
         if lhs.highlights != rhs.highlights {
             return false
         }
+        if lhs.totalHits != rhs.totalHits {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(text)
         hasher.combine(highlights)
+        hasher.combine(totalHits)
     }
 }
 
@@ -2277,13 +2402,15 @@ public struct FfiConverterTypeLiveText: FfiConverterRustBuffer {
         return
             try LiveText(
                 text: FfiConverterString.read(from: &buf), 
-                highlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf)
+                highlights: FfiConverterSequenceTypeUtf16Range.read(from: &buf), 
+                totalHits: FfiConverterUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: LiveText, into buf: inout [UInt8]) {
         FfiConverterString.write(value.text, into: &buf)
         FfiConverterSequenceTypeUtf16Range.write(value.highlights, into: &buf)
+        FfiConverterUInt64.write(value.totalHits, into: &buf)
     }
 }
 
@@ -2803,6 +2930,30 @@ extension RecallKind: Equatable, Hashable {}
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCommitRecord: FfiConverterRustBuffer {
     typealias SwiftType = CommitRecord?
 
@@ -2843,6 +2994,30 @@ fileprivate struct FfiConverterOptionTypeContentDocument: FfiConverterRustBuffer
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeContentDocument.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeContentPreview: FfiConverterRustBuffer {
+    typealias SwiftType = ContentPreview?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeContentPreview.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeContentPreview.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3223,6 +3398,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_xs_ffi_checksum_method_contentindex_live_count() != 42349) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xs_ffi_checksum_method_contentindex_preview() != 13482) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xs_ffi_checksum_method_contentindex_reload() != 50369) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3245,6 +3423,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_last_commit() != 11785) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_method_contentindexwriter_live_file_ids() != 61063) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_put() != 26588) {

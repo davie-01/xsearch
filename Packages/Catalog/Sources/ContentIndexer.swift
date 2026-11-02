@@ -25,13 +25,16 @@ public final class ContentIndexer: @unchecked Sendable {
         public var indexed: Int
         public var committedBatches: UInt64
         public var running: Bool
+        /// The last cycle failed; it is retried automatically.
+        public var lastError: String?
 
-        public init(pending: Int = 0, failed: Int = 0, indexed: Int = 0, committedBatches: UInt64 = 0, running: Bool = false) {
+        public init(pending: Int = 0, failed: Int = 0, indexed: Int = 0, committedBatches: UInt64 = 0, running: Bool = false, lastError: String? = nil) {
             self.pending = pending
             self.failed = failed
             self.indexed = indexed
             self.committedBatches = committedBatches
             self.running = running
+            self.lastError = lastError
         }
     }
 
@@ -50,8 +53,18 @@ public final class ContentIndexer: @unchecked Sendable {
     private var writer: ContentIndexWriter?
     private var workers: [ExtractionWorker] = []
     private var timer: DispatchSourceTimer?
-    private var stopped = true
+    /// Read by extraction threads and set by `stop()` before it waits for the queue.
+    private let stopFlag = OSAllocatedUnfairLock(initialState: true)
+    private var stopped: Bool {
+        get { stopFlag.withLock { $0 } }
+        set { stopFlag.withLock { $0 = newValue } }
+    }
     private var cycling = false
+    private var needsRecovery = false
+    private var errorBackoffUntil = Date.distantPast
+    /// Switched-out instances, deleted after the grace period (readers need up to a status
+    /// refresh to move to the new path; a restart collects whatever is left).
+    private var retired: [(url: URL, removeAt: Date)] = []
     /// Committed op_seq per file (rebuilt from the index on open and after rollbacks).
     private var committedSeq: [UInt64: UInt64] = [:]
     private var lastBatch: UInt64 = 0
@@ -65,6 +78,8 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Per-file extraction timeout = base + 2 s per MB.
     var baseTimeout: TimeInterval = 30
     var limits = ExtractionLimits()
+    var errorBackoff: TimeInterval = 5
+    var oldInstanceGrace: TimeInterval = 60
     /// Test hooks: crash at a protocol step; inject a worker fault for a path; run between
     /// extraction and staging (to change the file mid-flight).
     var fault: ((Fault) -> Bool)?
@@ -75,11 +90,14 @@ public final class ContentIndexer: @unchecked Sendable {
     private let lock = NSLock()
     private var lastFullCount = Date.distantPast
 
-    static func digest(_ path: String) -> String? {
+    static func digest(_ path: String, cancelled: () -> Bool = { false }) -> String? {
         guard let h = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? h.close() }
         var sha = SHA256()
-        while let chunk = try? h.read(upToCount: 1 << 20), !chunk.isEmpty { sha.update(data: chunk) }
+        while let chunk = try? h.read(upToCount: 1 << 20), !chunk.isEmpty {
+            if cancelled() { return nil }
+            sha.update(data: chunk)
+        }
         return sha.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
@@ -118,7 +136,10 @@ public final class ContentIndexer: @unchecked Sendable {
                 try resetIndexInstance()
             }
             try recover()
+            removeUnknownInstances()
+            try removeOrphanDocuments()
             try reindexUpgradedExtractors()
+            workers.forEach { $0.resume() }
             stopped = false
             state.withLock { $0.running = true }
             let t = DispatchSource.makeTimerSource(queue: queue)
@@ -129,9 +150,12 @@ public final class ContentIndexer: @unchecked Sendable {
         }
     }
 
+    /// Returns quickly even with hung parsers: running extractions are killed first, and their
+    /// tasks stay queued without counting as attempts.
     public func stop() {
+        stopped = true
+        workers.forEach { $0.cancel() }
         queue.sync {
-            stopped = true
             timer?.cancel(); timer = nil
             writer = nil
             catalog = nil
@@ -167,18 +191,68 @@ public final class ContentIndexer: @unchecked Sendable {
 
     /// Replaces an unreadable index instance (schema mismatch) with a new, empty one; every
     /// content file is queued again. Old instance directories and unconfirmed batches go away.
+    /// Switch and requeue are one transaction: a crash cannot leave an empty index with no work.
     private func resetIndexInstance() throws {
         guard let catalog else { return }
         writer = nil
-        for old in [instanceId, rebuildId].compactMap({ $0 }) {
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent("content").appendingPathComponent(old))
+        let old = [instanceId, rebuildId].compactMap { $0 }
+        let id = UUID().uuidString
+        try catalog.db.transaction {
+            try catalog.setMeta("content_instance", id)
+            try catalog.setMeta("content_rebuild_instance", nil)
+            try clearBatchRecords()
+            _ = try requeue { _ in true }
         }
-        instanceId = UUID().uuidString
+        instanceId = id
         rebuildId = nil
-        try catalog.setMeta("content_instance", instanceId)
-        try catalog.db.exec("DELETE FROM meta WHERE key = 'content_rebuild_instance'; DELETE FROM content_batch;")
+        for name in old {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("content").appendingPathComponent(name))
+        }
         try openWriter()
-        _ = try requeue { _ in true }
+    }
+
+    /// Batch numbers belong to one index instance.
+    private func clearBatchRecords() throws {
+        try catalog?.db.exec("DELETE FROM content_batch; DELETE FROM meta WHERE key IN ('content_batch_pending', 'content_batch_confirmed');")
+    }
+
+    /// Directories a crash left behind: neither the active instance nor the rebuild.
+    private func removeUnknownInstances() {
+        let root = directory.appendingPathComponent("content")
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [] where name != instanceId && name != rebuildId {
+            try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
+        }
+    }
+
+    private func removeRetiredInstances() {
+        let now = Date()
+        retired.removeAll { old in
+            guard old.removeAt <= now else { return false }
+            try? FileManager.default.removeItem(at: old.url)
+            return true
+        }
+    }
+
+    /// Once: documents of files the catalog no longer knows, from versions that purged
+    /// tombstones with their delete tasks still queued. Each gets a delete task.
+    private func removeOrphanDocuments() throws {
+        guard let catalog, let writer, try catalog.meta("content_orphans_checked") == nil else { return }
+        let ids = try writer.liveFileIds()
+        try catalog.db.transaction {
+            var counter = try catalog.opSeqCounter()
+            for fid in ids {
+                let id = Int64(fid)
+                let info = try catalog.contentInfo(id)
+                if let info, !info.deleted, info.inContent { continue }
+                let task = try catalog.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE file_id = ?").bind(id)
+                if try task.first({ $0.int(0) > 0 }) == true { continue }
+                counter += 1
+                if let info { try catalog.setContent(id, inContent: info.inContent, opSeq: counter) }
+                try catalog.enqueue(id, opSeq: counter, kind: .delete, priority: 0)
+            }
+            try catalog.setOpSeqCounter(counter)
+            try catalog.setMeta("content_orphans_checked", "1")
+        }
     }
 
     // MARK: Versions and rebuild
@@ -190,7 +264,7 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Bumps op_seq and queues an index task for content files whose name passes `filter`.
     private func requeue(where filter: (String) -> Bool) throws -> Int {
         guard let catalog else { return 0 }
-        return try catalog.db.transaction {
+        return try catalog.db.transactionIfNeeded {
             let s = try catalog.db.prepare("SELECT id, name, mtime_ns FROM files WHERE deleted = 0 AND in_content = 1")
             var rows: [(Int64, String, Int64)] = []
             while try s.step() { rows.append((s.int(0), s.text(1), s.int(2))) }
@@ -224,16 +298,30 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Rebuilds the content index into a new instance (§9.3 step 7, simplified): the writer moves
     /// to the new instance and every content file is re-queued; readers keep the old instance
     /// until the new one has caught up, then the active instance switches and the old
-    /// directory is deleted (disk space reclaimed, §6.2).
+    /// directory is deleted (disk space reclaimed, §6.2). The new writer opens first (a crash
+    /// leaves only an unused directory); the rebuild mark and the requeue are one transaction, so
+    /// a rebuild never looks caught up before its tasks exist.
     public func rebuildContentIndex() throws {
         try queue.sync {
             guard let catalog, rebuildId == nil else { return }
+            try recoverIfNeeded()
             let id = UUID().uuidString
-            try catalog.setMeta("content_rebuild_instance", id)
-            rebuildId = id
             writer = nil
-            try openWriter()
-            _ = try requeue { _ in true }
+            rebuildId = id
+            do {
+                try openWriter()
+                try catalog.db.transaction {
+                    try catalog.setMeta("content_rebuild_instance", id)
+                    try clearBatchRecords()
+                    _ = try requeue { _ in true }
+                }
+            } catch {
+                writer = nil
+                try? FileManager.default.removeItem(at: writeURL)
+                rebuildId = nil
+                try openWriter()
+                throw error
+            }
             try refreshCounts()
         }
     }
@@ -248,15 +336,15 @@ public final class ContentIndexer: @unchecked Sendable {
         }
         instanceId = id
         rebuildId = nil
-        try? FileManager.default.removeItem(at: old)
+        retired.append((old, Date().addingTimeInterval(oldInstanceGrace)))
     }
 
-    /// Startup: resolve the unconfirmed batch, release leases of the previous process.
+    /// Startup and after a failed cycle: resolve the unconfirmed batch, release leases (only
+    /// this process indexes, and no cycle is running).
     private func recover() throws {
         guard let catalog, let writer else { return }
-        let pending = try catalog.meta("content_batch_pending").flatMap(UInt64.init)
-        let confirmed = try catalog.meta("content_batch_confirmed").flatMap(UInt64.init) ?? 0
-        if let pending, pending > confirmed {
+        // The index payload alone says whether it was committed.
+        if let pending = try catalog.meta("content_batch_pending").flatMap(UInt64.init) {
             if try writer.lastCommit()?.batchId == pending {
                 try confirm(batch: pending)  // committed, confirmation lost
             } else {
@@ -266,9 +354,20 @@ public final class ContentIndexer: @unchecked Sendable {
                 }
             }
         }
-        // Only this process indexes: every lease left behind is dead.
         try catalog.db.exec("UPDATE content_tasks SET state = 0, lease_until = 0 WHERE state = 1")
         try refreshCounts()
+    }
+
+    private func recoverIfNeeded() throws {
+        guard needsRecovery else { return }
+        if writer == nil { try openWriter() }
+        try recover()
+        if let writer {
+            committedSeq = try writer.appliedSeqs()
+            lastBatch = try writer.lastCommit()?.batchId ?? 0
+            state.withLock { $0.committedBatches = lastBatch }
+        }
+        needsRecovery = false
     }
 
     // MARK: Cycle
@@ -291,17 +390,22 @@ public final class ContentIndexer: @unchecked Sendable {
         case failed(String)
     }
 
+    /// Due tasks, and leases that expired. Binds: now, now.
+    private static let claimable = "(state = 0 AND not_before <= ?) OR (state = 1 AND lease_until < ?)"
+
     private func readyCount() throws -> Int {
         guard let catalog else { return 0 }
-        let s = try catalog.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE state = 0 AND not_before <= ?").bind(Date().timeIntervalSince1970)
+        let now = Date().timeIntervalSince1970
+        let s = try catalog.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE \(Self.claimable)").bind(now, now)
         return try s.first { s in Int(s.int(0)) } ?? 0
     }
 
     private func cycle() {
-        guard !stopped, !cycling, catalog != nil else { return }
+        guard !stopped, !cycling, catalog != nil, Date() >= errorBackoffUntil else { return }
         cycling = true
         defer { cycling = false }
         do {
+            try recoverIfNeeded()
             // Idle must stay idle: a read decides, so no write lock is taken without work.
             var worked = false
             while !stopped, try readyCount() > 0 {
@@ -312,12 +416,18 @@ public final class ContentIndexer: @unchecked Sendable {
             }
             try refreshCounts(full: worked || Date().timeIntervalSince(lastFullCount) > 30)
             try finishRebuildIfCaughtUp()
+            removeRetiredInstances()
+            if status.lastError != nil { state.withLock { $0.lastError = nil } }
         } catch is Crash {
             crash()
         } catch {
-            // Unexpected I/O or SQLite error: drop staged work; the next cycle starts clean.
+            // Unexpected I/O or SQLite error (busy for over 5 s, disk full): drop staged work,
+            // wait a little, then resolve the batch and leases as a restart would.
             try? writer?.rollback()
             committedSeq = (try? writer?.appliedSeqs()) ?? committedSeq
+            needsRecovery = true
+            errorBackoffUntil = Date().addingTimeInterval(errorBackoff)
+            state.withLock { $0.lastError = String(describing: error) }
         }
     }
 
@@ -339,11 +449,13 @@ public final class ContentIndexer: @unchecked Sendable {
         guard let catalog else { return [] }
         let now = Date().timeIntervalSince1970
         return try catalog.db.transaction {
+            // A kind this version cannot name could never be marked claimed and would spin the cycle.
+            try catalog.db.exec("DELETE FROM content_tasks WHERE kind NOT IN (1, 2)")
             // Deletions first (stale text must disappear), then newest files first (§9.2).
             let s = try catalog.db.prepare("""
-                SELECT file_id, op_seq, kind, attempts FROM content_tasks WHERE state = 0 AND not_before <= ?
+                SELECT file_id, op_seq, kind, attempts FROM content_tasks WHERE \(Self.claimable)
                 ORDER BY kind DESC, priority DESC LIMIT ?
-                """).bind(now, limit)
+                """).bind(now, now, limit)
             var out: [Task] = []
             while try s.step() {
                 out.append(Task(fileId: s.int(0), opSeq: s.int(1), kind: FileCatalog.TaskKind(rawValue: s.int(2)) ?? .index, attempts: Int(s.int(3))))
@@ -368,7 +480,8 @@ public final class ContentIndexer: @unchecked Sendable {
         var outcomes: [(Task, Staged)] = []
         var toExtract: [Prepared] = []
         for t in tasks {
-            guard let info = try catalog.contentInfo(t.fileId) else { outcomes.append((t, .drop)); continue }
+            // The row is gone (purged, or the catalog forgot it): its text must not stay.
+            guard let info = try catalog.contentInfo(t.fileId) else { outcomes.append((t, .remove)); continue }
             // Superseded: a newer op for this file exists (its own task will handle it).
             if info.opSeq != t.opSeq { outcomes.append((t, .drop)); continue }
             if t.kind == .delete || info.deleted || !info.inContent { outcomes.append((t, .remove)); continue }
@@ -397,13 +510,16 @@ public final class ContentIndexer: @unchecked Sendable {
     }
 
     private func extract(_ p: Prepared, worker: ExtractionWorker) -> Staged {
+        let interrupted = Staged.retry(after: 0, error: nil, countAttempt: false)
+        if stopped { return interrupted }
         // Before: the file must still be what the catalog recorded for this op.
         guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
         let dir = (p.path as NSString).deletingLastPathComponent
         let type = ContentType.of(name: p.info.name)
         // §10 cache key: strong digest + extractor version + config. Same key → reuse the stored
         // extraction (moves, renames, copies) instead of parsing again.
-        let key = Self.digest(p.path).map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes)" } ?? ""
+        let key = Self.digest(p.path, cancelled: { self.stopped }).map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes)" } ?? ""
+        if stopped { return interrupted }
         if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
             lock.withLock { cacheHits += 1 }
             return .put(ContentInput(fileId: UInt64(p.task.fileId), opSeq: UInt64(p.task.opSeq), revision: UInt64(bitPattern: p.version.mtimeNs),
@@ -413,6 +529,7 @@ public final class ContentIndexer: @unchecked Sendable {
         }
         let timeout = baseTimeout + Double(p.version.size) / Double(1 << 20) * 2
         let outcome = worker.extract(path: p.path, limits: limits, timeout: timeout, fault: workerFault?(p.path))
+        if outcome == .cancelled { return interrupted }
         afterExtract?(p.path)
         // After: changed during extraction → the result describes neither version.
         guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
@@ -424,6 +541,8 @@ public final class ContentIndexer: @unchecked Sendable {
                                      anchorsJson: r.anchorsJSON, pagesJson: r.pagesJSON, state: ExtractStateKind(code: r.state), extractKey: key))
         case .failed(let message):
             return .failed(message)
+        case .cancelled:
+            return interrupted
         case .timedOut, .crashed:
             let reason = outcome == .timedOut ? "解析超时" : "解析器崩溃"
             if p.task.attempts + 1 >= maxAttempts { return .failed("\(reason)，已隔离") }
@@ -463,8 +582,8 @@ public final class ContentIndexer: @unchecked Sendable {
         var invalid = false
         for (t, _) in staged {
             let s = try catalog.db.prepare("""
-                SELECT f.op_seq, t.lease_until FROM files f JOIN content_tasks t ON t.file_id = f.id
-                WHERE f.id = ? AND t.op_seq = ? AND t.kind = ?
+                SELECT COALESCE(f.op_seq, t.op_seq), t.lease_until FROM content_tasks t LEFT JOIN files f ON f.id = t.file_id
+                WHERE t.file_id = ? AND t.op_seq = ? AND t.kind = ?
                 """).bind(t.fileId, t.opSeq, t.kind.rawValue)
             let ok = try s.first { s in s.int(0) == t.opSeq && s.double(1) > now } ?? false
             if !ok { invalid = true; break }

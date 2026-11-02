@@ -396,7 +396,7 @@ fn text_matcher_agrees_with_indexed_search() {
         let indexed = s.next(Duration::from_secs(5), 10, &AtomicBool::new(false)).unwrap().hits.pop().unwrap();
         let live = m.check(text).unwrap();
         assert_eq!((live.hit_count, &live.snippet, &live.snippet_highlights), (indexed.hit_count, &indexed.snippet, &indexed.snippet_highlights), "{q}");
-        assert_eq!(m.highlights(text), reader.highlights(1, &expr, Mode::Loose).unwrap(), "{q}");
+        assert_eq!(m.highlights(text, usize::MAX).0, reader.highlights(1, &expr, Mode::Loose).unwrap(), "{q}");
     }
     assert!(TextMatcher::new(&parse("不存在").unwrap(), Mode::Loose).check(text).is_none());
 }
@@ -436,4 +436,108 @@ fn archive_members_are_separate_hits() {
     assert_eq!(hits("合同 金额").iter().map(|h| h.1.as_str()).collect::<Vec<_>>(), vec!["b/二.docx"]);
     // Terms in different members do not make a hit.
     assert!(hits("附 件").is_empty());
+}
+
+/// Reference: the full source map, as highlights used to be computed.
+fn reference_highlights(text: &str, query: &str, mode: Mode) -> Vec<std::ops::Range<u32>> {
+    use xs_core::normalize::normalize;
+    fn literals(e: &Expr, out: &mut Vec<String>) {
+        match e {
+            Expr::Literal(s) => out.push(s.clone()),
+            Expr::And(x) | Expr::Or(x) => x.iter().for_each(|e| literals(e, out)),
+            _ => {}
+        }
+    }
+    let mut lits = vec![];
+    literals(&parse(query).unwrap(), &mut lits);
+    let n = normalize(text, mode);
+    let starts: Vec<(usize, usize)> = n.text.char_indices().enumerate().map(|(i, (b, _))| (b, i)).collect();
+    let scalar_at = |b: usize| starts.binary_search_by_key(&b, |x| x.0).map(|i| starts[i].1).unwrap_or(starts.len());
+    let mut hits: Vec<std::ops::Range<usize>> = vec![];
+    for l in lits {
+        let l = normalize_text(&l, mode);
+        let mut from = 0;
+        while let Some(p) = n.text[from..].find(&l) {
+            let b = from + p;
+            hits.push(b..b + l.len());
+            from = b + n.text[b..].chars().next().unwrap().len_utf8();
+        }
+    }
+    hits.sort_by_key(|r| (r.start, r.end));
+    let mut merged: Vec<std::ops::Range<usize>> = vec![];
+    for r in hits {
+        match merged.last_mut() {
+            Some(m) if r.start < m.end => m.end = m.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    let mut src: Vec<std::ops::Range<usize>> = vec![];
+    for r in merged {
+        let (a, b) = (scalar_at(r.start), scalar_at(r.end));
+        let r = n.source_spans[a].start..n.source_spans[b - 1].end;
+        match src.last_mut() {
+            Some(m) if r.start < m.end => m.end = m.end.max(r.end),
+            _ => src.push(r),
+        }
+    }
+    let mut utf16 = vec![0u32];
+    for c in text.chars() {
+        utf16.push(utf16.last().unwrap() + c.len_utf16() as u32);
+    }
+    src.into_iter().map(|r| utf16[r.start]..utf16[r.end]).collect()
+}
+
+#[test]
+fn bounded_highlights_equal_the_full_source_map() {
+    use xs_index::TextMatcher;
+    let docs = corpus();
+    let cases = ["数据", "a", "the", "合同", "数据 | 共享", "ﬁ", "café", "a  b"];
+    let extra = ["ﬁnal ﬁ fi  x\t\n y Café CAFE\u{301} 😀数据😀", "aaaa aa   aaa", "ＡＢＣ abc ß SS ss"];
+    let mut compared = 0;
+    for text in docs.iter().map(|d| d.text.as_str()).chain(extra) {
+        for q in cases {
+            for mode in Mode::ALL {
+                let m = TextMatcher::new(&parse(q).unwrap(), mode);
+                let (got, total) = m.highlights(text, usize::MAX);
+                let want = reference_highlights(text, q, mode);
+                assert_eq!(got, want, "{q:?} {mode:?} {text:?}");
+                assert!(total as usize >= got.len());
+                // A cap returns the same prefix (mapping can merge, so compare what is common).
+                let (few, total2) = m.highlights(text, 2);
+                assert_eq!(total, total2);
+                assert!(few.len() <= 2 && few.iter().zip(&want).all(|(a, b)| a.start == b.start));
+                compared += 1;
+            }
+        }
+    }
+    assert!(compared > 100);
+}
+
+#[test]
+fn preview_of_archive_member_is_one_consistent_slice() {
+    use xs_index::{Anchor, AnchorKind};
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    // Members start at scalars 0 and 5; "😀" is one scalar but two UTF-16 units.
+    let mut d = doc(1, "😀甲乙\n\n丙丁 戊丁\n");
+    d.anchors = vec![
+        Anchor { start: 0, kind: AnchorKind::Member { name: "a.txt".into() } },
+        Anchor { start: 5, kind: AnchorKind::Member { name: "b.docx".into() } },
+        Anchor { start: 5, kind: AnchorKind::Paragraph { index: 1 } },
+    ];
+    w.put(&d).unwrap();
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    let expr = parse("丁 | 甲").unwrap();
+    let second = reader.preview(1, &expr, Mode::Loose, Some(5), 100).unwrap().unwrap();
+    assert_eq!(second.doc.text, "丙丁 戊丁\n");
+    assert_eq!(second.highlights, vec![1..2, 4..5]);
+    assert_eq!(second.doc.anchors, vec![Anchor { start: 0, kind: AnchorKind::Paragraph { index: 1 } }]);
+    let first = reader.preview(1, &expr, Mode::Loose, Some(0), 100).unwrap().unwrap();
+    assert_eq!(first.doc.text, "😀甲乙\n\n");
+    assert_eq!(first.highlights.first(), Some(&(2..3)));
+    assert_eq!(first.highlights.len(), 1);
+    let whole = reader.preview(1, &expr, Mode::Loose, None, 2).unwrap().unwrap();
+    assert_eq!((whole.highlights.len(), whole.total_hits), (2, 3));
+    assert!(reader.preview(9, &expr, Mode::Loose, None, 2).unwrap().is_none());
 }

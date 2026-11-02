@@ -143,7 +143,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     // MARK: Loading
 
     /// Shows `hit` and jumps to its `startAt`-th occurrence.
-    func show(_ hit: ContentHit, expression: String, startAt: Int = 0) {
+    func show(_ hit: ContentHit, expression: String, mode: MatchMode? = nil, startAt: Int = 0) {
         token += 1
         let token = self.token
         path = hit.path
@@ -156,7 +156,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         countLabel.stringValue = "正在载入…"
         showWindow(nil)
         bringToFront(window)
-        searcher.preview(fileId: hit.fileId, expression: expression, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
+        searcher.preview(fileId: hit.fileId, expression: expression, mode: mode, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
             guard let self, token == self.token else { return }
             guard let data else {
                 self.countLabel.stringValue = "索引中已没有这个文件"
@@ -179,7 +179,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             return HitRow(range: r, page: anchor?.info.kind == "page" ? anchor?.info.page : nil, location: anchor?.info.location ?? "",
                           context: Self.context(text, r))
         }
-        countLabel.stringValue = stale ? "命中暂不可用" : rows.isEmpty ? "没有可定位的命中" : "共 \(rows.count) 处"
+        countLabel.stringValue = stale ? "命中暂不可用" : rows.isEmpty ? "没有可定位的命中" : data.totalHits > UInt64(rows.count) ? "前 \(Theme.count(rows.count)) 处（共 \(Theme.count(Int(data.totalHits))) 处）" : "共 \(rows.count) 处"
         let isPDF = (path as NSString).pathExtension.lowercased() == "pdf"
         pdfMarks = []
         pdfSelections = []
@@ -194,7 +194,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             pdfView.document = nil
             pdfView.isHidden = true
             textPane.isHidden = false
-            textPane.show(PreviewData(document: doc, highlights: stale ? [] : data.highlights), path: path,
+            textPane.show(PreviewData(document: doc, highlights: stale ? [] : data.highlights, totalHits: data.totalHits), path: path,
                           location: shownHit.flatMap { $0.isMember ? $0.displayLocation : nil })
             externalButton.isHidden = true
         }

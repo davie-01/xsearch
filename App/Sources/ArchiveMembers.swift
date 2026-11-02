@@ -27,19 +27,6 @@ extension ContentHit {
     }
 }
 
-extension PreviewData {
-    /// Only the member's part of an archive document: text, highlights and anchors shifted to
-    /// start at 0 (the member's own anchors keep their kinds; member markers are dropped).
-    func member(_ name: String, startingAt start: UInt32) -> PreviewData {
-        let slice = memberSlice(text: document.text, anchorsJson: document.anchorsJson, highlights: highlights, start: start)
-        var doc = document
-        doc.text = slice.text
-        doc.anchorsJson = slice.anchorsJson
-        doc.name = (name as NSString).lastPathComponent
-        return PreviewData(document: doc, highlights: slice.highlights)
-    }
-}
-
 @MainActor
 enum MemberOpener {
     /// Unpacks the member to a private temporary folder and opens it with its default app.

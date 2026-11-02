@@ -33,7 +33,7 @@ pub struct Normalized {
 }
 pub fn normalize(input: &str, mode: Mode) -> Normalized {
     let mut spans: Vec<Range<usize>> = vec![];
-    let text = normalize_impl(input, mode, Some(&mut spans), usize::MAX, usize::MAX);
+    let text = normalize_impl(input, mode, &mut spans, usize::MAX, usize::MAX);
     Normalized {
         text,
         source_spans: spans,
@@ -42,7 +42,7 @@ pub fn normalize(input: &str, mode: Mode) -> Normalized {
 /// Same output as `normalize(..).text` without the per-scalar source map: verification only
 /// needs to know whether a document matches, and the map costs 16 bytes per scalar.
 pub fn normalize_text(input: &str, mode: Mode) -> String {
-    normalize_impl(input, mode, None, usize::MAX, usize::MAX)
+    normalize_impl(input, mode, &mut (), usize::MAX, usize::MAX)
 }
 /// Normalizes only a prefix: stops once `max_out_bytes` of output exist or `max_source_scalars`
 /// source scalars were consumed. Identical to the start of `normalize` (each scalar maps
@@ -58,7 +58,7 @@ pub fn normalize_prefix(
     let text = normalize_impl(
         input,
         mode,
-        Some(&mut spans),
+        &mut spans,
         max_out_bytes,
         max_source_scalars,
     );
@@ -67,10 +67,70 @@ pub fn normalize_prefix(
         source_spans: spans,
     }
 }
-fn normalize_impl(
+/// Source spans of only the `wanted` output scalars (sorted, distinct), in that order. Same
+/// mapping as `normalize(..).source_spans`, but memory follows the number of wanted positions,
+/// not the document: 16 bytes per scalar is 1.6 GB on a 100 MiB text (R07).
+pub fn source_spans_at(input: &str, mode: Mode, wanted: &[usize]) -> Vec<Range<usize>> {
+    let mut sink = Selected { wanted, count: 0, kept_last: false, out: Vec::with_capacity(wanted.len()) };
+    normalize_impl(input, mode, &mut sink, usize::MAX, usize::MAX);
+    sink.out
+}
+
+/// Receives the source span of each output scalar as normalization produces it.
+trait SpanSink {
+    fn push(&mut self, source: usize);
+    /// A merged whitespace run: the last output scalar also covers `source`.
+    fn extend_last(&mut self, source: usize);
+    /// Nothing further can matter: normalization may stop early.
+    fn done(&self) -> bool {
+        false
+    }
+}
+
+impl SpanSink for () {
+    fn push(&mut self, _: usize) {}
+    fn extend_last(&mut self, _: usize) {}
+}
+
+impl SpanSink for Vec<Range<usize>> {
+    fn push(&mut self, source: usize) {
+        Vec::push(self, source..source + 1);
+    }
+    fn extend_last(&mut self, source: usize) {
+        self.last_mut().unwrap().end = source + 1;
+    }
+}
+
+struct Selected<'a> {
+    wanted: &'a [usize],
+    count: usize,
+    kept_last: bool,
+    out: Vec<Range<usize>>,
+}
+
+impl SpanSink for Selected<'_> {
+    fn push(&mut self, source: usize) {
+        self.kept_last = self.wanted.get(self.out.len()) == Some(&self.count);
+        if self.kept_last {
+            self.out.push(source..source + 1);
+        }
+        self.count += 1;
+    }
+    fn extend_last(&mut self, source: usize) {
+        if self.kept_last {
+            self.out.last_mut().unwrap().end = source + 1;
+        }
+    }
+    // Stop once the output has moved past the last wanted scalar (its span can no longer grow).
+    fn done(&self) -> bool {
+        self.out.len() == self.wanted.len() && !self.kept_last
+    }
+}
+
+fn normalize_impl<S: SpanSink>(
     input: &str,
     mode: Mode,
-    mut spans: Option<&mut Vec<Range<usize>>>,
+    spans: &mut S,
     max_out_bytes: usize,
     max_source_scalars: usize,
 ) -> String {
@@ -86,29 +146,27 @@ fn normalize_impl(
             }
         }
         let out = &input[..end];
-        if let Some(spans) = spans.as_deref_mut() {
-            spans.extend((0..out.chars().count()).map(|i| i..i + 1));
+        for i in 0..out.chars().count() {
+            if spans.done() {
+                break;
+            }
+            spans.push(i);
         }
         return out.to_owned();
     }
-    let mut push =
-        |d: char, i: usize, out: &mut String, spans: &mut Option<&mut Vec<Range<usize>>>| {
-            let d = if d.is_whitespace() { ' ' } else { d };
-            if d == ' ' && last_space {
-                if let Some(spans) = spans.as_deref_mut() {
-                    spans.last_mut().unwrap().end = i + 1;
-                }
-            } else {
-                out.push(d);
-                if let Some(spans) = spans.as_deref_mut() {
-                    spans.push(i..i + 1);
-                }
-            }
-            last_space = d == ' ';
-        };
+    let mut push = |d: char, i: usize, out: &mut String, spans: &mut S| {
+        let d = if d.is_whitespace() { ' ' } else { d };
+        if d == ' ' && last_space {
+            spans.extend_last(i);
+        } else {
+            out.push(d);
+            spans.push(i);
+        }
+        last_space = d == ' ';
+    };
     let mut decomposed: Vec<char> = Vec::with_capacity(8);
     for (i, c) in input.chars().enumerate() {
-        if i >= max_source_scalars || out.len() >= max_out_bytes {
+        if i >= max_source_scalars || out.len() >= max_out_bytes || spans.done() {
             break;
         }
         // ASCII fast path: NFKD is identity; loose folding is A–Z → a–z only.
@@ -118,7 +176,7 @@ fn normalize_impl(
             } else {
                 c
             };
-            push(d, i, &mut out, &mut spans);
+            push(d, i, &mut out, spans);
             continue;
         }
         // Per-scalar NFKD without allocating a String per character.
@@ -131,11 +189,11 @@ fn normalize_impl(
                 && let Some(f) = folding::fold(d)
             {
                 for x in f.chars() {
-                    push(x, i, &mut out, &mut spans);
+                    push(x, i, &mut out, spans);
                 }
                 continue;
             }
-            push(d, i, &mut out, &mut spans);
+            push(d, i, &mut out, spans);
         }
     }
     out
