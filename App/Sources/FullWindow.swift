@@ -1,6 +1,7 @@
 import AppKit
 import Catalog
 import ContentEngine
+import Quartz
 import XSearchCore
 
 /// Window whose key equivalents go to the controller first.
@@ -16,7 +17,7 @@ final class KeyWindow: NSWindow {
 /// types, modified time, match mode), a sortable multi-select table and a preview. A normal
 /// window: clicking outside does not close it.
 @MainActor
-final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+final class FullWindowController: NSWindowController, NSWindowDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     struct Row {
         var name: String
         var path: String
@@ -150,6 +151,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         table.doubleAction = #selector(doubleClicked)
         table.target = self
         table.onReturn = { [weak self] flags in self?.openSelected(reveal: flags.contains(.command)) }
+        table.onSpace = { [weak self] in self?.toggleQuickLook() }
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         tableScroll.documentView = table
         tableScroll.hasVerticalScroller = true
@@ -284,6 +286,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func windowWillClose(_ notification: Notification) {
         content.cancel()
         previewToken += 1
+        closeQuickLook()
     }
 
     // MARK: Query
@@ -318,6 +321,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         if !shown {
             previewToken += 1
             textPreview.clear()
+        } else {
+            closeQuickLook()
         }
     }
 
@@ -488,6 +493,51 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     func tableViewSelectionDidChange(_ notification: Notification) {
         let sel = table.selectedRowIndexes
         showPreview(sel.count == 1 ? rows[sel.first!] : nil)
+        updateQuickLookItems()
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().reloadData() }
+    }
+
+    // MARK: Quick Look
+
+    /// File names preview in the system's panel (space, as in Finder); content has its own pane.
+    func toggleQuickLook() {
+        guard mode == .name, !table.selectedRowIndexes.isEmpty else { return }
+        updateQuickLookItems()
+        let panel = QLPreviewPanel.shared()!
+        if panel.isVisible {
+            panel.orderOut(nil)
+        } else {
+            window?.makeFirstResponder(table)
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private func updateQuickLookItems() {
+        quickLookURLs = table.selectedRowIndexes.filter { $0 < rows.count }.map { URL(fileURLWithPath: rows[$0].path) as NSURL }
+    }
+
+    private func closeQuickLook() {
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
+    }
+
+    /// Quick Look calls its data source on the main thread; the selection is mirrored here for it.
+    nonisolated(unsafe) private var quickLookURLs: [NSURL] = []
+
+    nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { quickLookURLs.count }
+
+    nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        index < quickLookURLs.count ? quickLookURLs[index] : nil
+    }
+
+    /// Arrow keys keep moving through the list while the panel is up, as in Finder.
+    nonisolated func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard event.type == .keyDown else { return false }
+        nonisolated(unsafe) let event = event!  // delivered on the main thread
+        return MainActor.assumeIsolated {
+            guard [123, 124, 125, 126].contains(event.keyCode), table.selectedRowIndexes.count == 1 else { return false }
+            table.keyDown(with: event)
+            return true
+        }
     }
 
     private func showPreview(_ row: Row?) {

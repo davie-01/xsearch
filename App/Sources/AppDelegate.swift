@@ -219,6 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.full.openFirstInReader = reader
                 self?.full.show(text: text, mode: mode)
+                // Dev: XS_QUICKLOOK=1 opens the Quick Look panel on the first result, as space would.
+                if ProcessInfo.processInfo.environment["XS_QUICKLOOK"] == "1" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self?.full.toggleQuickLook() }
+                }
             }
         }
     }

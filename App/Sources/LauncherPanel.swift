@@ -56,10 +56,16 @@ final class ResultTable: NSTableView {
     // Quick Look panel control lives on the focused table.
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        MainActor.assumeIsolated { panel.dataSource = delegate as? QLPreviewPanelDataSource }
+        MainActor.assumeIsolated {
+            panel.dataSource = delegate as? QLPreviewPanelDataSource
+            panel.delegate = delegate as? QLPreviewPanelDelegate
+        }
     }
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        MainActor.assumeIsolated { panel.dataSource = nil }
+        MainActor.assumeIsolated {
+            panel.dataSource = nil
+            panel.delegate = nil
+        }
     }
 }
 
