@@ -1050,7 +1050,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             delay += 0.15
             for ch in chunk {
                 // Long enough for what a key starts (Quick Look opening) to finish.
-                delay += "↓↑␣⌨◉".contains(ch) ? 1 : 0.15
+                delay += "↓↑␣⌨◉◌".contains(ch) ? 1 : 0.15
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
                     if ch == "⇥" { _ = self.scopeToSelection(); return }
@@ -1072,6 +1072,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                         self.logShownHeight()
                         return
                     }
+                    if ch == "◌" { self.logTestState("◌"); return }  // log only
                     if ch == "◉" {
                         (self.filters.arrangedSubviews.first as? NSButton)?.performClick(nil)
                         self.logTestState("◉")
@@ -1101,7 +1102,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
             let focus = panel.firstResponder === table ? "list" : panel.firstResponder is NSTextView ? "input" : "other"
             let ql = QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible
-            let line = "\(step) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
+            let preview = mode == .content ? " selected=\(contentPane.selected?.name ?? "-") preview=\(contentPane.preview.title.stringValue)|\(contentPane.preview.position.stringValue)" : ""
+            let line = "\(step)\(preview) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
             if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
         }
     }
