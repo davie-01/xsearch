@@ -16,14 +16,24 @@ mkdir -p "$out"
 step() { printf '\n== %s\n' "$1"; }
 
 step "Rust tests"
-cargo test --release --locked -q 2>&1 | tee "$out/rust-test.log" | grep -E "test result|FAILED|panicked" | grep -v " 0 passed" || true
-grep -qE "FAILED|panicked" "$out/rust-test.log" && { echo "Rust tests failed"; exit 1; }
+# Success is the command's exit status; the log is only filtered for display.
+if ! cargo test --release --locked -q > "$out/rust-test.log" 2>&1; then
+    tail -40 "$out/rust-test.log"
+    echo "Rust tests failed"
+    exit 1
+fi
+grep -E "test result" "$out/rust-test.log" | grep -v " 0 passed" || true
 step "clippy"
 cargo clippy --release --locked -q --all-targets -- -D warnings
 
 step "Swift tests"
 cargo build --release --locked -q -p xs-ffi
-swift build --scratch-path target/swift --build-tests 2>&1 | grep -E "error:" && exit 1
+# A failed build must stop here: --skip-build below would run the previous binaries.
+if ! swift build --scratch-path target/swift --build-tests > "$out/swift-build.log" 2>&1; then
+    grep -E "error:" "$out/swift-build.log" || tail -40 "$out/swift-build.log"
+    echo "Swift build failed"
+    exit 1
+fi
 perl -e 'alarm 900; exec @ARGV' swift test --scratch-path target/swift --skip-build > "$out/swift-test.log" 2>&1 || { tail -40 "$out/swift-test.log"; echo "Swift tests failed"; exit 1; }
 grep -E "Test run with" "$out/swift-test.log"
 grep -q "✘" "$out/swift-test.log" && { grep "✘" "$out/swift-test.log"; exit 1; }
@@ -37,7 +47,11 @@ cargo run -q --release --locked -p xs-index --example bench -- "$out/content-ind
 rm -rf "$out/content-index"
 
 step "Benchmark: extraction"
-swift build -c release --scratch-path target/swift --product xs-extract 2>&1 | grep -E "error:" && exit 1
+if ! swift build -c release --scratch-path target/swift --product xs-extract > "$out/extract-build.log" 2>&1; then
+    tail -40 "$out/extract-build.log"
+    echo "xs-extract build failed"
+    exit 1
+fi
 worker="$(swift build -c release --scratch-path target/swift --show-bin-path)/xs-extract"
 python3 -I -c "
 import random, sys

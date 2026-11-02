@@ -104,7 +104,8 @@ final class FileCatalog {
     }
 
     /// Schema steps after the tables above (which describe the current layout for new files).
-    /// Version 1: M1 tables. Version 2: M2 content columns on catalogs created by M1. Unversioned
+    /// Version 1: M1 tables. Version 2: M2 content columns on catalogs created by M1. Version 3:
+    /// partial index for content counts. Unversioned
     /// catalogs (before M5) start at 0 and pass through the idempotent steps.
     static let migrations: [@Sendable (SQLite) throws -> Void] = [
         { _ in },
@@ -114,6 +115,8 @@ final class FileCatalog {
                 try db.exec("ALTER TABLE files ADD COLUMN \(name) \(decl)")
             }
         },
+        // v3: content-state counts without visiting every name entry (56 ms → 0.04 ms on 170k files).
+        { db in try db.exec("CREATE INDEX IF NOT EXISTS files_content_state ON files(content_state) WHERE deleted = 0 AND in_content = 1") },
     ]
 
     static func columns(_ db: SQLite, _ table: String) throws -> [String] {

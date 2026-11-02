@@ -38,6 +38,8 @@ public final class NameService: @unchecked Sendable {
     private var lastPersist = Date.distantPast
     private var persistTimer: DispatchSourceTimer?
     private var processing = false
+    /// Newest event id seen but not yet written (see `received`).
+    private var unsavedCursor: UInt64?
     /// Recursive rescans (initial scan, scope change, dropped events) applied since start.
     /// Restart must not need one; tests assert this.
     private(set) var rescanOps = 0
@@ -97,6 +99,7 @@ public final class NameService: @unchecked Sendable {
                 self.scope = scope
                 contentScope = content
                 context = makeContext(scope)
+                saveCursor()
                 try catalog.append([(.scope, "", 0)], lastEventId: nil)
                 try catalog.setMeta("fingerprint", fingerprint())
                 restartWatcher(since: try catalog.meta("fsevents_last_id").flatMap(UInt64.init) ?? FSEventsWatcher.currentEventId)
@@ -110,6 +113,7 @@ public final class NameService: @unchecked Sendable {
         queue.sync {
             persistTimer?.cancel(); persistTimer = nil
             watcher?.stop(); watcher = nil
+            saveCursor()
             mergeQueue.sync {}
             try? persist(force: true)
             try? catalog?.db.checkpoint()
@@ -340,7 +344,10 @@ public final class NameService: @unchecked Sendable {
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 30, repeating: 30)
-        timer.setEventHandler { [weak self] in try? self?.persist(force: false) }
+        timer.setEventHandler { [weak self] in
+            self?.saveCursor()
+            try? self?.persist(force: false)
+        }
         timer.resume()
         persistTimer = timer
         process()
@@ -375,10 +382,25 @@ public final class NameService: @unchecked Sendable {
             let key = "\(path)\u{0}\(e.flags & structural)"
             if seen.insert(key).inserted { ops.append((.fsevent, path, e.flags & structural)) }
         }
+        // Watching "/" reports every file change on the system. Events that concern nothing
+        // only move the cursor in memory: writing it (with fsync) each time cost about three
+        // database writes per second at idle. Losing it in a crash replays events that are
+        // filtered out again.
+        guard !ops.isEmpty else {
+            unsavedCursor = maxId
+            return
+        }
         do {
             try catalog.append(ops, lastEventId: maxId)
-            if !ops.isEmpty { process() }
+            unsavedCursor = nil
+            process()
         } catch { fail(error) }
+    }
+
+    /// Runs on `queue`: the 30 s timer, scope changes, shutdown.
+    private func saveCursor() {
+        guard let cursor = unsavedCursor, let catalog else { return }
+        if (try? catalog.setMeta("fsevents_last_id", String(cursor))) != nil { unsavedCursor = nil }
     }
 
     /// Data-volume events can arrive under the firmlink target; the catalog uses the "/" view.

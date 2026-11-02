@@ -330,7 +330,7 @@ final class PreviewPane: NSView {
         currentHit = -1
         shownRange = NSRange(location: NSNotFound, length: 0)
         if hits.isEmpty {
-            render(around: 0)
+            render(for: NSRange(location: 0, length: 0))
             position.stringValue = stale ? "" : "没有可定位的命中"
             subtitle.stringValue = locationOverride ?? PathUtil.abbreviate((path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
             textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
@@ -344,37 +344,23 @@ final class PreviewPane: NSView {
     /// The whole stored text; the text view shows `shownRange` of it.
     private var fullText: NSString = ""
     private var shownRange = NSRange(location: NSNotFound, length: 0)
-    /// Documents above this size (UTF-16 units) are shown as a shownRange around the current hit:
-    /// handing millions of characters to the text system costs ~100 ms per document even with
-    /// non-contiguous layout, and typing must not wait for previews.
-    static let windowLimit = 300_000
-    static let windowSize = 200_000
-
-    /// Hit range in text-view coordinates.
-    private func local(_ r: NSRange) -> NSRange { NSRange(location: r.location - shownRange.location, length: r.length) }
-
-    /// Shows the part of the text around `location` (all of it for ordinary documents), hits
-    /// colored before the text reaches the layout system (coloring afterwards forces glyph
-    /// generation up to each hit).
-    private func render(around location: Int) {
-        let length = fullText.length
-        var range = NSRange(location: 0, length: length)
-        if length > Self.windowLimit {
-            let end = min(length, max(0, location - Self.windowSize / 2) + Self.windowSize)
-            range = fullText.rangeOfComposedCharacterSequences(for: NSRange(location: max(0, end - Self.windowSize), length: min(Self.windowSize, end)))
-        }
+    /// Shows the part of the text for `hit` (all of it for ordinary documents), hits colored
+    /// before the text reaches the layout system (coloring afterwards forces glyph generation
+    /// up to each hit).
+    private func render(for hit: NSRange) {
+        let range = PreviewWindow.range(for: hit, in: fullText)
         shownRange = range
         let para = NSMutableParagraphStyle()
         para.lineHeightMultiple = 1.8
         let text = NSMutableAttributedString(string: fullText.substring(with: range),
                                              attributes: [.font: NSFont.systemFont(ofSize: 14.5), .foregroundColor: NSColor.labelColor, .paragraphStyle: para])
-        for r in hits where NSIntersectionRange(r, range).length == r.length {
-            text.addAttribute(.backgroundColor, value: HitColors.hit, range: local(r))
+        for r in hits {
+            if let part = PreviewWindow.visible(r, in: range) { text.addAttribute(.backgroundColor, value: HitColors.hit, range: part) }
         }
         textView.textStorage?.setAttributedString(text)
         ruler.anchors = anchors.filter { NSLocationInRange($0.utf16, range) }.map { ($0.utf16 - range.location, $0.info.gutter) }
         ruler.needsDisplay = true
-        let windowed = range.length < length
+        let windowed = range.length < fullText.length
         banner.stringValue = stale ? "  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  "
             : windowed ? "  文档较大，只显示当前命中附近约 20 万字；切换命中时会跟着移动。  " : ""
         banner.isHidden = !stale && !windowed
@@ -385,13 +371,13 @@ final class PreviewPane: NSView {
         let previous = currentHit
         currentHit = (i % hits.count + hits.count) % hits.count
         let target = hits[currentHit]
-        if shownRange.location == NSNotFound || NSIntersectionRange(target, shownRange).length < target.length {
-            render(around: target.location)
-        } else if previous >= 0 && previous < hits.count, NSIntersectionRange(hits[previous], shownRange).length == hits[previous].length {
+        if PreviewWindow.needsMove(target, window: shownRange) {
+            render(for: target)
+        } else if previous >= 0 && previous < hits.count, let old = PreviewWindow.visible(hits[previous], in: shownRange) {
             // Only the previous and the new current hit change.
-            storage.addAttributes([.backgroundColor: HitColors.hit, .foregroundColor: NSColor.labelColor], range: local(hits[previous]))
+            storage.addAttributes([.backgroundColor: HitColors.hit, .foregroundColor: NSColor.labelColor], range: old)
         }
-        let r = local(target)
+        guard let r = PreviewWindow.visible(target, in: shownRange) else { return }
         storage.addAttributes([.backgroundColor: HitColors.current, .foregroundColor: NSColor.black], range: r)
         // Center the current hit; non-contiguous layout lays out only around it.
         lm.ensureLayout(forCharacterRange: r)
@@ -402,7 +388,8 @@ final class PreviewPane: NSView {
             scroll.reflectScrolledClipView(scroll.contentView)
         }
         marks.current = currentHit
-        position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处"
+        // A hit longer than the window is shown from its start.
+        position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处" + (r.length < target.length ? "（命中过长，只显示开头）" : "")
         let loc = anchors.last { $0.utf16 <= target.location }?.info.location
         subtitle.stringValue = [locationOverride ?? PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
         ruler.needsDisplay = true

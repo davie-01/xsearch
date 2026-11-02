@@ -234,10 +234,15 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     try p.start()
     #expect(p.settle())
     let old = p.indexer.indexURL
+    // Checked while the rebuild is extracting: right after the call it may already have finished.
+    nonisolated(unsafe) var during: Set<String> = []
+    p.indexer.afterExtract = { _ in
+        if during.isEmpty, let hits = try? p.search("lambda3") { during = hits }
+    }
     try p.indexer.rebuildContentIndex()
-    #expect(p.indexer.isRebuilding)
-    #expect(try p.search("lambda3") == ["r3.txt"], "readers keep the old instance meanwhile")
     #expect(p.until { !p.indexer.isRebuilding })
+    p.indexer.afterExtract = nil
+    #expect(during == ["r3.txt"], "readers keep the old instance meanwhile")
     #expect(p.indexer.indexURL != old)
     #expect(!FileManager.default.fileExists(atPath: old.path), "old instance removed")
     for i in 1...5 { #expect(try p.search("lambda\(i)") == ["r\(i).txt"]) }

@@ -130,3 +130,29 @@ func input(_ id: UInt64, _ text: String, dir: String = "/Users/t/下载", name: 
     #expect(try FileManager.default.contentsOfDirectory(atPath: out.path) == ["合同.txt"])
     #expect(throws: EngineError.self) { try extractArchiveMember(path: dir.appendingPathComponent("p.zip").path, member: "无.txt", dest: out.path, maxMemberBytes: 1 << 20) }
 }
+
+@Test func previewWindowNeverExceedsTheShownText() {
+    let long = String(repeating: "a", count: 400_000) as NSString
+    // A hit longer than the window: shown from its start, clipped, stable.
+    let huge = NSRange(location: 0, length: 400_000)
+    let w = PreviewWindow.range(for: huge, in: long)
+    #expect(w == NSRange(location: 0, length: 200_000))
+    #expect(PreviewWindow.visible(huge, in: w) == NSRange(location: 0, length: 200_000))
+    #expect(!PreviewWindow.needsMove(huge, window: w))
+    // Late long hit: the window stays inside the text and is filled by the hit.
+    let late = NSRange(location: 150_000, length: 250_000)
+    let w2 = PreviewWindow.range(for: late, in: long)
+    #expect(NSMaxRange(w2) <= long.length && PreviewWindow.visible(late, in: w2)?.length == w2.length)
+    // A short hit crossing the edge moves the window; afterwards it is fully shown.
+    let edge = NSRange(location: 199_998, length: 10)
+    #expect(PreviewWindow.needsMove(edge, window: w))
+    let w3 = PreviewWindow.range(for: edge, in: long)
+    #expect(PreviewWindow.visible(edge, in: w3)?.length == 10 && !PreviewWindow.needsMove(edge, window: w3))
+    #expect(PreviewWindow.visible(NSRange(location: 300_000, length: 5), in: w) == nil)
+    #expect(PreviewWindow.needsMove(edge, window: NSRange(location: NSNotFound, length: 0)))
+    // Small documents are shown whole; composed characters are not split at the edges.
+    #expect(PreviewWindow.range(for: edge, in: "abc" as NSString) == NSRange(location: 0, length: 3))
+    let emoji = String(repeating: "😀", count: 200_000) as NSString
+    let w4 = PreviewWindow.range(for: NSRange(location: 200_001, length: 2), in: emoji)
+    #expect(w4.location % 2 == 0 && NSMaxRange(w4) % 2 == 0)
+}

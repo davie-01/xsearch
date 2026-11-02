@@ -73,6 +73,7 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Extractions served from the cache (tests, diagnostics).
     private(set) var cacheHits = 0
     private let lock = NSLock()
+    private var lastFullCount = Date.distantPast
 
     static func digest(_ path: String) -> String? {
         guard let h = FileHandle(forReadingAtPath: path) else { return nil }
@@ -301,12 +302,15 @@ public final class ContentIndexer: @unchecked Sendable {
         cycling = true
         defer { cycling = false }
         do {
-            while !stopped {
+            // Idle must stay idle: a read decides, so no write lock is taken without work.
+            var worked = false
+            while !stopped, try readyCount() > 0 {
                 let tasks = try claim(limit: batchSize)
                 if tasks.isEmpty { break }
                 try process(tasks)
+                worked = true
             }
-            try refreshCounts()
+            try refreshCounts(full: worked || Date().timeIntervalSince(lastFullCount) > 30)
             try finishRebuildIfCaughtUp()
         } catch is Crash {
             crash()
@@ -563,10 +567,18 @@ public final class ContentIndexer: @unchecked Sendable {
         }
     }
 
-    private func refreshCounts() throws {
+    /// Pending comes from the small task table, every cycle. The per-file figures change only
+    /// through tasks this indexer processes, so they are recounted then (and every 30 s).
+    private func refreshCounts(full: Bool = true) throws {
         guard let catalog else { return }
         let p = try catalog.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE state IN (0, 1)")
         let pending = try p.first { p in Int(p.int(0)) } ?? 0
+        guard full else {
+            catalog.db.resetStatements()
+            state.withLock { $0.pending = pending }
+            return
+        }
+        lastFullCount = Date()
         let f = try catalog.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state = 4")
         let failed = try f.first { f in Int(f.int(0)) } ?? 0
         let i = try catalog.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state IN (1, 2, 3)")

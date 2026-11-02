@@ -83,3 +83,40 @@ import XSearchCore
     let scope = try JSONDecoder().decode(NameScope.self, from: Data(#"{"wholeDisk":false,"folders":["/W"],"futureOption":3}"#.utf8))
     #expect(!scope.wholeDisk && scope.folders == ["/W"] && scope.excludes == NameScope.default.excludes)
 }
+
+@Test func contentCountsUseThePartialIndex() throws {
+    let box = try Sandbox("count-plan")
+    let catalog = try FileCatalog(url: box.data.appendingPathComponent("catalog.sqlite"))
+    for sql in ["content_state = 4", "content_state IN (1, 2, 3)"] {
+        let plan = try catalog.db.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND \(sql)").first { $0.text(3) } ?? ""
+        #expect(plan.contains("files_content_state"), "\(plan)")
+    }
+}
+
+@Test func filteredEventsDoNotWriteTheCursor() throws {
+    let box = try Sandbox("cursor")
+    // The data directory is inside the watched root, as ~/Library is under "/": its own events
+    // are filtered out.
+    let data = URL(fileURLWithPath: box.p("appdata"))
+    let names = NameService(directory: data, home: "/nonexistent-home")
+    names.start(scope: box.scope)
+    #expect(names.waitUntilIdle())
+    sleep(1)
+    let c = try FileCatalog(url: data.appendingPathComponent("catalog.sqlite"))
+    let before = try c.meta("fsevents_last_id")
+    for i in 0..<5 {
+        try "x".write(toFile: data.appendingPathComponent("ignored-\(i)").path, atomically: false, encoding: .utf8)
+        usleep(400_000)
+    }
+    #expect(try c.meta("fsevents_last_id") == before, "no database write for events that concern nothing")
+    // A real change still advances it, and shutdown saves what is in memory.
+    try box.write("real.txt")
+    let deadline = Date().addingTimeInterval(10)
+    while try c.meta("fsevents_last_id") == before, Date() < deadline { usleep(100_000) }
+    #expect(try c.meta("fsevents_last_id") != before)
+    try "x".write(toFile: data.appendingPathComponent("ignored-last").path, atomically: false, encoding: .utf8)
+    usleep(800_000)
+    let mid = try c.meta("fsevents_last_id")
+    names.shutdown()
+    #expect(try c.meta("fsevents_last_id") != mid)
+}
