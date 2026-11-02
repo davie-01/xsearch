@@ -459,3 +459,97 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     let s = try c.db.prepare("SELECT deleted FROM files WHERE name = 'unreadable-keep.txt'")
     #expect(try s.first { $0.int(0) } == 0)
 }
+
+@Test func wakeProcessesNewTasksWithoutWaitingForTheFallback() throws {
+    let p = try Pipeline("wake")
+    defer { p.stop() }
+    p.names.onContentTasks = { [indexer = p.indexer] in indexer.wake() }
+    try p.start()
+    usleep(400_000)  // the first cycle has passed; only a wake can trigger the next one soon
+    try p.box.write("docs/w.txt", "唤醒 eta9")
+    // Polled from outside, with no waitUntilIdle driving the cycles.
+    let deadline = Date().addingTimeInterval(ContentIndexer.fallbackInterval / 2)
+    var found = false
+    while !found && Date() < deadline {
+        found = (try? p.search("eta9")) == ["w.txt"]
+        usleep(50_000)
+    }
+    #expect(found)
+}
+
+@Test func retryIsScheduledWithoutAWake() throws {
+    let p = try Pipeline("retry") { $0.backoffBase = 0.3 }
+    defer { p.stop() }
+    nonisolated(unsafe) var failures = 1
+    p.indexer.workerFault = { _ in
+        if failures > 0 { failures -= 1; return "crash" }
+        return nil
+    }
+    try p.box.write("docs/r.txt", "重试 iota9")
+    try p.start()
+    let deadline = Date().addingTimeInterval(ContentIndexer.fallbackInterval / 2)
+    var found = false
+    while !found && Date() < deadline {
+        found = (try? p.search("iota9")) == ["r.txt"]
+        usleep(50_000)
+    }
+    #expect(found)
+}
+
+@Test func digestIsAllOrNothing() throws {
+    let box = try Sandbox("digest")
+    try box.write("f.txt", "abc")
+    #expect(ContentIndexer.digest(box.p("f.txt"))?.count == 64)
+    #expect(ContentIndexer.digest(box.p("f.txt"), cancelled: { true }) == nil)
+    #expect(ContentIndexer.digest(box.p("missing")) == nil)
+}
+
+@Test func watcherFailureIsReportedAndRetried() throws {
+    let p = try Pipeline("watch")
+    defer { p.stop() }
+    p.names.failWatcherStarts = 1
+    p.names.watcherDelay = 0.5
+    try p.start()
+    #expect(!p.names.status.watching, "reported, not shown as ready")
+    let deadline = Date().addingTimeInterval(10)
+    while !p.names.status.watching && Date() < deadline { usleep(50_000) }
+    #expect(p.names.status.watching, "recovered without a restart")
+}
+
+@Test func quickScopeChangesBothTakeEffect() throws {
+    let p = try Pipeline("scopes")
+    defer { p.stop() }
+    try p.box.write("docs/s.txt", "范围 theta9")
+    try p.start()
+    #expect(p.settle())
+    // The second call must see the first one's value: it reads the other half on the queue.
+    var scope = p.box.scope
+    scope.excludes.append("never-matches-\(UUID().uuidString)")
+    p.names.setScope(scope)
+    p.names.setContentScope(nil)
+    p.names.setContentScope(ContentScope(folders: [p.box.p("docs")]))
+    #expect(p.until { try p.search("theta9") == ["s.txt"] })
+    #expect(p.names.waitUntilIdle())
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let fp = try #require(try c.meta("fingerprint"))
+    #expect(fp.contains("never-matches-"))
+}
+
+@Test func favoritesForgetIdsOfAnotherCatalog() throws {
+    let box = try Sandbox("usage-catalog")
+    let usage = try UsageStore(directory: box.data)
+    usage.bindCatalog("A")
+    usage.toggleFavorite(path: "/a/fav", fileId: 7)
+    usage.recordOpen(path: "/a/opened", fileId: 8)
+    usage.bindCatalog("A")
+    #expect(usage.favorites().first?.fileId == 7)
+    usage.bindCatalog("B")  // the catalog was rebuilt: 7 is another file now
+    #expect(usage.favorites() == [.init(path: "/a/fav", fileId: nil)])
+    #expect(usage.recents().first?.fileId == nil && usage.recents().first?.path == "/a/opened")
+    #expect(usage.usage().byPath["/a/opened"] == 1 && usage.usage().byId.isEmpty)
+    // Remembered across launches: same catalog keeps new ids.
+    usage.toggleFavorite(path: "/b/fav", fileId: 9)
+    let again = try UsageStore(directory: box.data)
+    again.bindCatalog("B")
+    #expect(again.favorites().contains(.init(path: "/b/fav", fileId: 9)))
+}

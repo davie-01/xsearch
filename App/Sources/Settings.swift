@@ -350,7 +350,7 @@ struct ScopePane: View {
         switch st.phase {
         case .starting: return "正在打开…"
         case .scanning: return "正在建立 · \(Theme.count(st.count)) 项"
-        case .ready: return "\(Theme.count(st.count)) 项 · 内存约 \(mem) · 实时更新"
+        case .ready: return "\(Theme.count(st.count)) 项 · 内存约 \(mem) · " + (st.watching ? "实时更新" : "未实时更新，正在重试")
         case .failed(let m): return "出错：\(m)"
         }
     }

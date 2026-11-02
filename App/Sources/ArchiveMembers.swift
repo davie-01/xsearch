@@ -29,17 +29,25 @@ extension ContentHit {
 
 @MainActor
 enum MemberOpener {
-    /// Unpacks the member to a private temporary folder and opens it with its default app.
-    /// Returns a message when that fails.
-    static func open(_ hit: ContentHit) -> String? {
+    private static let queue = DispatchQueue(label: "xsearch.member-open", qos: .userInitiated)
+
+    /// Unpacks the member to a private temporary folder (up to 512 MB: off the main thread) and
+    /// opens it with its default app. `done` gets a message when that fails.
+    static func open(_ hit: ContentHit, done: @escaping @MainActor @Sendable (String?) -> Void = { _ in }) {
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent("XSearch-open/\(UUID().uuidString)", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let file = try extractArchiveMember(path: hit.path, member: hit.member, dest: dest.path, maxMemberBytes: 512 << 20)
-            NSWorkspace.shared.open(URL(fileURLWithPath: file))
-            return nil
-        } catch {
-            return "无法从压缩包中取出“\(hit.displayName)”：\(error)"
+        let path = hit.path, member = hit.member, name = hit.displayName
+        queue.async {
+            do {
+                try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                let file = try extractArchiveMember(path: path, member: member, dest: dest.path, maxMemberBytes: 512 << 20)
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: file))
+                    done(nil)
+                }
+            } catch {
+                let message = "无法从压缩包中取出“\(name)”：\(error)"
+                DispatchQueue.main.async { done(message) }
+            }
         }
     }
 

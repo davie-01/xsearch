@@ -104,7 +104,7 @@ fn matches_brute_force_in_all_modes_with_filters() {
                     mode,
                     dirs: dirs.clone(),
                     exts: exts.clone(),
-                    scopes: scopes.clone(),
+                    scopes: scopes.clone(), size: None, mtime: None
                 };
                 let (got, _, _) = run_all(&reader, req);
                 assert_eq!(got, want, "{e:?} {mode:?} {dirs:?} {exts:?} {scopes:?}");
@@ -128,7 +128,7 @@ fn recall_kinds_explain_cost() {
             mode: Mode::Loose,
             dirs: vec![],
             exts: vec![],
-            scopes: vec![],
+            scopes: vec![], size: None, mtime: None
         })
         .unwrap()
         .recall
@@ -161,7 +161,7 @@ fn progressive_batches_cancel_and_completeness() {
         mode: Mode::Loose,
         dirs: vec![],
         exts: vec![],
-        scopes: vec![],
+        scopes: vec![], size: None, mtime: None
     };
     // Tiny budget: many batches, each making progress, union equals the full answer.
     let mut s = r.session(req.clone()).unwrap();
@@ -232,7 +232,7 @@ fn updates_tombstones_and_restart() {
                 mode: Mode::Loose,
                 dirs: vec![],
                 exts: vec![],
-                scopes: vec![],
+                scopes: vec![], size: None, mtime: None
             },
         )
         .0
@@ -263,7 +263,7 @@ fn snippets_and_highlights_point_at_hits() {
             mode: Mode::Loose,
             dirs: vec![],
             exts: vec![],
-            scopes: vec![],
+            scopes: vec![], size: None, mtime: None
         })
         .unwrap();
     let h = s
@@ -369,7 +369,7 @@ fn proximity_and_regex() {
     }
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
-    let req = |q: &str| SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] };
+    let req = |q: &str| SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None };
     assert_eq!(run_all(&reader, req(r#""合同 金额"~3"#)).0, BTreeSet::from([1]));
     assert_eq!(run_all(&reader, req(r#""合同 金额"~30"#)).0, BTreeSet::from([1, 2]));
     let (ids, recall, _) = run_all(&reader, req(r"regex:ht-\d{4}-\d+"));
@@ -392,7 +392,7 @@ fn text_matcher_agrees_with_indexed_search() {
     for q in ["合同", "ht-2024 -草稿", r"regex:HT-\d+", r#""合同 金额"~2"#] {
         let expr = parse(q).unwrap();
         let m = TextMatcher::new(&expr, Mode::Loose);
-        let mut s = reader.session(SearchRequest { expr: expr.clone(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] }).unwrap();
+        let mut s = reader.session(SearchRequest { expr: expr.clone(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
         let indexed = s.next(Duration::from_secs(5), 10, &AtomicBool::new(false)).unwrap().hits.pop().unwrap();
         let live = m.check(text).unwrap();
         assert_eq!((live.hit_count, &live.snippet, &live.snippet_highlights), (indexed.hit_count, &indexed.snippet, &indexed.snippet_highlights), "{q}");
@@ -419,7 +419,7 @@ fn archive_members_are_separate_hits() {
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
     let hits = |q: &str| {
-        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] }).unwrap();
+        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
         let mut v: Vec<(u64, String, u32, String)> = s
             .next(Duration::from_secs(5), 100, &AtomicBool::new(false))
             .unwrap()
@@ -558,7 +558,7 @@ fn large_archive_is_paged_member_by_member() {
     w.put(&d).unwrap();
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
-    let session = || reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] }).unwrap();
+    let session = || reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
     let never = AtomicBool::new(false);
     let mut s = session();
     let first = s.next(Duration::from_secs(5), 3, &never).unwrap();
@@ -579,4 +579,32 @@ fn large_archive_is_paged_member_by_member() {
     assert_eq!(s.next(Duration::from_secs(5), 1, &never).unwrap().hits.len(), 1);
     let b = s.next(Duration::from_secs(5), 100, &AtomicBool::new(true)).unwrap();
     assert!(b.hits.is_empty() && !b.done);
+}
+
+#[test]
+fn size_and_time_filters_apply_to_candidates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    for (id, size, mtime) in [(1u64, 10i64, 100i64), (2, 500, 100), (3, 500, 900)] {
+        let mut d = doc(id, "合同 文本");
+        d.size = size;
+        d.mtime = mtime;
+        w.put(&d).unwrap();
+    }
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    let ids = |size: Option<(i64, i64)>, mtime: Option<(i64, i64)>| {
+        let mut s = reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size, mtime }).unwrap();
+        // Filtered out before verification: the candidate count already says so.
+        let n = s.candidates();
+        let mut v: Vec<u64> = s.next(Duration::from_secs(5), 100, &AtomicBool::new(false)).unwrap().hits.iter().map(|h| h.file_id).collect();
+        v.sort();
+        assert_eq!(n, v.len());
+        v
+    };
+    assert_eq!(ids(None, None), [1, 2, 3]);
+    assert_eq!(ids(Some((100, 1000)), None), [2, 3]);
+    assert_eq!(ids(None, Some((0, 500))), [1, 2]);
+    assert_eq!(ids(Some((100, 1000)), Some((0, 500))), [2]);
+    assert_eq!(reader.recall_of(&parse(r"regex:\d{2}").unwrap()), Recall::Scan);
 }

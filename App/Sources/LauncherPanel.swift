@@ -483,6 +483,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         resize(animated: false)
         position()
         panel.makeKeyAndOrderFront(nil)
+        onVisibilityChange?()
         startMouseWatch()
         if let delay = ProcessInfo.processInfo.environment["XS_CLEAR_AFTER"].flatMap(Double.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -509,6 +510,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // Nobody is looking: stop the query and any queued preview. `show` searches again.
         session.content.cancel()
         contentPane.invalidatePreview()
+        onVisibilityChange?()
     }
 
     private func position() {
@@ -796,7 +798,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     @objc private func startLiveScan() {
         guard let out = contentOutput, !out.query.isEmpty else { return }
-        let (files, unresolved, truncated) = session.liveFiles(dirs: uncoveredDirs(out.query), extensions: out.query.liveExtensions)
+        session.liveFiles(dirs: uncoveredDirs(out.query), extensions: out.query.liveExtensions) { [weak self] files, unresolved, truncated in
+            // Still the same query, still on screen.
+            guard let self, self.panel.isVisible, self.contentOutput?.text == out.text else { return }
+            self.beginLiveScan(out, files: files, unresolved: unresolved, truncated: truncated)
+        }
+    }
+
+    private func beginLiveScan(_ out: ContentOutput, files: [LiveFile], unresolved: [String], truncated: Bool) {
         clearNotice()
         for d in unresolved {
             addNotice("\(PathUtil.abbreviate(d, home: NSHomeDirectory())) 不在文件名索引中，无法扫描。", color: Theme.warnText, size: 12.5)
@@ -826,7 +835,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if reveal {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } else if hit.isMember {
-            if let message = MemberOpener.open(hit) { Self.inform(message) }
+            MemberOpener.open(hit) { message in if let message { Self.inform(message) } }
         } else if let message = Opener.open(path: path, line: line, page: page) {
             Self.inform(message)
         }
@@ -900,6 +909,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     /// Reader window at the current occurrence (set by the app delegate).
     var onRead: ((ContentHit, String, Int, Bool) -> Void)?
+    var onVisibilityChange: (() -> Void)?
 
     private func openReader(_ hit: ContentHit, at n: Int) {
         let expression = contentPane.expressionForReader

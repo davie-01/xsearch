@@ -5,7 +5,7 @@ fn main() {
     let (index, query) = (a.next().unwrap(), a.next().unwrap());
     let exts: Vec<String> = a.collect();
     let r = xs_index::ContentReader::open(std::path::Path::new(&index)).unwrap();
-    let mut s = r.session(xs_index::SearchRequest { expr: xs_index::parse(&query).unwrap(), mode: xs_index::Mode::Loose, dirs: vec![], exts, scopes: vec![] }).unwrap();
+    let mut s = r.session(xs_index::SearchRequest { expr: xs_index::parse(&query).unwrap(), mode: xs_index::Mode::Loose, dirs: vec![], exts, scopes: vec![], size: None, mtime: None }).unwrap();
     let mut hits = vec![];
     loop {
         let b = s.next(Duration::from_secs(10), usize::MAX, &AtomicBool::new(false)).unwrap();

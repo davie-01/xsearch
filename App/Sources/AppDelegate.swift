@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Content indexer in IndexService.xpc (in-process without the bundled service).
     private var indexer: IndexServiceClient?
     private var statusTimer: Timer?
+    private var menuOpen = false
     private let contentStatusItem = NSMenuItem(title: "内容索引：正在打开", action: nil, keyEquivalent: "")
     private var usage: UsageStore?
     private var session: SearchSession!
@@ -99,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Callbacks shared by every launcher instance (startup and index rebuild).
     private func wireLauncher() {
+        launcher.onVisibilityChange = { [weak self] in self?.updateStatusTimer() }
         launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
         launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
         launcher.onRead = { [weak self] hit, expression, n, live in self?.reader.show(hit, expression: expression, live: live, startAt: n) }
@@ -142,6 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ix.onError = { [weak self] message in self?.contentStatusItem.title = "内容索引出错：\(message.prefix(60))" }
         ix.onUpdate = { [weak self] in self?.showContentStatus() }
         ix.maxFileBytes = contentScope.maxFileBytes
+        names.onContentTasks = { [weak ix] in
+            Task { @MainActor in ix?.wake() }
+        }
         session.content.maxFileBytes = contentScope.maxFileBytes
         ix.start()
         indexer = ix
@@ -170,9 +175,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         names.start(scope: nameScope, content: contentScope)
         startIndexer()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.statusChanged() }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // After the close: the window still counts as visible during this notification.
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateStatusTimer() } }
+            }
         }
+        updateStatusTimer()
 
         buildStatusItem()
         installKeyMenu()
@@ -288,14 +297,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusChanged()
     }
 
-    func menuWillOpen(_ menu: NSMenu) { statusChanged() }
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+        statusChanged()
+        updateStatusTimer()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+        updateStatusTimer()
+    }
+
+    /// Status is polled only while someone can see it. Also how readers learn the index path
+    /// after a rebuild, so opening the launcher refreshes at once.
+    private func updateStatusTimer() {
+        let visible = menuOpen || launcher?.isVisible == true || NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+        guard visible != (statusTimer != nil) else { return }
+        if visible {
+            let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.statusChanged() }
+            }
+            timer.tolerance = 0.5
+            statusTimer = timer
+            statusChanged()
+        } else {
+            statusTimer?.invalidate()
+            statusTimer = nil
+        }
+    }
 
     private func statusChanged() {
         let st = names.status
         switch st.phase {
         case .starting: indexStatusItem.title = "文件名索引：正在打开"
         case .scanning: indexStatusItem.title = "文件名索引：正在建立 · \(Theme.count(st.count)) 项"
-        case .ready: indexStatusItem.title = "文件名索引：已就绪 · \(Theme.count(st.count)) 项"
+        case .ready: indexStatusItem.title = "文件名索引：\(st.watching ? "已就绪" : "未实时更新") · \(Theme.count(st.count)) 项"
         case .failed(let message): indexStatusItem.title = "文件名索引出错：\(message.prefix(60))"
         }
         // The snapshot arrives asynchronously from the service (`showContentStatus`).

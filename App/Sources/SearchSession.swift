@@ -82,6 +82,9 @@ final class SearchSession {
         let showRecents = Preferences.shared.showRecents
         queue.async {
             guard gate.withLock({ $0 }) == id else { return }
+            // Stored file ids count only for the catalog they came from.
+            let catalogId = names.catalogId
+            if let catalogId { usage?.bindCatalog(catalogId) }
             let start = DispatchTime.now()
             var q = NameQuery.parse(text, home: home, syntax: syntax)
             q.documentTypes = documentTypes
@@ -94,7 +97,7 @@ final class SearchSession {
                 var shown = Set<String>()
                 for f in usage?.favorites() ?? [] {
                     var path = f.path
-                    if !FileManager.default.fileExists(atPath: path), let id = f.fileId, let moved = names.view.path(id), moved != path,
+                    if catalogId != nil, !FileManager.default.fileExists(atPath: path), let id = f.fileId, let moved = names.view.path(id), moved != path,
                        FileManager.default.fileExists(atPath: moved) {
                         usage?.relocateFavorite(from: path, to: moved)
                         path = moved
@@ -106,7 +109,8 @@ final class SearchSession {
                     items.append(Self.item(path: r.path, fileId: r.fileId, group: .recents))
                 }
             } else {
-                let counts = usage?.usage() ?? (byId: [:], byPath: [:])
+                var counts = usage?.usage() ?? (byId: [:], byPath: [:])
+                if catalogId == nil { counts.byId = [:] }
                 let appHits = AppCatalog.search(apps, q, usage: counts.byPath).prefix(6)
                 for a in appHits {
                     items.append(ResultItem(group: .apps, name: a.displayName, path: a.path, fileId: nil, kind: .app, ext: "app", meta: "应用"))
@@ -137,7 +141,16 @@ final class SearchSession {
     /// Text-type files under `dirs` from the name index, for the live scan (§8.7): the name
     /// scope's exclusion rules apply as they do everywhere else. `truncated`: a folder had more
     /// candidates than one scan reads.
-    func liveFiles(dirs: [String], extensions: [String]) -> (files: [LiveFile], unresolved: [String], truncated: Bool) {
+    /// Delivered on the main thread: 200,000 candidates take a while to materialize.
+    func liveFiles(dirs: [String], extensions: [String], deliver: @escaping @MainActor ([LiveFile], [String], Bool) -> Void) {
+        let names = self.names, home = self.home
+        queue.async {
+            let r = Self.liveFiles(names: names, home: home, dirs: dirs, extensions: extensions)
+            Task { @MainActor in deliver(r.files, r.unresolved, r.truncated) }
+        }
+    }
+
+    nonisolated private static func liveFiles(names: NameService, home: String, dirs: [String], extensions: [String]) -> (files: [LiveFile], unresolved: [String], truncated: Bool) {
         guard !extensions.isEmpty else { return ([], [], false) }
         let exts = extensions.joined(separator: ";")
         let limit = 200_000

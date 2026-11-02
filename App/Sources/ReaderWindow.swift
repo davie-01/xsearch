@@ -29,8 +29,11 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     private let textPane = PreviewPane()
     private var rows: [HitRow] = []
     private var path = ""
-    private var pdfMarks: [[PDFAnnotation]] = []
-    private var pdfSelections: [PDFSelection?] = []
+    /// By row, filled per page when the page is reached: a document can have thousands of hits.
+    private var pdfMarks: [Int: [PDFAnnotation]] = [:]
+    private var pdfSelections: [Int: PDFSelection] = [:]
+    private var pdfRowsByPage: [Int: [Int]] = [:]
+    private var pdfAnchors: [(utf16: Int, info: AnchorInfo)] = []
     private var current = -1
     private var token = 0
     var onOpenFile: ((String, Int64?) -> Void)?
@@ -105,6 +108,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
 
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
+        NotificationCenter.default.addObserver(self, selector: #selector(markVisiblePDFPages), name: .PDFViewPageChanged, object: pdfView)
         pdfView.backgroundColor = NSColor.underPageBackgroundColor
         textPane.locate.isHidden = true
         let stage = NSView()
@@ -187,14 +191,19 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         }
         countLabel.stringValue = stale ? "命中暂不可用" : rows.isEmpty ? "没有可定位的命中" : data.totalHits > UInt64(rows.count) ? "前 \(Theme.count(rows.count)) 处（共 \(Theme.count(Int(data.totalHits))) 处）" : "共 \(rows.count) 处"
         let isPDF = (path as NSString).pathExtension.lowercased() == "pdf"
-        pdfMarks = []
-        pdfSelections = []
+        pdfMarks = [:]
+        pdfSelections = [:]
+        pdfRowsByPage = [:]
         current = -1
         if isPDF, let pdf = PDFDocument(url: URL(fileURLWithPath: path)) {
             pdfView.isHidden = false
             textPane.isHidden = true
             pdfView.document = pdf
-            mapPDFHits(pdf, anchors: anchors, text: text)
+            pdfAnchors = anchors
+            for (i, row) in rows.enumerated() {
+                if let page = row.page { pdfRowsByPage[page, default: []].append(i) }
+            }
+            markVisiblePDFPages()
             externalButton.isHidden = false
         } else {
             pdfView.document = nil
@@ -210,26 +219,31 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
 
     /// Stored PDF text is each page's `page.string` plus "\n", so a hit is a character range of
     /// one page's string: exact, no fuzzy search.
-    private func mapPDFHits(_ pdf: PDFDocument, anchors: [(utf16: Int, info: AnchorInfo)], text: NSString) {
-        for row in rows {
-            guard let pageNo = row.page, let page = pdf.page(at: pageNo - 1),
-                  let start = anchors.first(where: { $0.info.kind == "page" && $0.info.page == pageNo })?.utf16 else {
-                pdfMarks.append([]); pdfSelections.append(nil); continue
-            }
+    private func markPDFPage(_ pageNo: Int) {
+        guard let rowsOnPage = pdfRowsByPage.removeValue(forKey: pageNo), let page = pdfView.document?.page(at: pageNo - 1),
+              let start = pdfAnchors.first(where: { $0.info.kind == "page" && $0.info.page == pageNo })?.utf16 else { return }
+        let length = (page.string as NSString?)?.length ?? 0
+        for i in rowsOnPage {
+            let row = rows[i]
             let local = NSRange(location: row.range.location - start, length: row.range.length)
-            guard local.location >= 0, NSMaxRange(local) <= (page.string as NSString?)?.length ?? 0, let sel = page.selection(for: local) else {
-                pdfMarks.append([]); pdfSelections.append(nil); continue
-            }
+            guard local.location >= 0, NSMaxRange(local) <= length, let sel = page.selection(for: local) else { continue }
             var marks: [PDFAnnotation] = []
             for line in sel.selectionsByLine() {
                 let a = PDFAnnotation(bounds: line.bounds(for: page), forType: .highlight, withProperties: nil)
-                a.color = HitColors.hit.usingColorSpace(.sRGB) ?? .yellow
+                a.color = i == current ? HitColors.current.withAlphaComponent(0.55) : HitColors.hit.usingColorSpace(.sRGB) ?? .yellow
                 page.addAnnotation(a)
                 marks.append(a)
             }
-            pdfMarks.append(marks)
-            pdfSelections.append(sel)
+            pdfMarks[i] = marks
+            pdfSelections[i] = sel
         }
+    }
+
+    /// The page in view and its neighbours (continuous scrolling shows parts of them).
+    @objc private func markVisiblePDFPages() {
+        guard let doc = pdfView.document, let page = pdfView.currentPage else { return }
+        let n = doc.index(for: page) + 1
+        for p in [n, n - 1, n + 1] { markPDFPage(p) }
     }
 
     static func context(_ text: NSString, _ r: NSRange) -> String {
@@ -253,13 +267,12 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     }
 
     private func go(to i: Int) {
-        if current >= 0 && current < pdfMarks.count {
-            pdfMarks[current].forEach { $0.color = HitColors.hit.usingColorSpace(.sRGB) ?? .yellow }
-        }
+        pdfMarks[current]?.forEach { $0.color = HitColors.hit.usingColorSpace(.sRGB) ?? .yellow }
         current = i
         table.scrollRowToVisible(i)
         if !pdfView.isHidden {
-            pdfMarks[i].forEach { $0.color = HitColors.current.withAlphaComponent(0.55) }
+            if let p = rows[i].page { markPDFPage(p) }
+            pdfMarks[i]?.forEach { $0.color = HitColors.current.withAlphaComponent(0.55) }
             if let sel = pdfSelections[i] {
                 pdfView.go(to: sel)
             } else if let p = rows[i].page, let page = pdfView.document?.page(at: p - 1) {
@@ -297,7 +310,8 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
 
     @objc private func openDefault() {
         if let hit = shownHit, hit.isMember {
-            if let message = MemberOpener.open(hit), let window {
+            MemberOpener.open(hit) { [weak self] message in
+                guard let message, let window = self?.window else { return }
                 let alert = NSAlert()
                 alert.messageText = message
                 alert.beginSheetModal(for: window)
@@ -394,9 +408,16 @@ enum ExternalPDF {
                     tell front document to go to page \(page)
                 end tell
                 """
-            if run(script) { return nil }
-            NSWorkspace.shared.open([url], withApplicationAt: skim, configuration: NSWorkspace.OpenConfiguration())
-            return Message(title: "已用 Skim 打开，但没能跳到第 \(page) 页", detail: "请在 系统设置 → 隐私与安全性 → 自动化 中允许 XSearch 控制 Skim。", offerSettings: false)
+            run(script) { ok in
+                guard !ok else { return }
+                NSWorkspace.shared.open([url], withApplicationAt: skim, configuration: NSWorkspace.OpenConfiguration())
+                NSApp.activate()
+                let alert = NSAlert()
+                alert.messageText = "已用 Skim 打开，但没能跳到第 \(page) 页"
+                alert.informativeText = "请在 系统设置 → 隐私与安全性 → 自动化 中允许 XSearch 控制 Skim。"
+                alert.runModal()
+            }
+            return nil
         }
         guard let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
             NSWorkspace.shared.open(url)
@@ -417,14 +438,30 @@ enum ExternalPDF {
                 keystroke return
             end tell
             """
-        DispatchQueue.main.async { _ = run(script) }
+        run(script) { _ in }
         return nil
     }
 
-    @discardableResult
-    static func run(_ source: String) -> Bool {
-        var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        return error == nil
+    /// In a child process: these scripts wait for another app, and the window must not. An app
+    /// that never answers gets the process ended after 20 s.
+    static func run(_ source: String, done: @escaping @MainActor @Sendable (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            p.arguments = ["-e", source]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            let finished = DispatchSemaphore(value: 0)
+            p.terminationHandler = { _ in finished.signal() }
+            var ok = false
+            if (try? p.run()) != nil {
+                if finished.wait(timeout: .now() + 20) == .timedOut {
+                    p.terminate()
+                } else {
+                    ok = p.terminationStatus == 0
+                }
+            }
+            DispatchQueue.main.async { [ok] in done(ok) }
+        }
     }
 }

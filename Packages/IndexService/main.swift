@@ -35,8 +35,8 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         lock.lock()
         let ix = indexer
         lock.unlock()
-        let snap = IndexServiceSnapshot(status: ix?.status ?? ContentIndexer.Status(),
-                                        indexPath: ix?.indexURL.path)
+        let status = ix?.status ?? ContentIndexer.Status()
+        let snap = IndexServiceSnapshot(status: status, indexPath: ix?.indexURL(of: status).path)
         reply((try? JSONEncoder().encode(snap)) ?? Data())
     }
 
@@ -52,6 +52,13 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         let ix = indexer
         lock.unlock()
         ix?.setMaxFileBytes(bytes)
+    }
+
+    func wake() {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        ix?.wake()
     }
 
     func stop(reply: @escaping () -> Void) {

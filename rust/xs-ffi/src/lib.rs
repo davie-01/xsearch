@@ -146,6 +146,11 @@ pub struct SearchFilters {
     pub dirs: Vec<String>,
     pub exts: Vec<String>,
     pub scopes: Vec<u64>,
+    /// Inclusive bounds of `size:` / `dm:`; candidates outside are never read.
+    #[uniffi(default = None)]
+    pub size_range: Option<Vec<i64>>,
+    #[uniffi(default = None)]
+    pub mtime_range: Option<Vec<i64>>,
 }
 
 /// Stored document for the preview. Anchors and page states are JSON (`xs_index::Anchor`,
@@ -237,21 +242,24 @@ impl ContentIndex {
         mode: MatchMode,
         filters: SearchFilters,
     ) -> Result<Arc<ContentSearch>, EngineError> {
+        let bounds = |r: Option<Vec<i64>>| r.and_then(|v| Some((*v.first()?, *v.get(1)?)));
         let req = idx::SearchRequest {
             expr: parse(&query)?,
             mode: mode.into(),
             dirs: filters.dirs,
             exts: filters.exts,
             scopes: filters.scopes,
+            size: bounds(filters.size_range),
+            mtime: bounds(filters.mtime_range),
         };
         let scoped = !req.dirs.is_empty() || !req.exts.is_empty();
-        let has_regex = req.expr.has_regex();
-        let session = self.reader.session(req)?;
-        if has_regex && !scoped && session.recall == idx::Recall::Scan {
+        // Before collecting candidates: this refusal must not cost a scan's worth of work.
+        if req.expr.has_regex() && !scoped && self.reader.recall_of(&req.expr) == idx::Recall::Scan {
             return Err(EngineError::Query {
                 message: "正则需要包含至少 3 个字节的固定文字，或搭配 dir: / ext: 缩小范围".into(),
             });
         }
+        let session = self.reader.session(req)?;
         let recall = match session.recall {
             idx::Recall::Trigram => RecallKind::Trigram,
             idx::Recall::Pair => RecallKind::Pair,

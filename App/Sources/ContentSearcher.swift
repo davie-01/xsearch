@@ -51,6 +51,8 @@ final class ContentSearcher: @unchecked Sendable {
     private var openedPath: String?
     /// Where the active index instance lives (set once the indexer has started).
     var indexPath: (@Sendable () -> String?)?
+    /// Another searcher whose reader to use: one reader per index, whichever window asks.
+    var indexSource: ContentSearcher?
     var mode: MatchMode = .loose
     /// Live scan and its preview follow the single-file limit in the settings.
     var maxFileBytes: UInt64 = 100 << 20
@@ -61,6 +63,7 @@ final class ContentSearcher: @unchecked Sendable {
 
     /// Opens (or reopens after an instance switch) the reader. nil until the indexer committed once.
     func openIndex() -> ContentIndex? {
+        if let indexSource { return indexSource.openIndex() }
         lock.lock()
         defer { lock.unlock() }
         guard let path = indexPath?() else { return nil }
@@ -124,7 +127,9 @@ final class ContentSearcher: @unchecked Sendable {
         try? index.reload()
         let search: ContentSearch
         do {
-            search = try index.search(query: q.expression, mode: mode, filters: SearchFilters(dirs: q.dirs, exts: q.exts, scopes: []))
+            search = try index.search(query: q.expression, mode: mode, filters: SearchFilters(dirs: q.dirs, exts: q.exts, scopes: [],
+                                                                                            sizeRange: q.size.map { [$0.lowerBound, $0.upperBound] },
+                                                                                            mtimeRange: q.modified.map { [$0.lowerBound, $0.upperBound] }))
         } catch EngineError.Query(let message) {
             // Engine messages in Chinese are already user-facing (regex needs a scope…).
             out.error = message.unicodeScalars.contains { $0.value >= 0x4E00 } ? message : "查询无法解析：\(message)"
@@ -156,8 +161,7 @@ final class ContentSearcher: @unchecked Sendable {
                 send(out, generation: gen, to: deliver)
                 break
             }
-            // size: / dm: are checked here, after verification.
-            let hits = q.size == nil && q.modified == nil ? b.hits : b.hits.filter { q.allows(size: $0.size, mtime: $0.mtime) }
+            let hits = b.hits
             let kept = hits.prefix(Self.resultCap - shown)
             shown += kept.count
             out.hits = Array(kept)
@@ -256,8 +260,13 @@ final class ContentSearcher: @unchecked Sendable {
                  deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
         let mode = mode ?? self.mode
         previewQueue.async { [weak self] in
-            guard let index = self?.openIndex(),
-                  let p = try? index.preview(fileId: fileId, query: expression, mode: mode, memberStart: member.isEmpty ? nil : memberStart, maxHits: Self.previewHitCap) else {
+            guard let index = self?.openIndex() else {
+                DispatchQueue.main.async { deliver(nil) }
+                return
+            }
+            // A hit may come from a search newer than this reader's last reload.
+            try? index.reload()
+            guard let p = try? index.preview(fileId: fileId, query: expression, mode: mode, memberStart: member.isEmpty ? nil : memberStart, maxHits: Self.previewHitCap) else {
                 DispatchQueue.main.async { deliver(nil) }
                 return
             }

@@ -21,6 +21,8 @@ public final class NameService: @unchecked Sendable {
         public var memoryBytes: Int
         /// Journal entries not yet applied.
         public var backlog: Int
+        /// false: file changes are not being followed (FSEvents could not start); retried.
+        public var watching = true
     }
 
     public let directory: URL
@@ -30,6 +32,10 @@ public final class NameService: @unchecked Sendable {
     private let state = OSAllocatedUnfairLock(initialState: State())
     private var catalog: FileCatalog?
     private var watcher: FSEventsWatcher?
+    private var watcherRetry: DispatchWorkItem?
+    var watcherDelay: TimeInterval = 5
+    /// Test hook: this many watcher starts fail.
+    var failWatcherStarts = 0
     private var scope = NameScope.default
     /// nil: content indexing disabled.
     private var contentScope: ContentScope?
@@ -55,7 +61,13 @@ public final class NameService: @unchecked Sendable {
         var lastMergeEnd = Date.distantPast
         var lastMergeDuration: TimeInterval = 0
         var status = Status(phase: .starting, count: 0, memoryBytes: 0, backlog: 0)
+        var catalogId: String?
     }
+
+    /// Called on an internal queue when content tasks wait for the indexer.
+    public var onContentTasks: (@Sendable () -> Void)?
+    /// Identity of the open catalog: file ids mean something only within it.
+    public var catalogId: String? { state.withLock { $0.catalogId } }
 
     /// Called on an internal queue whenever the status changes.
     public var onStatus: (@Sendable (Status) -> Void)?
@@ -83,29 +95,29 @@ public final class NameService: @unchecked Sendable {
     }
 
     public func setScope(_ scope: NameScope) {
-        setScopes(scope, content: contentScope)
+        queue.async { [self] in setScopes(scope, content: contentScope) }
     }
 
     /// Changes the content scope: one reconcile re-decides which files are content-indexed and
     /// writes index / delete tasks for the difference (§6.2).
     public func setContentScope(_ content: ContentScope?) {
-        setScopes(scope, content: content)
+        queue.async { [self] in setScopes(scope, content: content) }
     }
 
+    /// On `queue`: the other half of the settings is read there, so two quick changes in a row
+    /// both take effect.
     private func setScopes(_ scope: NameScope, content: ContentScope?) {
-        queue.async { [self] in
-            do {
-                guard let catalog else { return }
-                self.scope = scope
-                contentScope = content
-                context = makeContext(scope)
-                saveCursor()
-                try catalog.append([(.scope, "", 0)], lastEventId: nil)
-                try catalog.setMeta("fingerprint", fingerprint())
-                restartWatcher(since: try catalog.meta("fsevents_last_id").flatMap(UInt64.init) ?? FSEventsWatcher.currentEventId)
-                process()
-            } catch { fail(error) }
-        }
+        do {
+            guard let catalog else { return }
+            self.scope = scope
+            contentScope = content
+            context = makeContext(scope)
+            saveCursor()
+            try catalog.append([(.scope, "", 0)], lastEventId: nil)
+            try catalog.setMeta("fingerprint", fingerprint())
+            restartWatcher(since: try catalog.meta("fsevents_last_id").flatMap(UInt64.init) ?? FSEventsWatcher.currentEventId)
+            process()
+        } catch { fail(error) }
     }
 
     /// Stops watching, folds the overlay and writes the snapshot. Safe to call more than once.
@@ -305,6 +317,7 @@ public final class NameService: @unchecked Sendable {
         self.catalog = catalog
         if try catalog.meta("catalog_id") == nil { try catalog.setMeta("catalog_id", UUID().uuidString) }
         let catalogId = try catalog.meta("catalog_id")!
+        state.withLock { $0.catalogId = catalogId }
         let applied = try catalog.consumer(FileCatalog.nameConsumer)
 
         // Base: the snapshot when it belongs to this catalog and name-key version, otherwise
@@ -355,14 +368,31 @@ public final class NameService: @unchecked Sendable {
 
     private func restartWatcher(since: UInt64) {
         watcher?.stop()
-        guard let roots = context?.roots, !roots.isEmpty else { watcher = nil; return }
+        watcherRetry?.cancel()
+        watcherRetry = nil
+        guard let roots = context?.roots, !roots.isEmpty else {
+            watcher = nil
+            updateStatus { $0.watching = true }
+            return
+        }
         watcher = FSEventsWatcher(paths: roots, since: since, latency: 0.3, queue: queue) { [weak self] events in
             self?.received(events)
         }
-        if watcher?.start() != true {
-            // Without a stream we cannot keep up; reconcile on next start instead of trusting the cursor.
-            try? catalog?.setMeta("fsevents_uuids", "")
+        if failWatcherStarts == 0, watcher?.start() == true {
+            // Back after a failure: what happened meanwhile is in the history from `since`.
+            watcherDelay = 5
+            updateStatus { $0.watching = true }
+            return
         }
+        failWatcherStarts = max(0, failWatcherStarts - 1)
+        watcher = nil
+        // Without a stream we cannot keep up; reconcile on next start instead of trusting the cursor.
+        try? catalog?.setMeta("fsevents_uuids", "")
+        updateStatus { $0.watching = false }
+        let retry = DispatchWorkItem { [weak self] in self?.restartWatcher(since: since) }
+        watcherRetry = retry
+        queue.asyncAfter(deadline: .now() + watcherDelay, execute: retry)
+        watcherDelay = min(watcherDelay * 2, 300)
     }
 
     // MARK: Events
@@ -453,6 +483,8 @@ public final class NameService: @unchecked Sendable {
             }
             updateStatus { $0.phase = .ready; $0.backlog = 0 }
             if persistedSeq < 0 { try persist(force: true) }
+            let waiting = try catalog.db.prepare("SELECT 1 FROM content_tasks WHERE state = 0 LIMIT 1")
+            if try waiting.first({ _ in true }) == true { onContentTasks?() }
         } catch { fail(error) }
     }
 

@@ -15,6 +15,7 @@ public final class UsageStore: @unchecked Sendable {
 
     private let lock = OSAllocatedUnfairLock()
     private let db: SQLite
+    private var boundCatalog: String?
 
     public init(directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -27,10 +28,30 @@ public final class UsageStore: @unchecked Sendable {
         // Personal data is never discarded: a file from a newer build is used as it is (its
         // tables only grow), not migrated backwards.
         do { try Migrations.migrate(db, file: "user.sqlite", steps: Self.migrations) } catch is Migrations.NewerFormat {}
+        try db.exec("CREATE TABLE IF NOT EXISTS user_meta(key TEXT PRIMARY KEY, value TEXT)")
     }
 
-    /// Version 1: opens + favorites (M3).
-    static let migrations: [@Sendable (SQLite) throws -> Void] = [{ _ in }]
+    /// Version 1: opens + favorites (M3). Version 2: which catalog the stored file ids belong to.
+    static let migrations: [@Sendable (SQLite) throws -> Void] = [
+        { _ in },
+        { db in try db.exec("CREATE TABLE IF NOT EXISTS user_meta(key TEXT PRIMARY KEY, value TEXT)") },
+    ]
+
+    /// File ids are catalog row ids: after a rebuild the same number is another file. Paths stay;
+    /// ids from another catalog are forgotten, so nothing follows a stranger's id.
+    public func bindCatalog(_ id: String) {
+        lock.withLock {
+            guard id != boundCatalog else { return }
+            let stored = try? db.prepare("SELECT value FROM user_meta WHERE key = 'catalog_id'").first { $0.text(0) }
+            if stored != id {
+                _ = try? db.transaction {
+                    try db.exec("UPDATE opens SET file_id = NULL; UPDATE favorites SET file_id = NULL;")
+                    try db.prepare("INSERT OR REPLACE INTO user_meta(key, value) VALUES('catalog_id', ?)").bind(id).run()
+                }
+            }
+            boundCatalog = id
+        }
+    }
 
     public struct Favorite: Sendable, Equatable {
         public var path: String

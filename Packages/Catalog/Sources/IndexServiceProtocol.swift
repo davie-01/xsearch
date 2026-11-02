@@ -11,6 +11,8 @@ import Foundation
     func setMaxFileBytes(_ bytes: UInt64)
     /// JSON `IndexServiceSnapshot`.
     func snapshot(reply: @escaping (Data) -> Void)
+    /// The catalog queued new tasks.
+    func wake()
     func rebuildContentIndex(reply: @escaping (String?) -> Void)
     /// Stops the indexer (writer closed, workers stopped); the app calls this before quitting.
     func stop(reply: @escaping () -> Void)

@@ -43,6 +43,9 @@ pub struct SearchRequest {
     pub exts: Vec<String>,
     /// Content scope ids; OR-ed. Empty = all scopes.
     pub scopes: Vec<u64>,
+    /// Inclusive ranges (`size:`, `dm:`), applied to candidates.
+    pub size: Option<(i64, i64)>,
+    pub mtime: Option<(i64, i64)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,7 +107,8 @@ impl ContentReader {
         let f = Fields::of(&index.schema())?;
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            // No file watcher (it polls meta.json twice a second): callers reload before a query.
+            .reload_policy(ReloadPolicy::Manual)
             // M0-B 5.3: a doc store block cache makes repeated reads of hot documents cheap.
             .doc_store_cache_num_blocks(100)
             .try_into()?;
@@ -126,6 +130,12 @@ impl ContentReader {
 
     pub fn index(&self) -> &Index {
         &self.index
+    }
+
+    /// How `expr` would find its candidates, without collecting them: a query that must be
+    /// refused for scanning everything is refused before any work.
+    pub fn recall_of(&self, expr: &Expr) -> Recall {
+        SearchSession::recall_of(self.f, expr)
     }
 
     pub fn session(&self, req: SearchRequest) -> Result<SearchSession> {
@@ -429,19 +439,25 @@ struct MemberCursor {
 }
 
 impl SearchSession {
+    fn recall_of(f: Fields, expr: &Expr) -> Recall {
+        let mut planner = Planner { f, used_pair: false, dropped_short: false };
+        let query = planner.plan(expr);
+        match (&query, planner.dropped_short, planner.used_pair) {
+            (None, _, _) => Recall::Scan,
+            (Some(_), true, _) => Recall::LongTermsThenVerify,
+            (Some(_), false, true) => Recall::Pair,
+            (Some(_), false, false) => Recall::Trigram,
+        }
+    }
+
     fn new(searcher: Searcher, f: Fields, req: SearchRequest) -> Result<Self> {
+        let recall = Self::recall_of(f, &req.expr);
         let mut planner = Planner {
             f,
             used_pair: false,
             dropped_short: false,
         };
         let recall_query = planner.plan(&req.expr);
-        let recall = match (&recall_query, planner.dropped_short, planner.used_pair) {
-            (None, _, _) => Recall::Scan,
-            (Some(_), true, _) => Recall::LongTermsThenVerify,
-            (Some(_), false, true) => Recall::Pair,
-            (Some(_), false, false) => Recall::Trigram,
-        };
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(
             Occur::Must,
             Box::new(TermQuery::new(
@@ -497,14 +513,18 @@ impl SearchSession {
         }
         let addrs = searcher.search(&BooleanQuery::new(clauses), &DocSetCollector)?;
         // Newest first: recent files are the likeliest answers and reach the first screen first.
+        // One pass over the candidates, which also applies size: and dm: before any text is read.
+        let mut columns = Vec::with_capacity(searcher.segment_readers().len());
+        for seg in searcher.segment_readers() {
+            columns.push((seg.fast_fields().i64("mtime")?, seg.fast_fields().i64("size")?));
+        }
         let mut keyed: Vec<(i64, DocAddress)> = Vec::with_capacity(addrs.len());
-        for seg_ord in 0..searcher.segment_readers().len() {
-            let col = searcher
-                .segment_reader(seg_ord as u32)
-                .fast_fields()
-                .i64("mtime")?;
-            for a in addrs.iter().filter(|a| a.segment_ord as usize == seg_ord) {
-                keyed.push((col.first(a.doc_id).unwrap_or(0), *a));
+        for a in &addrs {
+            let (mtimes, sizes) = &columns[a.segment_ord as usize];
+            let mtime = mtimes.first(a.doc_id).unwrap_or(0);
+            let within = |range: &Option<(i64, i64)>, v: i64| range.is_none_or(|(lo, hi)| lo <= v && v <= hi);
+            if within(&req.mtime, mtime) && within(&req.size, sizes.first(a.doc_id).unwrap_or(0)) {
+                keyed.push((mtime, *a));
             }
         }
         keyed.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));

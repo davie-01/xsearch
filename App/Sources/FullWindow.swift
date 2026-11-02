@@ -74,7 +74,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     init(session: SearchSession, usage: UsageStore?) {
         self.session = session
         self.usage = usage
-        content.indexPath = session.content.indexPath
+        content.indexSource = session.content
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1360, height: 830),
                                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
         window.titlebarAppearsTransparent = true
@@ -286,7 +286,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
     /// Opens with the launcher's input and mode (UI-SPEC §6.2: the query carries over).
     func show(text: String, mode: Preferences.Mode) {
         // The index instance can change (content rebuild): follow the launcher's searcher.
-        content.indexPath = session.content.indexPath
+        content.indexSource = session.content
         matchPopup.selectItem(at: ["loose", "caseSensitive", "strict"].firstIndex(of: Preferences.shared.matchMode) ?? 0)
         field.stringValue = text
         if mode != self.mode {
@@ -506,7 +506,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         // Archive members are unpacked and opened one by one; ⌘↵ shows the archive.
         if !reveal && selectedRows.contains(where: \.isMember) {
             for r in selectedRows {
-                if let h = r.hit, h.isMember { _ = MemberOpener.open(h) } else { NSWorkspace.shared.open(URL(fileURLWithPath: r.path)) }
+                if let h = r.hit, h.isMember { MemberOpener.open(h) } else { NSWorkspace.shared.open(URL(fileURLWithPath: r.path)) }
             }
             return
         }

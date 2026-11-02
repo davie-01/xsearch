@@ -27,6 +27,8 @@ public final class ContentIndexer: @unchecked Sendable {
         public var running: Bool
         /// The last cycle failed; it is retried automatically.
         public var lastError: String?
+        /// Active instance, published together with the figures.
+        public var instanceId = ""
 
         public init(pending: Int = 0, failed: Int = 0, indexed: Int = 0, committedBatches: UInt64 = 0, running: Bool = false, lastError: String? = nil) {
             self.pending = pending
@@ -68,7 +70,10 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Committed op_seq per file (rebuilt from the index on open and after rollbacks).
     private var committedSeq: [UInt64: UInt64] = [:]
     private var lastBatch: UInt64 = 0
-    public private(set) var instanceId = ""
+    public private(set) var instanceId: String {
+        get { status.instanceId }
+        set { state.withLock { $0.instanceId = newValue } }
+    }
 
     // Tunables (tests shorten them).
     var leaseSeconds: TimeInterval = 600
@@ -90,12 +95,17 @@ public final class ContentIndexer: @unchecked Sendable {
     private let lock = NSLock()
     private var lastFullCount = Date.distantPast
 
+    /// nil when the file cannot be read to its end, or `cancelled` says stop (no partial digest).
     static func digest(_ path: String, cancelled: () -> Bool = { false }) -> String? {
         guard let h = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? h.close() }
         var sha = SHA256()
-        while let chunk = try? h.read(upToCount: 1 << 20), !chunk.isEmpty {
+        while true {
             if cancelled() { return nil }
+            let read: Data?
+            do { read = try h.read(upToCount: 1 << 20) } catch { return nil }
+            // nil is the end of the file.
+            guard let chunk = read, !chunk.isEmpty else { break }
             sha.update(data: chunk)
         }
         return sha.finalize().map { String(format: "%02x", $0) }.joined()
@@ -114,7 +124,9 @@ public final class ContentIndexer: @unchecked Sendable {
     private var rebuildId: String?
 
     /// Directory readers open: the active instance (also during a rebuild).
-    public var indexURL: URL { directory.appendingPathComponent("content").appendingPathComponent(instanceId) }
+    public var indexURL: URL { indexURL(of: status) }
+    /// For a status already read, so the figures and the path belong together.
+    public func indexURL(of status: Status) -> URL { directory.appendingPathComponent("content").appendingPathComponent(status.instanceId) }
     /// Directory the writer uses: the rebuild instance while one is running.
     var writeURL: URL { directory.appendingPathComponent("content").appendingPathComponent(rebuildId ?? instanceId) }
     public var isRebuilding: Bool { queue.sync { rebuildId != nil } }
@@ -144,8 +156,8 @@ public final class ContentIndexer: @unchecked Sendable {
             stopped = false
             state.withLock { $0.running = true }
             let t = DispatchSource.makeTimerSource(queue: queue)
-            t.schedule(deadline: .now() + 0.2, repeating: 0.5)
-            t.setEventHandler { [weak self] in self?.cycle() }
+            t.schedule(deadline: .now() + 0.2)
+            t.setEventHandler { [weak self] in self?.cycleAndReschedule() }
             t.resume()
             timer = t
         }
@@ -163,6 +175,31 @@ public final class ContentIndexer: @unchecked Sendable {
             workers.forEach { $0.stop() }
             state.withLock { $0.running = false }
         }
+    }
+
+    /// New tasks were written (the catalog's owner calls this): look now, not at the next timer.
+    public func wake() {
+        queue.async { [weak self] in self?.cycleAndReschedule() }
+    }
+
+    private func cycleAndReschedule() {
+        cycle()
+        scheduleNextCycle()
+    }
+
+    /// Idle stays idle: the timer fires for the earliest retry or lease expiry, and otherwise
+    /// only as a fallback in case a wake-up was lost.
+    private func scheduleNextCycle() {
+        guard let timer, !stopped else { return }
+        var delay = Self.fallbackInterval
+        if needsRecovery {
+            delay = max(0.05, errorBackoffUntil.timeIntervalSinceNow)
+        } else if let catalog,
+                  let s = try? catalog.db.prepare("SELECT MIN(CASE state WHEN 0 THEN not_before ELSE lease_until END) FROM content_tasks WHERE state IN (0, 1)"),
+                  let next = (try? s.first { s in s.isNull(0) ? nil : s.double(0) }) ?? nil {
+            delay = min(delay, max(0.2, next - Date().timeIntervalSince1970))
+        }
+        timer.schedule(deadline: .now() + delay, leeway: .milliseconds(Int(max(50, delay * 100))))
     }
 
     /// Runs cycles until no task is ready (tests, diagnostics).
@@ -262,6 +299,8 @@ public final class ContentIndexer: @unchecked Sendable {
         Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
     }
 
+    static let fallbackInterval: TimeInterval = 30
+
     /// Single-file limit from the settings. Before `start` it is simply used; later the files it
     /// affects are queued (on the indexer's queue: a running cycle may take a while).
     public func setMaxFileBytes(_ bytes: UInt64) {
@@ -271,6 +310,7 @@ public final class ContentIndexer: @unchecked Sendable {
             do {
                 try applyLimits()
                 try refreshCounts()
+                scheduleNextCycle()
             } catch {
                 state.withLock { $0.lastError = String(describing: error) }
             }
@@ -357,6 +397,7 @@ public final class ContentIndexer: @unchecked Sendable {
                 throw error
             }
             try refreshCounts()
+            scheduleNextCycle()
         }
     }
 
@@ -552,16 +593,23 @@ public final class ContentIndexer: @unchecked Sendable {
         let type = ContentType.of(name: p.info.name)
         // §10 cache key: strong digest + extractor version + config. Same key → reuse the stored
         // extraction (moves, renames, copies) instead of parsing again.
-        let key = Self.digest(p.path, cancelled: { self.stopped }).map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes):\(limits.maxUnpackedBytes)" } ?? ""
+        // Not for a file over the limit (the extractor refuses or truncates it after a moment; an
+        // archive's limit is per member), and no longer than its extraction may take.
+        let timeout = baseTimeout + Double(p.version.size) / Double(1 << 20) * 2
+        let hashable = type == .archive || UInt64(max(0, p.version.size)) <= limits.maxFileBytes
+        let hashDeadline = Date().addingTimeInterval(timeout)
+        let digest = hashable ? Self.digest(p.path, cancelled: { self.stopped || Date() > hashDeadline }) : nil
+        let key = digest.map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes):\(limits.maxUnpackedBytes)" } ?? ""
         if stopped { return interrupted }
         if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
+            // The digest describes what was read: the file must not have changed since.
+            guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
             lock.withLock { cacheHits += 1 }
             return .put(ContentInput(fileId: UInt64(p.task.fileId), opSeq: UInt64(p.task.opSeq), revision: UInt64(bitPattern: p.version.mtimeNs),
                                      extractorVer: type.map(Extractor.version) ?? 0, scopeIds: [1], dir: dir, name: p.info.name,
                                      size: p.version.size, mtime: p.version.mtimeNs / 1_000_000_000, text: cached.text,
                                      anchorsJson: cached.anchorsJson, pagesJson: cached.pagesJson, state: cached.state, extractKey: key))
         }
-        let timeout = baseTimeout + Double(p.version.size) / Double(1 << 20) * 2
         let outcome = worker.extract(path: p.path, limits: limits, timeout: timeout, fault: workerFault?(p.path))
         if outcome == .cancelled { return interrupted }
         afterExtract?(p.path)

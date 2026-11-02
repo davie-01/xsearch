@@ -10,6 +10,9 @@ final class IndexServiceClient {
     private let dataDirectory: URL
     private let worker: URL
     private var connection: NSXPCConnection?
+    private var generation = 0
+    private var stopping = false
+    private var reconnectDelay: TimeInterval = 1
     private var local: ContentIndexer?
     /// Latest snapshot; read from any thread through `indexPath`.
     private(set) var snapshot = IndexServiceSnapshot(status: ContentIndexer.Status(), indexPath: nil)
@@ -52,14 +55,45 @@ final class IndexServiceClient {
             refresh()
             return
         }
+        stopping = false
+        connect()
+    }
+
+    /// One connection per generation: callbacks of a replaced connection do nothing.
+    private func connect() {
+        generation += 1
+        let gen = generation
         let c = NSXPCConnection(serviceName: IndexServiceInfo.serviceName)
         c.remoteObjectInterface = NSXPCInterface(with: IndexServiceProtocol.self)
         // A crash or kill: launchd starts the service again on the next message.
-        c.interruptionHandler = { [weak self] in Task { @MainActor in self?.startRemote() } }
-        c.invalidationHandler = { [weak self] in Task { @MainActor in self?.connection = nil } }
+        c.interruptionHandler = { [weak self] in
+            Task { @MainActor in
+                guard let self, gen == self.generation else { return }
+                self.startRemote()
+            }
+        }
+        c.invalidationHandler = { [weak self] in
+            Task { @MainActor in
+                guard let self, gen == self.generation else { return }
+                self.connection = nil
+                self.reconnectLater()
+            }
+        }
         c.resume()
         connection = c
         startRemote()
+    }
+
+    /// The connection is gone for good (service could not be launched…): a new one, with growing
+    /// pauses so a broken install does not spin. Reset once a start succeeds.
+    private func reconnectLater() {
+        guard !stopping else { return }
+        let delay = reconnectDelay
+        reconnectDelay = min(reconnectDelay * 2, 60)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.stopping, self.connection == nil else { return }
+            self.connect()
+        }
     }
 
     private var proxy: IndexServiceProtocol? {
@@ -84,6 +118,7 @@ final class IndexServiceClient {
                     }
                 } else {
                     self.startAttempts = 0
+                    self.reconnectDelay = 1
                 }
                 self.refresh()
             }
@@ -109,6 +144,11 @@ final class IndexServiceClient {
         }
     }
 
+    /// The catalog queued tasks.
+    func wake() {
+        if let local { local.wake() } else { proxy?.wake() }
+    }
+
     func setMaxFileBytes(_ bytes: UInt64) {
         guard bytes != maxFileBytes else { return }
         maxFileBytes = bytes
@@ -129,6 +169,8 @@ final class IndexServiceClient {
     /// quitting never hangs; the service stops by itself when the connection goes away, and
     /// the next start recovers anything left unfinished.
     func stop() {
+        stopping = true
+        generation += 1
         if let local { local.stop(); self.local = nil; return }
         guard let c = connection else { return }
         let done = DispatchSemaphore(value: 0)
