@@ -14,7 +14,10 @@ app="$PWD/target/XSearch.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp App/Resources/Info.plist "$app/Contents/Info.plist"
-cp App/Resources/XSearch.icns App/Resources/XSearchTemplate-18.png App/Resources/XSearchTemplate-18@2x.png "$app/Contents/Resources/"
+cp App/Resources/XSearchTemplate-18.png App/Resources/XSearchTemplate-18@2x.png "$app/Contents/Resources/"
+# An Icon Composer document: the only source format that keeps the dark variant on macOS.
+xcrun actool App/Resources/AppIcon.icon --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 26.0 \
+    --app-icon AppIcon --output-partial-info-plist "$(mktemp)" > /dev/null
 # Auto-update: the public EdDSA key always; the feed only when XS_FEED_URL is given (e.g.
 # https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml). No feed = updates off.
 /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $(cat App/Resources/sparkle-public-key.txt)" "$app/Contents/Info.plist"
