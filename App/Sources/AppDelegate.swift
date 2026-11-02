@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func wireLauncher() {
         launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
         launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
-        launcher.onRead = { [weak self] hit, expression, n in self?.reader.show(hit, expression: expression, startAt: n) }
+        launcher.onRead = { [weak self] hit, expression, n, live in self?.reader.show(hit, expression: expression, live: live, startAt: n) }
         launcher.onExpand = { [weak self] text, mode in self?.full.show(text: text, mode: mode) }
         readerWindow?.close()
         readerWindow = nil
@@ -141,6 +141,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let ix = IndexServiceClient(dataDirectory: dataDirectory, worker: worker)
         ix.onError = { [weak self] message in self?.contentStatusItem.title = "内容索引出错：\(message.prefix(60))" }
         ix.onUpdate = { [weak self] in self?.showContentStatus() }
+        ix.maxFileBytes = contentScope.maxFileBytes
+        session.content.maxFileBytes = contentScope.maxFileBytes
         ix.start()
         indexer = ix
         session.content.indexPath = { [ix] in ix.indexPath }
@@ -332,6 +334,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applyContentScope(_ scope: ContentScope) {
         Preferences.shared.contentScope = scope
         names.setContentScope(scope)
+        indexer?.setMaxFileBytes(scope.maxFileBytes)
+        session.content.maxFileBytes = scope.maxFileBytes
     }
 
     var currentContentScope: ContentScope { contentScope }

@@ -271,13 +271,14 @@ final class Reconciler {
                     try catalog.update(dir, seq: seq)
                     try wrote(.upsert(FileCatalog.record(dir)))
                 }
-            case .success(let entries):
+            case .success(let listing):
+                let entries = listing.entries
                 if dir.flags.contains(.noAccess) {
                     dir.flags.remove(.noAccess)
                     try catalog.update(dir, seq: seq)
                     try wrote(.upsert(FileCatalog.record(dir)))
                 }
-                if job.fresh { try insertAll(entries, into: dir, path: job.path) } else { try reconcile(entries, dir: dir, job: job) }
+                if job.fresh { try insertAll(entries, into: dir, path: job.path) } else { try reconcile(entries, dir: dir, job: job, incomplete: listing.incomplete) }
             }
         }
     }
@@ -294,7 +295,7 @@ final class Reconciler {
         }
     }
 
-    private func reconcile(_ entries: [DiskEntry], dir: Row, job: ParallelLister.Job) throws {
+    private func reconcile(_ entries: [DiskEntry], dir: Row, job: ParallelLister.Job, incomplete: Bool) throws {
         var existing = Dictionary(try catalog.children(of: dir.id).map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
         for e in entries {
             let p = childPath(job.path, e.name)
@@ -330,6 +331,8 @@ final class Reconciler {
                 for c in try catalog.children(of: r.id) { vanished[c.id] = c }
             }
         }
+        // An entry the kernel could not report is not a deleted one.
+        guard !incomplete else { return }
         for r in existing.values {
             vanished[r.id] = r
             vanishedIn[r.id] = job.path

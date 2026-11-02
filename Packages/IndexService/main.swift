@@ -9,12 +9,17 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
     private var indexer: ContentIndexer?
     private var directory: String?
 
-    func start(dataDirectory: String, workerPath: String, workers: Int, reply: @escaping (String?) -> Void) {
+    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, reply: @escaping (String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
-        if indexer != nil && directory == dataDirectory { reply(nil); return }
+        if let indexer, directory == dataDirectory {
+            indexer.setMaxFileBytes(maxFileBytes)
+            reply(nil)
+            return
+        }
         indexer?.stop()
         let ix = ContentIndexer(directory: URL(fileURLWithPath: dataDirectory), workerExecutable: URL(fileURLWithPath: workerPath), workers: workers)
+        ix.setMaxFileBytes(maxFileBytes)
         do {
             try ix.start()
             indexer = ix
@@ -40,6 +45,13 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         let ix = indexer
         lock.unlock()
         do { try ix?.rebuildContentIndex(); reply(nil) } catch { reply(String(describing: error)) }
+    }
+
+    func setMaxFileBytes(_ bytes: UInt64) {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        ix?.setMaxFileBytes(bytes)
     }
 
     func stop(reply: @escaping () -> Void) {

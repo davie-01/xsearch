@@ -17,6 +17,8 @@ final class IndexServiceClient {
     nonisolated(unsafe) private var cachedPath: String?
     var onError: ((String) -> Void)?
     var onUpdate: (() -> Void)?
+    /// Single-file limit from the settings; set before `start`.
+    var maxFileBytes: UInt64 = 100 << 20
 
     var status: ContentIndexer.Status? { snapshot.status.running ? snapshot.status : nil }
 
@@ -45,6 +47,7 @@ final class IndexServiceClient {
     func start() {
         guard Self.serviceBundled && ProcessInfo.processInfo.environment["XS_INPROCESS_INDEX"] != "1" else {
             let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: 2)
+            ix.setMaxFileBytes(maxFileBytes)
             do { try ix.start(); local = ix } catch { onError?(String(describing: error)) }
             refresh()
             return
@@ -70,7 +73,7 @@ final class IndexServiceClient {
     /// A start can fail transiently (e.g. while the catalog is being rebuilt after a
     /// downgrade): retried every 3 s, up to 5 times.
     private func startRemote() {
-        proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2) { [weak self] error in
+        proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2, maxFileBytes: maxFileBytes) { [weak self] error in
             Task { @MainActor in
                 guard let self else { return }
                 if let error {
@@ -104,6 +107,12 @@ final class IndexServiceClient {
                 self.onUpdate?()
             }
         }
+    }
+
+    func setMaxFileBytes(_ bytes: UInt64) {
+        guard bytes != maxFileBytes else { return }
+        maxFileBytes = bytes
+        if let local { local.setMaxFileBytes(bytes) } else { proxy?.setMaxFileBytes(bytes) }
     }
 
     func rebuildContentIndex() {

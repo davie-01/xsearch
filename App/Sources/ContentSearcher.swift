@@ -13,6 +13,8 @@ struct ContentOutput: @unchecked Sendable {
     var verified: UInt64
     var candidates: UInt64
     var done: Bool
+    /// Stopped at the result limit: more matches may exist.
+    var capped = false
     var error: String?
     /// Live scan batch (§8.7): files without a content index, read directly.
     var live = false
@@ -50,6 +52,8 @@ final class ContentSearcher: @unchecked Sendable {
     /// Where the active index instance lives (set once the indexer has started).
     var indexPath: (@Sendable () -> String?)?
     var mode: MatchMode = .loose
+    /// Live scan and its preview follow the single-file limit in the settings.
+    var maxFileBytes: UInt64 = 100 << 20
 
     static let resultCap = 1000
     /// A one-letter query can hit millions of times; only this many are mapped and listed.
@@ -85,7 +89,7 @@ final class ContentSearcher: @unchecked Sendable {
         lock.unlock()
         let empty = ContentOutput(text: text, query: q, hits: [], append: false, recall: nil, verified: 0, candidates: 0, done: true, error: nil)
         if q.isEmpty {
-            DispatchQueue.main.async { deliver(empty) }
+            send(empty, generation: gen, to: deliver)
             return
         }
         let work = DispatchWorkItem { [weak self] in self?.run(q, text: text, generation: gen, deliver: deliver) }
@@ -101,12 +105,20 @@ final class ContentSearcher: @unchecked Sendable {
         return gen == generation
     }
 
+    /// Every delivery of a query goes through here: a replaced query delivers nothing.
+    private func send(_ out: ContentOutput, generation gen: Int, to deliver: @escaping @MainActor @Sendable (ContentOutput) -> Void) {
+        DispatchQueue.main.async { [weak self] in
+            guard self?.isCurrent(gen) == true else { return }
+            deliver(out)
+        }
+    }
+
     private func run(_ q: ContentQuery, text: String, generation gen: Int, deliver: @escaping @MainActor @Sendable (ContentOutput) -> Void) {
         guard isCurrent(gen) else { return }
         var out = ContentOutput(text: text, query: q, hits: [], append: false, recall: nil, verified: 0, candidates: 0, done: true, error: nil)
         guard let index = openIndex() else {
             out.error = "内容索引还没有建立完成"
-            DispatchQueue.main.async { deliver(out) }
+            send(out, generation: gen, to: deliver)
             return
         }
         try? index.reload()
@@ -116,11 +128,11 @@ final class ContentSearcher: @unchecked Sendable {
         } catch EngineError.Query(let message) {
             // Engine messages in Chinese are already user-facing (regex needs a scope…).
             out.error = message.unicodeScalars.contains { $0.value >= 0x4E00 } ? message : "查询无法解析：\(message)"
-            DispatchQueue.main.async { deliver(out) }
+            send(out, generation: gen, to: deliver)
             return
         } catch {
             out.error = "\(error)"
-            DispatchQueue.main.async { deliver(out) }
+            send(out, generation: gen, to: deliver)
             return
         }
         lock.lock()
@@ -132,20 +144,30 @@ final class ContentSearcher: @unchecked Sendable {
         var first = true
         while isCurrent(gen) {
             // First screen within ~60 ms; later batches are larger.
-            guard let b = try? search.next(budgetMs: first ? 60 : 120, maxHits: first ? 40 : 200) else { break }
+            let b: ContentBatch
+            do {
+                b = try search.next(budgetMs: first ? 60 : 120, maxHits: first ? 40 : 200)
+            } catch {
+                // A definite end, or the list would claim "still searching" for ever.
+                out.hits = []
+                out.append = !first
+                out.done = true
+                out.error = "搜索中断：\(error)"
+                send(out, generation: gen, to: deliver)
+                break
+            }
             // size: / dm: are checked here, after verification.
             let hits = q.size == nil && q.modified == nil ? b.hits : b.hits.filter { q.allows(size: $0.size, mtime: $0.mtime) }
-            shown += hits.count
-            out.hits = hits
+            let kept = hits.prefix(Self.resultCap - shown)
+            shown += kept.count
+            out.hits = Array(kept)
             out.append = !first
             out.verified = b.verified
             out.candidates = b.candidates
-            out.done = b.done || shown >= Self.resultCap
-            let batch = out
-            DispatchQueue.main.async { [weak self] in
-                guard self?.isCurrent(gen) == true else { return }
-                deliver(batch)
-            }
+            // Exactly at the limit with nothing left to check is simply the whole list.
+            out.capped = shown >= Self.resultCap && (!b.done || kept.count < hits.count)
+            out.done = b.done || out.capped
+            send(out, generation: gen, to: deliver)
             first = false
             if out.done { break }
         }
@@ -162,7 +184,7 @@ final class ContentSearcher: @unchecked Sendable {
         liveGeneration += 1
         let live = liveGeneration
         lock.unlock()
-        let mode = self.mode
+        let mode = self.mode, maxFileBytes = self.maxFileBytes
         liveQueue.async { [weak self] in
             guard let self else { return }
             func current() -> Bool {
@@ -172,7 +194,13 @@ final class ContentSearcher: @unchecked Sendable {
             }
             var out = ContentOutput(text: text, query: q, hits: [], append: true, recall: nil, verified: 0, candidates: 0, done: false, error: nil,
                                     live: true, scanned: 0, scanTotal: files.count)
-            guard let scan = try? LiveScan(query: q.expression, mode: mode, maxFileBytes: 100 << 20) else { return }
+            guard let scan = try? LiveScan(query: q.expression, mode: mode, maxFileBytes: maxFileBytes) else {
+                out.done = true
+                out.error = "这个查询无法实时扫描"
+                let batch = out
+                DispatchQueue.main.async { if current() { deliver(batch) } }
+                return
+            }
             var pending: [ContentHit] = []
             var last = Date()
             for (i, f) in files.enumerated() {
@@ -197,16 +225,16 @@ final class ContentSearcher: @unchecked Sendable {
             if files.isEmpty {
                 out.done = true
                 let batch = out
-                DispatchQueue.main.async { deliver(batch) }
+                DispatchQueue.main.async { if current() { deliver(batch) } }
             }
         }
     }
 
     /// Preview of a live hit: the file itself, decoded, with every hit.
     func livePreview(path: String, expression: String, deliver: @escaping @MainActor @Sendable (PreviewData?) -> Void) {
-        let mode = self.mode
+        let mode = self.mode, maxFileBytes = self.maxFileBytes
         previewQueue.async {
-            guard let scan = try? LiveScan(query: expression, mode: mode, maxFileBytes: 100 << 20), let t = scan.preview(path: path) else {
+            guard let scan = try? LiveScan(query: expression, mode: mode, maxFileBytes: maxFileBytes), let t = scan.preview(path: path) else {
                 DispatchQueue.main.async { deliver(nil) }
                 return
             }

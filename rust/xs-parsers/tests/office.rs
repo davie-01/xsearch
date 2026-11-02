@@ -166,3 +166,55 @@ fn binary_ppt_follows_persist_directory() {
     let kinds: Vec<_> = e.anchors.iter().map(|a| a.kind.clone()).collect();
     assert_eq!(kinds, vec![AnchorKind::Slide { slide: 1 }, AnchorKind::Part { name: "备注 1".into() }]);
 }
+
+#[test]
+fn pptx_follows_presentation_order_and_slide_relationships() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("t.pptx");
+    let a = r#"xmlns:p="p" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#;
+    let slide = |t: &str| format!(r#"<p:sld {a}><a:p><a:r><a:t>{t}</a:t></a:r></a:p></p:sld>"#);
+    let notes = |t: &str| format!(r#"<p:notes {a}><a:p><a:r><a:t>{t}</a:t></a:r></a:p></p:notes>"#);
+    let t = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let rel = |target: &str, kind: &str| format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{t}/{kind}" Target="{target}"/></Relationships>"#);
+    // Shown as slide3, slide1 (slide2 was deleted but its part stays); notes numbered the other way.
+    zip(&p, &[
+        ("ppt/presentation.xml", format!(r#"<p:presentation xmlns:p="p" xmlns:r="{t}"><p:sldIdLst><p:sldId id="258" r:id="rId8"/><p:sldId id="256" r:id="rId7"/></p:sldIdLst></p:presentation>"#)),
+        ("ppt/_rels/presentation.xml.rels", format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId7" Type="{t}/slide" Target="slides/slide1.xml"/><Relationship Id="rId8" Type="{t}/slide" Target="/ppt/slides/slide3.xml"/><Relationship Id="rId9" Type="{t}/theme" Target="theme/theme1.xml"/></Relationships>"#)),
+        ("ppt/slides/slide1.xml", slide("原第一页")),
+        ("ppt/slides/slide2.xml", slide("已删除的页")),
+        ("ppt/slides/slide3.xml", slide("原第三页")),
+        ("ppt/slides/_rels/slide1.xml.rels", rel("../notesSlides/notesSlide3.xml", "notesSlide")),
+        ("ppt/slides/_rels/slide3.xml.rels", rel("../notesSlides/notesSlide1.xml", "notesSlide")),
+        ("ppt/notesSlides/notesSlide1.xml", notes("第三页的备注")),
+        ("ppt/notesSlides/notesSlide3.xml", notes("第一页的备注")),
+    ]);
+    let e = office::pptx(&p, Limits::default()).unwrap();
+    assert_eq!(e.text, "原第三页\n第三页的备注\n原第一页\n第一页的备注\n");
+    let kinds: Vec<_> = e.anchors.iter().map(|a| a.kind.clone()).collect();
+    assert_eq!(kinds, vec![
+        AnchorKind::Slide { slide: 1 },
+        AnchorKind::Part { name: "备注 1".into() },
+        AnchorKind::Slide { slide: 2 },
+        AnchorKind::Part { name: "备注 2".into() },
+    ]);
+}
+
+#[test]
+fn unreadable_sheet_makes_the_workbook_partial() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("t.xlsx");
+    let ns = r#"xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
+    let t = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    zip(&p, &[
+        ("[Content_Types].xml", r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>"#.into()),
+        ("_rels/.rels", format!(r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{t}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#)),
+        ("xl/workbook.xml", format!(r#"<?xml version="1.0"?><workbook {ns}><sheets><sheet name="好" sheetId="1" r:id="rId1"/><sheet name="坏" sheetId="2" r:id="rId2"/></sheets></workbook>"#)),
+        ("xl/_rels/workbook.xml.rels", format!(r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{t}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{t}/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#)),
+        ("xl/worksheets/sheet1.xml", format!(r#"<?xml version="1.0"?><worksheet {ns}><sheetData><row r="1"><c r="A1"><v>7</v></c></row></sheetData></worksheet>"#)),
+        ("xl/worksheets/sheet2.xml", "<worksheet><sheetData><row".into()),
+    ]);
+    let e = office::spreadsheet(&p, Limits::default()).unwrap();
+    assert_eq!(e.text.trim(), "7");
+    assert_eq!(e.state, ExtractState::Partial);
+    assert!(e.warnings.iter().any(|w| w.contains("坏")), "{:?}", e.warnings);
+}

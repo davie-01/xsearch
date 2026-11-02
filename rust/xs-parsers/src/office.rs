@@ -6,8 +6,8 @@ use roxmltree::Node;
 use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 use xs_index::{Anchor, AnchorKind, ExtractState};
 
-pub const SHEET_EXTRACTOR_VERSION: u64 = 1;
-pub const PPTX_EXTRACTOR_VERSION: u64 = 1;
+pub const SHEET_EXTRACTOR_VERSION: u64 = 2;
+pub const PPTX_EXTRACTOR_VERSION: u64 = 2;
 pub const OFD_EXTRACTOR_VERSION: u64 = 2;
 
 pub(crate) struct Out {
@@ -86,7 +86,11 @@ fn sheets_into<RS: std::io::Read + std::io::Seek>(mut wb: calamine::Sheets<RS>, 
 fn sheets_into_impl<RS: std::io::Read + std::io::Seek>(wb: &mut calamine::Sheets<RS>, limits: Limits) -> Result<Extraction> {
     let mut out = Out::new(limits);
     'sheets: for name in wb.sheet_names().to_owned() {
-        let Ok(range) = wb.worksheet_range(&name) else { continue };
+        let Ok(range) = wb.worksheet_range(&name) else {
+            out.partial = true;
+            out.warnings.push(format!("工作表“{name}”无法读取"));
+            continue;
+        };
         let (r0, c0) = range.start().unwrap_or((0, 0));
         for (r, row) in range.rows().enumerate() {
             let cells: Vec<(usize, String)> = row
@@ -166,22 +170,27 @@ pub fn pptx(path: &Path, limits: Limits) -> Result<Extraction> {
         return ppt_binary(path, limits);
     }
     let mut zip = zip::ZipArchive::new(File::open(path)?)?;
-    let slides = numbered(&zip, "ppt/slides/slide");
+    let mut used = 0;
+    let slides = match slides_in_presentation_order(&mut zip, limits, &mut used) {
+        Some(ordered) if !ordered.is_empty() => ordered,
+        // No usable presentation part: file numbering is the best remaining guide.
+        _ => {
+            let notes = numbered(&zip, "ppt/notesSlides/notesSlide");
+            numbered(&zip, "ppt/slides/slide").into_iter().map(|(n, name)| (n, name, notes.get(&n).cloned())).collect()
+        }
+    };
     if slides.is_empty() {
         bail!("no slides");
     }
-    let notes = numbered(&zip, "ppt/notesSlides/notesSlide");
     let mut out = Out::new(limits);
-    let mut used = 0;
-    for (n, name) in slides {
+    for (n, name, note) in slides {
         out.anchor(AnchorKind::Slide { slide: n });
         for p in drawing_paragraphs(&zip_text(&mut zip, &name, limits, &mut used)?)? {
             out.push(&p);
             out.push("\n");
         }
-        // Notes numbering follows slides in typical files; good enough for search.
-        if let Some(note) = notes.get(&n) {
-            let paras = drawing_paragraphs(&zip_text(&mut zip, note, limits, &mut used)?)?;
+        if let Some(note) = note {
+            let paras = drawing_paragraphs(&zip_text(&mut zip, &note, limits, &mut used)?)?;
             // The first note paragraphs often repeat the slide number placeholder; keep text only.
             let paras: Vec<_> = paras.into_iter().filter(|p| p.trim().parse::<u32>().is_err()).collect();
             if !paras.is_empty() {
@@ -197,6 +206,48 @@ pub fn pptx(path: &Path, limits: Limits) -> Result<Extraction> {
         }
     }
     Ok(out.done("pptx"))
+}
+
+/// (position, slide part, notes part) as shown: `presentation.xml` lists the slides, and each
+/// slide's relationships name its notes. Part numbers say nothing once slides were reordered,
+/// copied or deleted. None when the parts are missing or malformed.
+fn slides_in_presentation_order(zip: &mut zip::ZipArchive<File>, limits: Limits, used: &mut u64) -> Option<Vec<(u32, String, Option<String>)>> {
+    let xml = zip_text(zip, "ppt/presentation.xml", limits, used).ok()?;
+    let doc = roxmltree::Document::parse(&xml).ok()?;
+    let rels = relationships(zip, "ppt/_rels/presentation.xml.rels", "ppt", limits, used)?;
+    let mut out = vec![];
+    for id in doc.descendants().filter(|n| local(n, "sldId")) {
+        // Its plain `id` attribute is a number; the relationship is the namespaced one.
+        let Some(rid) = id.attributes().find(|a| a.name() == "id" && a.namespace().is_some()) else { continue };
+        let Some((_, part)) = rels.iter().find(|(rel, _)| rel.0 == rid.value()) else { continue };
+        if zip.index_for_name(part).is_none() {
+            continue;
+        }
+        let (dir, file) = part.rsplit_once('/')?;
+        let note = relationships(zip, &format!("{dir}/_rels/{file}.rels"), dir, limits, used)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|((_, kind), target)| kind.ends_with("/notesSlide") && zip.index_for_name(target).is_some())
+            .map(|(_, target)| target);
+        out.push((out.len() as u32 + 1, part.clone(), note));
+    }
+    Some(out)
+}
+
+/// ((id, type), part name) of an OOXML relationships part; `base` is the source part's folder.
+fn relationships(zip: &mut zip::ZipArchive<File>, rels: &str, base: &str, limits: Limits, used: &mut u64) -> Option<Vec<((String, String), String)>> {
+    let xml = zip_text(zip, rels, limits, used).ok()?;
+    let doc = roxmltree::Document::parse(&xml).ok()?;
+    Some(
+        doc.descendants()
+            .filter(|n| local(n, "Relationship") && n.attribute("TargetMode") != Some("External"))
+            .filter_map(|n| {
+                let target = n.attribute("Target")?;
+                let part = if target.starts_with('/') { join("", target) } else { join(base, target) };
+                Some(((n.attribute("Id")?.to_owned(), n.attribute("Type")?.to_owned()), part))
+            })
+            .collect(),
+    )
 }
 
 fn local(n: &Node, name: &str) -> bool {

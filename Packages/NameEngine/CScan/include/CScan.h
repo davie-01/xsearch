@@ -23,8 +23,9 @@ typedef struct {
 typedef int (*xs_entry_cb)(void *ctx, const xs_entry *entry);
 
 /// Lists a directory with getattrlistbulk without following symlinks. Returns 0 or an errno.
-/// Entries the kernel reports with a per-entry error are skipped.
-int xs_list_dir(const char *path, xs_entry_cb cb, void *ctx);
+/// Entries the kernel reports with a per-entry error are skipped and counted in `*skipped`: the
+/// listing then does not prove that an entry it lacks is gone.
+int xs_list_dir(const char *path, xs_entry_cb cb, void *ctx, int *skipped);
 
 /// Attributes of a single path (not following symlinks), including its on-disk name, which
 /// may differ in case from `path` on case-insensitive volumes. `name_buf` receives the name.

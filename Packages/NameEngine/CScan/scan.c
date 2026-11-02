@@ -79,7 +79,8 @@ static int parse(const char *rec, xs_entry *e, const char **name_out, const attr
     return 0;
 }
 
-int xs_list_dir(const char *path, xs_entry_cb cb, void *ctx) {
+int xs_list_dir(const char *path, xs_entry_cb cb, void *ctx, int *skipped) {
+    *skipped = 0;
     int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0) return errno;
     struct attrlist al;
@@ -102,6 +103,8 @@ int xs_list_dir(const char *path, xs_entry_cb cb, void *ctx) {
             if (parse(rec + sizeof(len), &e, &name, NULL) == 0 && name) {
                 e.name = name;
                 if (cb(ctx, &e)) { free(buf); close(fd); return 0; }
+            } else {
+                (*skipped)++;
             }
             rec += len;
         }

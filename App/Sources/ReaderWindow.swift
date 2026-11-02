@@ -143,7 +143,8 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     // MARK: Loading
 
     /// Shows `hit` and jumps to its `startAt`-th occurrence.
-    func show(_ hit: ContentHit, expression: String, mode: MatchMode? = nil, startAt: Int = 0) {
+    /// `live`: a live scan's hit, which has no document in the index.
+    func show(_ hit: ContentHit, expression: String, mode: MatchMode? = nil, live: Bool = false, startAt: Int = 0) {
         token += 1
         let token = self.token
         path = hit.path
@@ -156,13 +157,18 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         countLabel.stringValue = "正在载入…"
         showWindow(nil)
         bringToFront(window)
-        searcher.preview(fileId: hit.fileId, expression: expression, mode: mode, member: hit.member, memberStart: hit.memberStart) { [weak self] data in
+        let deliver: @MainActor @Sendable (PreviewData?) -> Void = { [weak self] data in
             guard let self, token == self.token else { return }
             guard let data else {
-                self.countLabel.stringValue = "索引中已没有这个文件"
+                self.countLabel.stringValue = live ? "无法读取这个文件" : "索引中已没有这个文件"
                 return
             }
             self.load(data, startAt: startAt)
+        }
+        if live {
+            searcher.livePreview(path: hit.path, expression: expression, deliver: deliver)
+        } else {
+            searcher.preview(fileId: hit.fileId, expression: expression, mode: mode, member: hit.member, memberStart: hit.memberStart, deliver: deliver)
         }
     }
 

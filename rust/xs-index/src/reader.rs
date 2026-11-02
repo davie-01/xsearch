@@ -416,7 +416,16 @@ pub struct SearchSession {
     positives: Vec<Pat>,
     candidates: Vec<DocAddress>,
     next: usize,
+    /// An archive document partly checked: budget and cancel apply between its members.
+    members: Option<MemberCursor>,
     pub recall: Recall,
+}
+
+struct MemberCursor {
+    doc: TantivyDocument,
+    /// Member name, its start (scalars) and its byte range in the text.
+    members: Vec<(String, u32, Range<usize>)>,
+    next: usize,
 }
 
 impl SearchSession {
@@ -509,6 +518,7 @@ impl SearchSession {
             positives,
             candidates: keyed.into_iter().map(|(_, a)| a).collect(),
             next: 0,
+            members: None,
             recall,
         })
     }
@@ -529,7 +539,7 @@ impl SearchSession {
         let mut hits = vec![];
         let f = self.f;
         let mut progressed = 0;
-        while self.next < self.candidates.len() {
+        while self.next < self.candidates.len() || self.members.is_some() {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
@@ -537,13 +547,24 @@ impl SearchSession {
                 break;
             }
             progressed += 1;
+            if let Some(mut cursor) = self.members.take() {
+                hits.extend(self.member_hit(&cursor));
+                cursor.next += 1;
+                if cursor.next < cursor.members.len() {
+                    self.members = Some(cursor);
+                }
+                continue;
+            }
             let addr = self.candidates[self.next];
             self.next += 1;
             let d = self.searcher.doc::<TantivyDocument>(addr)?;
             let text = d.get_first(f.text).and_then(|v| v.as_str()).unwrap_or("");
             let anchors = bytes_of(&d, f.anchors);
             if anchors.windows(8).any(|w| w == b"\"member\"") {
-                self.member_hits(&d, text, anchors, &mut hits);
+                let members = member_ranges(text, anchors);
+                if !members.is_empty() {
+                    self.members = Some(MemberCursor { doc: d, members, next: 0 });
+                }
                 continue;
             }
             let norm = normalize_text(text, self.mode);
@@ -572,7 +593,7 @@ impl SearchSession {
             hits,
             candidates: self.candidates.len(),
             verified: self.next,
-            done: self.next >= self.candidates.len(),
+            done: self.next >= self.candidates.len() && self.members.is_none(),
         })
     }
 }
@@ -580,52 +601,64 @@ impl SearchSession {
 impl SearchSession {
     /// An archive document: each member is matched on its own text and becomes its own hit,
     /// so a query matches when one member satisfies it (not terms spread over members).
-    fn member_hits(&self, d: &TantivyDocument, text: &str, anchors: &[u8], hits: &mut Vec<Hit>) {
+    fn member_hit(&self, cursor: &MemberCursor) -> Option<Hit> {
         let f = self.f;
-        let parsed: Vec<Anchor> = serde_json::from_slice(anchors).unwrap_or_default();
-        let members: Vec<(u32, String)> = parsed
-            .into_iter()
-            .filter_map(|a| match a.kind {
-                AnchorKind::Member { name } => Some((a.start, name)),
-                _ => None,
-            })
-            .collect();
-        // Byte offset of each member start, and of the end of the text.
-        let mut wanted: Vec<u32> = members.iter().map(|m| m.0).collect();
-        wanted.sort_unstable();
-        let mut byte_at = std::collections::HashMap::new();
-        let mut k = 0;
-        for (scalar, (b, _)) in text.char_indices().enumerate() {
-            while k < wanted.len() && wanted[k] as usize <= scalar {
-                byte_at.insert(wanted[k], b);
-                k += 1;
-            }
+        let d = &cursor.doc;
+        let (name, start, range) = &cursor.members[cursor.next];
+        let text = d.get_first(f.text).and_then(|v| v.as_str()).unwrap_or("");
+        let segment = &text[range.clone()];
+        let norm = normalize_text(segment, self.mode);
+        if !self.compiled.matches(&norm) {
+            return None;
         }
-        for (i, (start, name)) in members.iter().enumerate() {
-            let b0 = byte_at.get(start).copied().unwrap_or(text.len());
-            let b1 = members.get(i + 1).and_then(|n| byte_at.get(&n.0).copied()).unwrap_or(text.len()).max(b0);
-            let segment = &text[b0..b1];
-            let norm = normalize_text(segment, self.mode);
-            if !self.compiled.matches(&norm) {
-                continue;
-            }
-            let (hit_count, first) = count_hits(&norm, &self.positives);
-            let (snippet, snippet_highlights) = snippet(segment, &norm, self.mode, &self.positives, first);
-            hits.push(Hit {
-                file_id: u64_of(d, f.file_id),
-                name: str_of(d, f.name),
-                dir: str_of(d, f.dir),
-                mtime: i64_of(d, f.mtime),
-                size: i64_of(d, f.size),
-                state: ExtractState::from_code(u64_of(d, f.state)),
-                hit_count,
-                snippet,
-                snippet_highlights,
-                member: name.clone(),
-                member_start: *start,
-            });
+        let (hit_count, first) = count_hits(&norm, &self.positives);
+        let (snippet, snippet_highlights) = snippet(segment, &norm, self.mode, &self.positives, first);
+        Some(Hit {
+            file_id: u64_of(d, f.file_id),
+            name: str_of(d, f.name),
+            dir: str_of(d, f.dir),
+            mtime: i64_of(d, f.mtime),
+            size: i64_of(d, f.size),
+            state: ExtractState::from_code(u64_of(d, f.state)),
+            hit_count,
+            snippet,
+            snippet_highlights,
+            member: name.clone(),
+            member_start: *start,
+        })
+    }
+}
+
+/// The members named by an archive document's anchors, with their byte ranges in `text`.
+fn member_ranges(text: &str, anchors: &[u8]) -> Vec<(String, u32, Range<usize>)> {
+    let parsed: Vec<Anchor> = serde_json::from_slice(anchors).unwrap_or_default();
+    let members: Vec<(u32, String)> = parsed
+        .into_iter()
+        .filter_map(|a| match a.kind {
+            AnchorKind::Member { name } => Some((a.start, name)),
+            _ => None,
+        })
+        .collect();
+    // Byte offset of each member start, and of the end of the text.
+    let mut wanted: Vec<u32> = members.iter().map(|m| m.0).collect();
+    wanted.sort_unstable();
+    let mut byte_at = std::collections::HashMap::new();
+    let mut k = 0;
+    for (scalar, (b, _)) in text.char_indices().enumerate() {
+        while k < wanted.len() && wanted[k] as usize <= scalar {
+            byte_at.insert(wanted[k], b);
+            k += 1;
         }
     }
+    let starts: Vec<usize> = members.iter().map(|m| byte_at.get(&m.0).copied().unwrap_or(text.len())).collect();
+    members
+        .into_iter()
+        .enumerate()
+        .map(|(i, (start, name))| {
+            let end = starts.get(i + 1).copied().unwrap_or(text.len()).max(starts[i]);
+            (name, start, starts[i]..end)
+        })
+        .collect()
 }
 
 /// Query verification on text that is not in the index (live scan, M4-3 / §8.7): the same

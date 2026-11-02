@@ -513,6 +513,9 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// Hits found by the live scan (preview reads the file, not the index).
     private(set) var liveIds = Set<UInt64>()
 
+    /// A preview still queued must not fill the pane any more.
+    func invalidatePreview() { previewToken += 1 }
+
     func show(_ out: ContentOutput) {
         expression = out.query.expression
         if !out.append { liveIds = [] }
@@ -532,7 +535,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         } else {
             hits = out.hits
             table.reloadData()
-            if hits.isEmpty { preview.clear() } else {
+            if hits.isEmpty { invalidatePreview(); preview.clear() } else {
                 table.selectRowIndexes([0], byExtendingSelection: false)
                 table.scrollRowToVisible(0)
             }
@@ -544,7 +547,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard let i = hits.firstIndex(where: { $0.path == path && !$0.isMember }) else { return }
         hits.remove(at: i)
         table.reloadData()
-        if hits.isEmpty { preview.clear() } else { table.selectRowIndexes([min(i, hits.count - 1)], byExtendingSelection: false) }
+        if hits.isEmpty { invalidatePreview(); preview.clear() } else { table.selectRowIndexes([min(i, hits.count - 1)], byExtendingSelection: false) }
     }
 
     func moveSelection(_ delta: Int) {
@@ -555,8 +558,8 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        guard let h = selected else { preview.clear(); return }
         previewToken += 1
+        guard let h = selected else { preview.clear(); return }
         let token = previewToken
         let path = h.dir + "/" + h.name
         let show: @MainActor @Sendable (PreviewData?) -> Void = { [weak self] data in

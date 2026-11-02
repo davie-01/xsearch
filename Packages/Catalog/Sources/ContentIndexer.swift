@@ -138,6 +138,7 @@ public final class ContentIndexer: @unchecked Sendable {
             try recover()
             removeUnknownInstances()
             try removeOrphanDocuments()
+            try applyLimits()
             try reindexUpgradedExtractors()
             workers.forEach { $0.resume() }
             stopped = false
@@ -201,7 +202,7 @@ public final class ContentIndexer: @unchecked Sendable {
             try catalog.setMeta("content_instance", id)
             try catalog.setMeta("content_rebuild_instance", nil)
             try clearBatchRecords()
-            _ = try requeue { _ in true }
+            _ = try requeue { _, _ in true }
         }
         instanceId = id
         rebuildId = nil
@@ -261,16 +262,49 @@ public final class ContentIndexer: @unchecked Sendable {
         Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
     }
 
-    /// Bumps op_seq and queues an index task for content files whose name passes `filter`.
-    private func requeue(where filter: (String) -> Bool) throws -> Int {
+    /// Single-file limit from the settings. Before `start` it is simply used; later the files it
+    /// affects are queued (on the indexer's queue: a running cycle may take a while).
+    public func setMaxFileBytes(_ bytes: UInt64) {
+        queue.async { [self] in
+            limits.maxFileBytes = bytes
+            guard catalog != nil else { return }
+            do {
+                try applyLimits()
+                try refreshCounts()
+            } catch {
+                state.withLock { $0.lastError = String(describing: error) }
+            }
+        }
+    }
+
+    /// Against the limits the index was built with: files between the old and the new size
+    /// limit change their outcome; an archive's members are bound by it whatever its own size.
+    private func applyLimits() throws {
+        guard let catalog else { return }
+        let old = try catalog.meta("content_limits").flatMap { try? JSONDecoder().decode(ExtractionLimits.self, from: Data($0.utf8)) } ?? ExtractionLimits()
+        let encoded = String(decoding: try JSONEncoder().encode(limits), as: UTF8.self)
+        guard old != limits else {
+            if try catalog.meta("content_limits") == nil { try catalog.setMeta("content_limits", encoded) }
+            return
+        }
+        let smaller = Int64(clamping: min(old.maxFileBytes, limits.maxFileBytes))
+        let everything = old.maxUnpackedBytes != limits.maxUnpackedBytes
+        try catalog.db.transaction {
+            _ = try requeue { name, size in everything || size > smaller || ContentType.of(name: name) == .archive }
+            try catalog.setMeta("content_limits", encoded)
+        }
+    }
+
+    /// Bumps op_seq and queues an index task for content files passing `filter` (name, size).
+    private func requeue(where filter: (String, Int64) -> Bool) throws -> Int {
         guard let catalog else { return 0 }
         return try catalog.db.transactionIfNeeded {
-            let s = try catalog.db.prepare("SELECT id, name, mtime_ns FROM files WHERE deleted = 0 AND in_content = 1")
-            var rows: [(Int64, String, Int64)] = []
-            while try s.step() { rows.append((s.int(0), s.text(1), s.int(2))) }
+            let s = try catalog.db.prepare("SELECT id, name, mtime_ns, size FROM files WHERE deleted = 0 AND in_content = 1")
+            var rows: [(Int64, String, Int64, Int64)] = []
+            while try s.step() { rows.append((s.int(0), s.text(1), s.int(2), s.int(3))) }
             var counter = try catalog.opSeqCounter()
             var n = 0
-            for (id, name, mtime) in rows where filter(name) {
+            for (id, name, mtime, size) in rows where filter(name, size) {
                 counter += 1
                 try catalog.setContent(id, inContent: true, opSeq: counter)
                 try catalog.enqueue(id, opSeq: counter, kind: .index, priority: mtime / 1_000_000_000)
@@ -289,7 +323,7 @@ public final class ContentIndexer: @unchecked Sendable {
         if let stored {
             let changed = Set(current.filter { stored[$0.key] != $0.value }.keys)
             if !changed.isEmpty {
-                _ = try requeue { name in ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false }
+                _ = try requeue { name, _ in ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false }
             }
         }
         try catalog.setMeta("content_extractors", String(decoding: try JSONEncoder().encode(current), as: UTF8.self))
@@ -313,7 +347,7 @@ public final class ContentIndexer: @unchecked Sendable {
                 try catalog.db.transaction {
                     try catalog.setMeta("content_rebuild_instance", id)
                     try clearBatchRecords()
-                    _ = try requeue { _ in true }
+                    _ = try requeue { _, _ in true }
                 }
             } catch {
                 writer = nil
@@ -518,7 +552,7 @@ public final class ContentIndexer: @unchecked Sendable {
         let type = ContentType.of(name: p.info.name)
         // §10 cache key: strong digest + extractor version + config. Same key → reuse the stored
         // extraction (moves, renames, copies) instead of parsing again.
-        let key = Self.digest(p.path, cancelled: { self.stopped }).map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes)" } ?? ""
+        let key = Self.digest(p.path, cancelled: { self.stopped }).map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes):\(limits.maxUnpackedBytes)" } ?? ""
         if stopped { return interrupted }
         if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
             lock.withLock { cacheHits += 1 }

@@ -275,6 +275,12 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         table.tableColumns.first { $0.identifier.rawValue == "hits" }?.isHidden = mode != .content
     }
 
+    /// Closed: stop the query and any queued preview. `show` searches again.
+    func windowWillClose(_ notification: Notification) {
+        content.cancel()
+        previewToken += 1
+    }
+
     // MARK: Query
 
     /// Opens with the launcher's input and mode (UI-SPEC §6.2: the query carries over).
@@ -353,7 +359,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, NSTableV
         if let e = out.error {
             countLabel.stringValue = e
         } else {
-            countLabel.stringValue = out.query.isEmpty ? "" : "\(Theme.count(ranked.count)) 个文件" + (out.done ? "" : " · 仍在搜索… 已核验 \(out.verified)/\(out.candidates)")
+            countLabel.stringValue = out.query.isEmpty ? "" : "\(Theme.count(ranked.count)) 个文件" + (out.capped ? "（前 \(Theme.count(ranked.count)) 个）" : out.done ? "" : " · 仍在搜索… 已核验 \(out.verified)/\(out.candidates)")
         }
         resort(keepSelection: out.append)
         if openFirstInReader, let first = rows.first?.hit {

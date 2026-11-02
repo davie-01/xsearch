@@ -166,3 +166,38 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     // The docx member's paragraphs keep their kind, shifted into the joined text.
     #expect(anchors.contains { $0["kind"] as? String == "paragraph" })
 }
+
+@Test func archiveWithIncompleteMemberIsPartial() throws {
+    let dir = tmp("incomplete-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try "完整的文本".write(toFile: dir + "/a.txt", atomically: true, encoding: .utf8)
+    makePDF(dir + "/scan.pdf")  // has a page without a text layer
+    let zipPath = dir + "/pack.zip"
+    let zip = Process()
+    zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+    zip.currentDirectoryURL = URL(fileURLWithPath: dir)
+    zip.arguments = ["-q", zipPath, "a.txt", "scan.pdf"]
+    try zip.run()
+    zip.waitUntilExit()
+    let r = try Extractor.extract(path: zipPath, limits: ExtractionLimits())
+    #expect(r.state == "partial")
+    #expect(r.warnings.contains { $0.contains("scan.pdf") })
+    #expect(r.text.contains("完整的文本"))
+}
+
+@Test func cancelThenStopNeverHangs() throws {
+    let txt = tmp("cancel.txt")
+    try "x".write(toFile: txt, atomically: true, encoding: .utf8)
+    let start = Date()
+    for i in 0..<60 {
+        let worker = ExtractionWorker(executable: workerURL, environment: ["XS_EXTRACT_FAULTS": "1"])
+        #expect(worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) != .crashed)
+        // Vary the gap: the process may end just before, during or after `stop` looks at it.
+        worker.cancel()
+        if i % 3 == 1 { usleep(200) } else if i % 3 == 2 { usleep(2000) }
+        worker.stop()
+        #expect(worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) == .cancelled)
+    }
+    #expect(Date().timeIntervalSince(start) < 30)
+}

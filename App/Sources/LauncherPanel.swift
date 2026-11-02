@@ -506,6 +506,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
         stopMouseWatch()
         panel.orderOut(nil)
+        // Nobody is looking: stop the query and any queued preview. `show` searches again.
+        session.content.cancel()
+        contentPane.invalidatePreview()
     }
 
     private func position() {
@@ -793,12 +796,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     @objc private func startLiveScan() {
         guard let out = contentOutput, !out.query.isEmpty else { return }
-        let (files, unresolved) = session.liveFiles(dirs: uncoveredDirs(out.query))
+        let (files, unresolved, truncated) = session.liveFiles(dirs: uncoveredDirs(out.query), extensions: out.query.liveExtensions)
         clearNotice()
         for d in unresolved {
             addNotice("\(PathUtil.abbreviate(d, home: NSHomeDirectory())) 不在文件名索引中，无法扫描。", color: Theme.warnText, size: 12.5)
         }
-        addNotice("实时扫描只读取文本类文件（\(Theme.count(files.count)) 个），不会写入索引。", color: .tertiaryLabelColor, size: 12.5)
+        addNotice("实时扫描只读取文本类文件（\(truncated ? "前 " : "")\(Theme.count(files.count)) 个），不会写入索引。", color: .tertiaryLabelColor, size: 12.5)
         resize()
         session.content.liveScan(out.query, text: out.text, files: files) { [weak self] batch in self?.applyContent(batch) }
     }
@@ -879,7 +882,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                     parts.append(out.done ? "实时扫描完成 · \(Theme.count(contentShown)) 个结果"
                                           : "实时扫描… \(Theme.count(out.scanned)) / \(Theme.count(out.scanTotal)) 个文件")
                 } else {
-                    parts.append(out.done ? "\(Theme.count(contentShown)) 个结果" : "仍在搜索… 已核验 \(Theme.count(Int(out.verified))) / \(Theme.count(Int(out.candidates)))")
+                    parts.append(out.capped ? "前 \(Theme.count(contentShown)) 个结果" : out.done ? "\(Theme.count(contentShown)) 个结果" : "仍在搜索… 已核验 \(Theme.count(Int(out.verified))) / \(Theme.count(Int(out.candidates)))")
                 }
             }
         } else if let out = output, !out.query.isEmpty {
@@ -896,12 +899,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private var pendingTrash: String?
 
     /// Reader window at the current occurrence (set by the app delegate).
-    var onRead: ((ContentHit, String, Int) -> Void)?
+    var onRead: ((ContentHit, String, Int, Bool) -> Void)?
 
     private func openReader(_ hit: ContentHit, at n: Int) {
         let expression = contentPane.expressionForReader
+        let live = contentPane.liveIds.contains(hit.fileId)
         hide()
-        onRead?(hit, expression, n)
+        onRead?(hit, expression, n, live)
     }
 
     private func expandToFullWindow() {

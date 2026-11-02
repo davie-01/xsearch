@@ -113,7 +113,7 @@ public final class ExtractionWorker: @unchecked Sendable {
     public var pid: Int32? { process?.processIdentifier }
 
     public func stop() {
-        if let p = process, p.isRunning { kill(p.processIdentifier, SIGKILL); p.waitUntilExit() }
+        if let p = process, p.isRunning { kill(p.processIdentifier, SIGKILL); Self.awaitExit(p) }
         process = nil
         toWorker = nil
         fromWorker = nil
@@ -147,6 +147,14 @@ public final class ExtractionWorker: @unchecked Sendable {
             activePid = nil
             return cancelled
         }
+    }
+
+    /// After SIGKILL. Not `waitUntilExit`: it waits in the run loop for a wake-up that never comes
+    /// if the process ended just before (seen when `cancel` had already killed it), and the
+    /// indexer's stop, so the app's quit, would hang for ever. The process is certainly dying.
+    private static func awaitExit(_ p: Process) {
+        let deadline = Date().addingTimeInterval(1)
+        while p.isRunning && Date() < deadline { usleep(1000) }
     }
 
     private func ensureRunning() throws {
@@ -194,7 +202,7 @@ public final class ExtractionWorker: @unchecked Sendable {
         if done.wait(timeout: .now() + timeout) == .timedOut {
             _ = endRequest()
             kill(p.processIdentifier, SIGKILL)
-            p.waitUntilExit()
+            Self.awaitExit(p)
             done.wait()  // the read returns once the pipe closes
             stop()
             return .timedOut

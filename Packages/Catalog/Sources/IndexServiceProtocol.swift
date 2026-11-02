@@ -6,7 +6,9 @@ import Foundation
 /// catalog SQLite (WAL, busy timeout) exactly as two connections in one process did before.
 @objc public protocol IndexServiceProtocol {
     /// Starts (or keeps running) the indexer on `dataDirectory`; replies an error message or nil.
-    func start(dataDirectory: String, workerPath: String, workers: Int, reply: @escaping (String?) -> Void)
+    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, reply: @escaping (String?) -> Void)
+    /// The single-file limit changed in settings: only the files it affects are extracted again.
+    func setMaxFileBytes(_ bytes: UInt64)
     /// JSON `IndexServiceSnapshot`.
     func snapshot(reply: @escaping (Data) -> Void)
     func rebuildContentIndex(reply: @escaping (String?) -> Void)

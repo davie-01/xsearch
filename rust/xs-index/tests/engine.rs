@@ -541,3 +541,42 @@ fn preview_of_archive_member_is_one_consistent_slice() {
     assert_eq!((whole.highlights.len(), whole.total_hits), (2, 3));
     assert!(reader.preview(9, &expr, Mode::Loose, None, 2).unwrap().is_none());
 }
+
+#[test]
+fn large_archive_is_paged_member_by_member() {
+    use xs_index::{Anchor, AnchorKind};
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    let mut text = String::new();
+    let mut anchors = vec![];
+    for i in 0..10 {
+        anchors.push(Anchor { start: text.chars().count() as u32, kind: AnchorKind::Member { name: format!("{i}.txt") } });
+        text.push_str(&format!("合同 第{i}份\n"));
+    }
+    let mut d = doc(1, &text);
+    d.anchors = anchors;
+    w.put(&d).unwrap();
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    let session = || reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![] }).unwrap();
+    let never = AtomicBool::new(false);
+    let mut s = session();
+    let first = s.next(Duration::from_secs(5), 3, &never).unwrap();
+    assert_eq!(first.hits.len(), 3, "max_hits holds inside one archive");
+    assert!(!first.done, "the rest of the members are still to come");
+    let mut members: Vec<String> = first.hits.into_iter().map(|h| h.member).collect();
+    loop {
+        let b = s.next(Duration::from_secs(5), 3, &never).unwrap();
+        assert!(b.hits.len() <= 3);
+        members.extend(b.hits.into_iter().map(|h| h.member));
+        if b.done {
+            break;
+        }
+    }
+    assert_eq!(members, (0..10).map(|i| format!("{i}.txt")).collect::<Vec<_>>());
+    // Cancelled between members: stops and does not report completion.
+    let mut s = session();
+    assert_eq!(s.next(Duration::from_secs(5), 1, &never).unwrap().hits.len(), 1);
+    let b = s.next(Duration::from_secs(5), 100, &AtomicBool::new(true)).unwrap();
+    assert!(b.hits.is_empty() && !b.done);
+}

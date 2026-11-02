@@ -1,6 +1,7 @@
 import AppKit
 import Catalog
 import NameEngine
+import os
 import XSearchCore
 
 /// One result row in the launcher list.
@@ -40,6 +41,8 @@ final class SearchSession {
     let usage: UsageStore?
     private let queue = DispatchQueue(label: "xsearch.query", qos: .userInteractive)
     private var latest = 0
+    /// `latest` for the query queue: requests already replaced are skipped, not computed.
+    private let latestRequest = OSAllocatedUnfairLock(initialState: 0)
     private var apps: [AppEntry] = []
     private var appsScannedAt = Date.distantPast
     let home = NSHomeDirectory()
@@ -72,10 +75,13 @@ final class SearchSession {
     func search(_ text: String, limit: Int = 200, documentTypes: DocumentTypes? = nil, deliver: @escaping @MainActor (SearchOutput) -> Void) {
         latest += 1
         let id = latest
+        latestRequest.withLock { $0 = id }
+        let gate = latestRequest
         let names = self.names, usage = self.usage, apps = self.apps, home = self.home
         let syntax = Preferences.shared.querySyntax
         let showRecents = Preferences.shared.showRecents
         queue.async {
+            guard gate.withLock({ $0 }) == id else { return }
             let start = DispatchTime.now()
             var q = NameQuery.parse(text, home: home, syntax: syntax)
             q.documentTypes = documentTypes
@@ -129,19 +135,27 @@ final class SearchSession {
     }
 
     /// Text-type files under `dirs` from the name index, for the live scan (§8.7): the name
-    /// scope's exclusion rules apply as they do everywhere else.
-    func liveFiles(dirs: [String]) -> (files: [LiveFile], unresolved: [String]) {
-        let exts = ContentType.text.extensions.sorted().joined(separator: ";")
+    /// scope's exclusion rules apply as they do everywhere else. `truncated`: a folder had more
+    /// candidates than one scan reads.
+    func liveFiles(dirs: [String], extensions: [String]) -> (files: [LiveFile], unresolved: [String], truncated: Bool) {
+        guard !extensions.isEmpty else { return ([], [], false) }
+        let exts = extensions.joined(separator: ";")
+        let limit = 200_000
         var files: [LiveFile] = []
+        var seen = Set<Int64>()  // overlapping folders
         var unresolved: [String] = []
+        var truncated = false
         for d in dirs {
             let q = NameQuery.parse("dir:\"\(d)\" ext:\(exts)", home: home)
-            let r = names.search(q, limit: 200_000)
+            let r = names.search(q, limit: limit)
             unresolved += r.unresolvedDirs
-            files += r.hits.filter { !$0.flags.contains(.directory) }.map { LiveFile(fileId: $0.fileId, path: $0.path, size: $0.size, mtime: $0.mtime) }
+            truncated = truncated || r.total > r.hits.count
+            for h in r.hits where !h.flags.contains(.directory) && seen.insert(h.fileId).inserted {
+                files.append(LiveFile(fileId: h.fileId, path: h.path, size: h.size, mtime: h.mtime))
+            }
         }
         // Newest first, like indexed results.
-        return (files.sorted { $0.mtime > $1.mtime }, unresolved)
+        return (files.sorted { $0.mtime > $1.mtime }, unresolved, truncated)
     }
 
     nonisolated static func item(path: String, fileId: Int64?, group: ResultItem.Group) -> ResultItem {

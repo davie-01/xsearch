@@ -411,3 +411,51 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(p.settle())
     for i in 1...8 { #expect(try p.search("psi\(i)") == ["h\(i).txt"]) }
 }
+
+@Test func sizeLimitChangeRequeuesOnlyAffectedFiles() throws {
+    let p = try Pipeline("limits")
+    defer { p.stop() }
+    try p.box.write("docs/small.txt", "小文件 chi")
+    try p.box.write("docs/big.txt", "大文件 " + String(repeating: "x", count: 4096) + " rho")
+    try p.start()
+    #expect(p.settle())
+    #expect(try p.search("rho") == ["big.txt"])
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    func seq(_ name: String) throws -> Int64 {
+        let s = try c.db.prepare("SELECT op_seq FROM files WHERE name = ?").bind(name)
+        return try s.first { $0.int(0) } ?? -1
+    }
+    let (small, big) = (try seq("small.txt"), try seq("big.txt"))
+    // Lowered: text beyond the limit goes (plain text keeps its start), the small file is not touched.
+    p.indexer.setMaxFileBytes(1024)
+    #expect(p.until { try p.search("rho").isEmpty })
+    #expect(try seq("small.txt") == small && seq("big.txt") > big)
+    #expect(try p.search("chi") == ["small.txt"])
+    // Remembered over a restart: nothing is queued again.
+    let lowered = try seq("big.txt")
+    try p.restartIndexer { $0.setMaxFileBytes(1024) }
+    #expect(p.settle())
+    #expect(try seq("big.txt") == lowered)
+    // Raised: back.
+    p.indexer.setMaxFileBytes(1 << 20)
+    #expect(p.until { try p.search("rho") == ["big.txt"] })
+    #expect(try seq("small.txt") == small)
+}
+
+@Test func unreadableEntryIsNotTreatedAsDeleted() throws {
+    let p = try Pipeline("unreadable")
+    defer {
+        DiskLister.unreadableForTests = nil
+        p.stop()
+    }
+    try p.box.write("docs/unreadable-keep.txt", "保留 beta7")
+    try p.start()
+    #expect(p.settle())
+    DiskLister.unreadableForTests = { $0 == "unreadable-keep.txt" }
+    try p.box.write("docs/unreadable-new.txt", "新增 beta8")
+    #expect(p.until { try p.search("beta8") == ["unreadable-new.txt"] })
+    #expect(try p.search("beta7") == ["unreadable-keep.txt"])
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let s = try c.db.prepare("SELECT deleted FROM files WHERE name = 'unreadable-keep.txt'")
+    #expect(try s.first { $0.int(0) } == 0)
+}

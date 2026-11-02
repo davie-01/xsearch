@@ -97,3 +97,11 @@ public struct ContentQuery: Sendable, Equatable {
         return out
     }
 }
+
+extension ContentQuery {
+    /// Extensions a live scan reads (§8.7): text types only, narrowed by `ext:`.
+    public var liveExtensions: [String] {
+        let text = ContentType.text.extensions
+        return (exts.isEmpty ? Array(text) : exts.filter { text.contains($0) }).sorted()
+    }
+}

@@ -151,3 +151,10 @@ import Testing
     let again = try JSONDecoder().decode(ContentScope.self, from: JSONEncoder().encode(now))
     #expect(again == now)
 }
+
+@Test func liveScanFollowsExtFilter() {
+    func exts(_ text: String) -> [String] { ContentQuery.parse(text, home: "/h", syntax: QuerySyntax()).liveExtensions }
+    #expect(exts("合同") == ContentType.text.extensions.sorted())
+    #expect(exts("合同 ext:txt") == ["txt"])
+    #expect(exts("合同 ext:pdf").isEmpty, "not a text type: nothing to read live")
+}

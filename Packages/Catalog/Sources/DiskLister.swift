@@ -62,9 +62,19 @@ struct DiskEntry {
 enum DiskLister {
     final class Box { var entries: [DiskEntry] = [] }
 
+    struct Listing {
+        var entries: [DiskEntry]
+        /// Some entries could not be read: one missing from `entries` may still exist.
+        var incomplete: Bool
+    }
+
+    /// Test hook: pretend the kernel reported an error for entries with these names.
+    nonisolated(unsafe) static var unreadableForTests: (@Sendable (String) -> Bool)?
+
     /// Lists a directory (no symlink following). Returns entries or an errno.
-    static func list(_ path: String) -> Result<[DiskEntry], POSIXError> {
+    static func list(_ path: String) -> Result<Listing, POSIXError> {
         let box = Box()
+        var skipped: Int32 = 0
         let rc = path.withCString { cpath in
             xs_list_dir(cpath, { ctx, e in
                 guard let ctx, let e else { return 0 }
@@ -73,10 +83,15 @@ enum DiskLister {
                 // `.` / `..` are never returned by getattrlistbulk; skip types we do not index.
                 if e.pointee.type != UInt32(XS_TYPE_OTHER) { box.entries.append(DiskEntry(e.pointee, name: name)) }
                 return 0
-            }, Unmanaged.passUnretained(box).toOpaque())
+            }, Unmanaged.passUnretained(box).toOpaque(), &skipped)
         }
         if rc != 0 { return .failure(POSIXError(POSIXErrorCode(rawValue: rc) ?? .EIO)) }
-        return .success(box.entries)
+        if let unreadable = unreadableForTests {
+            let kept = box.entries.filter { !unreadable($0.name) }
+            if kept.count != box.entries.count { skipped += 1 }
+            box.entries = kept
+        }
+        return .success(Listing(entries: box.entries, incomplete: skipped > 0))
     }
 
     /// Where an inode lives now, in the catalog's "/" view; nil when it no longer exists.
@@ -138,7 +153,7 @@ final class ListingPool: @unchecked Sendable {
 /// applies them.
 final class ParallelLister: @unchecked Sendable {
     struct Job { var id: Int64; var path: String; var fresh: Bool; var recursive: Bool }
-    struct Output { var job: Job; var result: Result<[DiskEntry], POSIXError> }
+    struct Output { var job: Job; var result: Result<DiskLister.Listing, POSIXError> }
 
     private let lock = NSCondition()
     private var done: [Output] = []
