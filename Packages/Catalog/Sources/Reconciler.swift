@@ -253,7 +253,7 @@ final class Reconciler {
     private func syncRoots() throws {
         let existing = try catalog.rootRows()
         for r in existing where !ctx.roots.contains(r.name) {
-            for id in try catalog.deleteSubtree(r.id, seq: seq) { try wrote(.remove(id)) }
+            try removeSubtree(r.id)
         }
         for path in ctx.roots where !existing.contains(where: { $0.name == path }) {
             guard case .success(var e) = DiskLister.stat(path), e.isDirectory else { continue }
@@ -454,6 +454,11 @@ final class Reconciler {
             var progressed = false
             var next: [(row: Row, parent: Row, parentPath: String, entry: DiskEntry)] = []
             for m in remaining {
+                // Deleted meanwhile with a subtree that another move evicted.
+                guard try catalog.row(id: m.row.id) != nil else {
+                    pendingNew.append((m.parent, m.parentPath, m.entry))
+                    continue
+                }
                 if try catalog.isWithin(m.parent.id, m.row.id) { next.append(m); continue }
                 try apply(m, claimed: claimed)
                 progressed = true
@@ -508,10 +513,20 @@ final class Reconciler {
 
     /// The disk says `name` in `parent` now belongs to a new or moved entry: whatever row still
     /// holds that slot (and is not itself being moved) is gone.
+    /// A deleted row is no longer a candidate for a move: a descendant still listed as vanished
+    /// would come back as an update of a row the catalog holds as deleted (a ghost in the name
+    /// index). If it turns up elsewhere, it is simply a new entry there.
+    private func removeSubtree(_ id: Int64) throws {
+        for removed in try catalog.deleteSubtree(id, seq: seq) {
+            vanished[removed] = nil
+            try wrote(.remove(removed))
+        }
+    }
+
     private func evictOccupant(parent: Int64, name: String, keeping: Set<Int64>) throws {
         guard let occupant = try catalog.child(of: parent, named: name), !keeping.contains(occupant.id) else { return }
         vanished[occupant.id] = nil
-        for id in try catalog.deleteSubtree(occupant.id, seq: seq) { try wrote(.remove(id)) }
+        try removeSubtree(occupant.id)
     }
 
     private func resubmitMissing() throws {
@@ -588,7 +603,7 @@ final class Reconciler {
 
     private func deleteVanished() throws {
         for r in vanished.values {
-            for id in try catalog.deleteSubtree(r.id, seq: seq) { try wrote(.remove(id)) }
+            try removeSubtree(r.id)
         }
         vanished.removeAll()
     }

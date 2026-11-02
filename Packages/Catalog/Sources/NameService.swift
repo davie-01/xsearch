@@ -300,6 +300,8 @@ public final class NameService: @unchecked Sendable {
         "m2\u{3}" + scope.fingerprint(home: home) + "\u{3}" + (contentScope?.fingerprint(home: home) ?? "no-content")
     }
 
+    private static let snapshotGeneration = "2"
+
     private func open(scope: NameScope, content: ContentScope?) throws {
         self.scope = scope
         contentScope = content
@@ -325,6 +327,9 @@ public final class NameService: @unchecked Sendable {
         // rebuilt from catalog rows (still no disk rescan).
         var base: NameSnapshot
         do {
+            // Snapshots from before generation 2 can hold entries the catalog has deleted (a
+            // moved row that a replaced directory had taken with it). Rows are the truth.
+            guard try catalog.meta("names_snapshot_generation") == Self.snapshotGeneration else { throw NameSnapshot.LoadError.version }
             base = try NameSnapshot.load(from: snapshotURL, expectedFingerprint: catalogId)
             persistedSeq = base.seq
         } catch {
@@ -544,6 +549,8 @@ public final class NameService: @unchecked Sendable {
         guard base.seq > persistedSeq || (force && persistedSeq < 0) else { return }
         guard force || Date().timeIntervalSince(lastPersist) > 25 else { return }
         try base.write(to: snapshotURL)
+        // Only now: a crash before this write must rebuild again, not trust the old snapshot.
+        try catalog.setMeta("names_snapshot_generation", Self.snapshotGeneration)
         persistedSeq = base.seq
         lastPersist = Date()
         try catalog.purgeTombstones(upTo: base.seq)

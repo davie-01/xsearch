@@ -268,6 +268,52 @@ func indexedPaths(_ s: NameService, _ box: Sandbox) -> Set<String> {
     #expect(find(s, "keep").isEmpty)
 }
 
+/// A directory replaced by a new one of the same name while its child moved to a place found
+/// only later in the batch: the old subtree is deleted, then the child turns up. It must not
+/// come back as a moved row that the catalog holds as deleted (the name index showed a ghost).
+@Test(arguments: 0..<12) func childOfReplacedDirectoryMovedAway(attempt: Int) throws {
+    let box = try Sandbox("replaced-\(attempt)")
+    try box.write("a/sub/f.txt")
+    try box.write("b/k.txt")
+    let s = box.service()
+    defer { s.shutdown() }
+    #expect(s.waitUntilIdle())
+    let fm = box.fm
+    try fm.moveItem(atPath: box.p("a/sub"), toPath: box.p("b/moved"))
+    try fm.moveItem(atPath: box.p("b"), toPath: box.p("c"))
+    try fm.removeItem(atPath: box.p("a"))
+    try fm.createDirectory(atPath: box.p("a"), withIntermediateDirectories: true)
+    #expect(eventually(s) { indexedPaths(s, box) == diskPaths(box) && indexedPaths(s, box).contains(box.p("c/moved/f.txt")) })
+    s.waitUntilIdle()
+    usleep(600_000)
+    s.waitUntilIdle()
+    #expect(indexedPaths(s, box) == diskPaths(box), "index-only \(indexedPaths(s, box).subtracting(diskPaths(box)).sorted())")
+}
+
+@Test func oldSnapshotIsRebuiltFromCatalogRowsOnce() throws {
+    let box = try Sandbox("ghost")
+    try box.write("keep.txt")
+    try box.write("ghost.txt")
+    func names(_ s: NameService) -> Set<String> { Set(indexedPaths(s, box).map { ($0 as NSString).lastPathComponent }) }
+    var s = box.service()
+    #expect(s.waitUntilIdle())
+    s.shutdown()
+    // What the old bug left behind: deleted in the catalog, present in the saved snapshot. The
+    // file stays on disk so no reconcile could explain the outcome.
+    let c = try FileCatalog(url: box.data.appendingPathComponent("catalog.sqlite"))
+    try c.db.exec("UPDATE files SET deleted = 1 WHERE name = 'ghost.txt'")
+    s = box.service()
+    #expect(s.waitUntilIdle())
+    #expect(names(s).contains("ghost.txt"), "a current snapshot is trusted")
+    s.shutdown()
+    try c.db.exec("DELETE FROM meta WHERE key = 'names_snapshot_generation'")
+    s = box.service()
+    #expect(s.waitUntilIdle())
+    #expect(!names(s).contains("ghost.txt") && names(s).contains("keep.txt"), "rows are the truth")
+    s.shutdown()
+    #expect(try c.meta("names_snapshot_generation") != nil, "and it happens once")
+}
+
 @Test func randomOperationsMatchDisk() throws {
     let box = try Sandbox("random")
     var rng = SystemRandomNumberGenerator()
