@@ -74,10 +74,21 @@ final class ResultTable: NSTableView {
 
     // Quick Look panel control lives on the focused table.
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
+    /// The context menu for a row. Asked here rather than through `menu` so that the table does
+    /// not draw its square outline around the row: the clicked row becomes the selection.
+    var contextMenu: ((Int) -> NSMenu?)?
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        return row >= 0 ? contextMenu?(row) : nil
+    }
+
+    /// Who feeds Quick Look for this table, when not its delegate (the content list's).
+    weak var previewController: AnyObject?
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
         MainActor.assumeIsolated {
-            panel.dataSource = delegate as? QLPreviewPanelDataSource
-            panel.delegate = delegate as? QLPreviewPanelDelegate
+            let owner = previewController ?? delegate
+            panel.dataSource = owner as? QLPreviewPanelDataSource
+            panel.delegate = owner as? QLPreviewPanelDelegate
         }
     }
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
@@ -267,6 +278,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         table.onReturn = { [weak self] flags in self?.activate(flags.contains(.command) ? .reveal : .open) }
         table.setDraggingSourceOperationMask([.copy, .link, .generic], forLocal: false)
         table.setAccessibilityLabel("搜索结果")
+        table.contextMenu = { [weak self] row in self?.contextMenu(content: false, row: row) }
         scroll.documentView = table
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -296,6 +308,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentPane.table.isAtTop = { [weak self] in (self?.contentPane.table.selectedRow ?? 0) <= 0 }
         contentPane.table.onLeave = { [weak self] in self?.focusInput() }
         contentPane.table.onTyping = { [weak self] in self?.typeInInput($0) }
+        contentPane.table.contextMenu = { [weak self] row in self?.contextMenu(content: true, row: row) }
+        contentPane.table.previewController = self
         contentPane.onOpen = { [weak self] hit, reveal in self?.openContent(hit, reveal: reveal) }
         contentPane.onRead = { [weak self] hit, n in self?.openReader(hit, at: n) }
         contentPane.isHidden = true
@@ -919,7 +933,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func updateHints() {
         hints.attributedStringValue = Self.hintString(mode == .name
-            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⇧⌘C", "复制路径"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
+            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
             : [("↵", "打开"), ("⌘↵", "阅读窗口"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘E", "完整窗口")])
     }
 
@@ -1053,7 +1067,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             delay += 0.15
             for ch in chunk {
                 // Long enough for what a key starts (Quick Look opening) to finish.
-                delay += "↓↑␣⌨◉◌".contains(ch) ? 1 : 0.15
+                delay += "↓↑␣⌨◉◌☰".contains(ch) ? 1 : 0.15
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
                     if ch == "⇥" { _ = self.scopeToSelection(); return }
@@ -1076,6 +1090,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                         return
                     }
                     if ch == "◌" { self.logTestState("◌"); return }  // log only
+                    // "☰": the context menu of the selected row, logged item by item.
+                    if ch == "☰" { self.logMenu(); return }
                     if ch == "◉" {
                         (self.filters.arrangedSubviews.first as? NSButton)?.performClick(nil)
                         self.logTestState("◉")
@@ -1089,6 +1105,30 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                     self.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: self.field))
                 }
             }
+        }
+    }
+
+    private func logMenu() {
+        guard let path = ProcessInfo.processInfo.environment["XS_TYPE_LOG"] else { return }
+        let content = mode == .content
+        let menu = NSMenu()
+        fillMenu(menu, content: content, row: (content ? contentPane.table : table).selectedRow)
+        let kind = content ? (contentPane.selected?.isMember == true ? "member" : "hit") : (selectedItem.map { "\($0.kind)" } ?? "-")
+        let items = menu.items.map { $0.isSeparatorItem ? "—" : $0.title + ($0.submenu.map { "▸\($0.items.filter { !$0.isSeparatorItem }.count)" } ?? "") }
+        let line = "☰ \(kind) ext=\(content ? ((contentPane.selected?.displayName ?? "") as NSString).pathExtension : selectedItem?.ext ?? "") : \(items.joined(separator: " | "))\n"
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
+        // XS_MENU_DO: runs the item with this title (prefix), then logs the state.
+        if let title = ProcessInfo.processInfo.environment["XS_MENU_DO"], let item = menu.items.first(where: { $0.title.hasPrefix(title) }) {
+            menu.performActionForItem(at: menu.index(of: item))
+            logTestState("☰ did \(title)")
+        }
+        // Where the selected row is on screen (top-left origin), for a real right click.
+        let list = content ? contentPane.table : table
+        let r = list.rect(ofRow: list.selectedRow)
+        if let w = list.window, list.selectedRow >= 0, let top = NSScreen.screens.first?.frame.maxY {
+            let p = w.convertPoint(toScreen: list.convert(NSPoint(x: r.midX, y: r.midY), to: nil))
+            let point = "rowpoint \(Int(p.x)) \(Int(top - p.y))\n"
+            if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(point.utf8)); try? h.close() }
         }
     }
 
@@ -1178,15 +1218,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         case (.command, "g", _) where mode == .content: contentPane.preview.goNext(); return true
         case ([.command, .shift], "g", _) where mode == .content, ([.command, .shift], "G", _) where mode == .content:
             contentPane.preview.goPrev(); return true
-        case ([.command, .shift], "c", _), ([.command, .shift], "C", _):
-            if mode == .content, let h = contentPane.selected {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(h.key, forType: .string)
-                toast("已复制路径")
-            } else {
-                activate(.copyPath)
-            }
-            return true
         case (.command, ",", _): hide(); openSettings?(); return true
         case (.command, "/", _): showSyntaxHelp(); return true
         case (.command, "d", _), (.command, "D", _): toggleFavorite(); return true
@@ -1222,26 +1253,89 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         return item
     }
 
-    private enum Action { case open, reveal, copyPath }
+    private enum Action { case open, reveal }
 
     private func activate(_ action: Action) {
         guard let item = selectedItem else { return }
         let url = URL(fileURLWithPath: item.path)
-        switch action {
-        case .copyPath:
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.path, forType: .string)
-            toast("已复制路径")
+        guard FileManager.default.fileExists(atPath: item.path) else {
+            toast("文件已不存在，索引会自动更新")
             return
-        case .open, .reveal:
-            guard FileManager.default.fileExists(atPath: item.path) else {
-                toast("文件已不存在，索引会自动更新")
-                return
-            }
-            usage?.recordOpen(path: item.path, fileId: item.fileId)
-            hide()
-            if action == .open { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
+        usage?.recordOpen(path: item.path, fileId: item.fileId)
+        hide()
+        if action == .open { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+
+    // MARK: Context menu
+
+    /// Right click: the clicked row becomes the selection (the actions work on it), then the
+    /// menu for that kind of result is built.
+    private func contextMenu(content: Bool, row: Int) -> NSMenu? {
+        let menu = NSMenu()
+        fillMenu(menu, content: content, row: row)
+        return menu.items.isEmpty ? nil : menu
+    }
+
+    private func fillMenu(_ menu: NSMenu, content: Bool, row: Int) {
+        menu.removeAllItems()
+        let list = content ? contentPane.table : table
+        guard row >= 0 else { return }
+        if !content && isGroup(row) { return }
+        let wasSelected = list.selectedRow == row
+        if !wasSelected { list.selectRowIndexes([row], byExtendingSelection: false) }
+        panel.makeFirstResponder(list)
+        guard let target = content ? contentTarget() : nameTarget() else { return }
+        var actions = ResultMenu.Actions(
+            open: { [weak self] in
+                guard let self else { return }
+                if content { if let h = contentPane.selected { openContent(h, reveal: false) } } else { activate(.open) }
+            },
+            reveal: { [weak self] in
+                guard let self else { return }
+                if content { if let h = contentPane.selected { openContent(h, reveal: true) } } else { activate(.reveal) }
+            },
+            read: nil,
+            quickLook: { [weak self] in self?.toggleQuickLook() },
+            toggleFavorite: { [weak self] in self?.toggleFavorite() },
+            trash: { [weak self] in self?.trashSelected() },
+            removeRecent: { [weak self] in
+                guard let self else { return }
+                usage?.remove(path: target.path)
+                toast("已从最近打开中移除")
+                runSearch()
+            },
+            toast: { [weak self] in self?.toast($0) },
+            willLeave: { [weak self] in
+                guard let self else { return }
+                usage?.recordOpen(path: target.path, fileId: currentTarget()?.fileId)
+                hide()
+            })
+        if content {
+            // The occurrence shown in the preview, when the preview is already of this row.
+            actions.read = { [weak self] in
+                guard let self, let h = contentPane.selected else { return }
+                openReader(h, at: wasSelected ? max(0, contentPane.preview.currentHit) : 0)
+            }
+        }
+        ResultMenu.build(menu, for: target, actions: actions)
+    }
+
+    private func nameTarget() -> ResultMenu.Target? {
+        guard let item = selectedItem else { return nil }
+        let exists = FileManager.default.fileExists(atPath: item.path)
+        let kind: ResultMenu.Target.Kind = !exists ? .missing : item.kind == .app ? .app : item.kind == .folder ? .folder : .file
+        let name = (item.path as NSString).lastPathComponent
+        return ResultMenu.Target(kind: kind, path: item.path, name: name, isFavorite: usage?.isFavorite(path: item.path) ?? false,
+                                 isRecent: item.group == .recents, copyPathText: item.path)
+    }
+
+    private func contentTarget() -> ResultMenu.Target? {
+        guard let h = contentPane.selected else { return nil }
+        let exists = FileManager.default.fileExists(atPath: h.path)
+        let kind: ResultMenu.Target.Kind = !exists ? .missing : h.isMember ? .member : .file
+        return ResultMenu.Target(kind: kind, path: h.path, name: h.name, isFavorite: usage?.isFavorite(path: h.path) ?? false,
+                                 canRead: true, copyPathText: h.key)
     }
 
     @objc private func doubleClicked() {
@@ -1312,7 +1406,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     // MARK: Quick Look
 
     private func toggleQuickLook() {
-        guard selectedItem != nil else { return }
+        refreshPreviewURL()
+        guard previewURL != nil else { return }
         let ql = QLPreviewPanel.shared()!
         if ql.isVisible { ql.orderOut(nil) } else { ql.makeKeyAndOrderFront(nil) }
     }
@@ -1320,8 +1415,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     /// Quick Look calls its data source on the main thread; the URL is mirrored here for it.
     nonisolated(unsafe) private var previewURL: NSURL?
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        previewURL = selectedItem.map { URL(fileURLWithPath: $0.path) as NSURL }
+    func tableViewSelectionDidChange(_ notification: Notification) { refreshPreviewURL() }
+
+    /// The selected result of the current list (an archive member has no file of its own).
+    private func refreshPreviewURL() {
+        if mode == .content {
+            previewURL = contentPane.selected.flatMap { $0.isMember ? nil : URL(fileURLWithPath: $0.path) as NSURL }
+        } else {
+            previewURL = selectedItem.map { URL(fileURLWithPath: $0.path) as NSURL }
+        }
     }
 
     /// ↑ ↓ keep moving through the list while the panel is up.
@@ -1329,7 +1431,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         guard event.type == .keyDown else { return false }
         let code = event.keyCode
         guard code == 125 || code == 126 else { return false }
-        MainActor.assumeIsolated { moveSelection(code == 125 ? 1 : -1) }
+        MainActor.assumeIsolated {
+            if mode == .content {
+                contentPane.moveSelection(code == 125 ? 1 : -1)
+                refreshPreviewURL()
+                panel.reloadData()
+            } else {
+                moveSelection(code == 125 ? 1 : -1)
+            }
+        }
         return true
     }
 
