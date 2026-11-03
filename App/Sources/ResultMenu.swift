@@ -118,7 +118,7 @@ enum ResultMenu {
                 willLeave()
                 ws.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
             }
-            let icon = ws.icon(forFile: app.path)
+            let icon = appIcon(atPath: app.path)
             icon.size = NSSize(width: 16, height: 16)
             item.image = icon
             menu.addItem(item)

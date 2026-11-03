@@ -539,7 +539,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             if types.isEmpty { toast("“\(item.name)”没有声明可打开的文档类型"); return true }
             // The name as Finder shows it (localized: “预览”, not “Preview”).
             types.appName = (FileManager.default.displayName(atPath: item.path) as NSString).deletingPathExtension
-            setScope(.app(types), icon: NSWorkspace.shared.icon(forFile: item.path), title: types.appName)
+            setScope(.app(types), icon: appIcon(atPath: item.path), title: types.appName)
         case .folder:
             setScope(.folder(item.path), icon: NSWorkspace.shared.icon(forFile: item.path), title: FileManager.default.displayName(atPath: item.path))
         default:
@@ -755,7 +755,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         var types = DocumentTypes(appPath: app.path)
         if types.isEmpty { toast("“\(name)”没有声明可打开的文档类型"); return }
         types.appName = name
-        applyFilter(.app(types), title: name, icon: NSWorkspace.shared.icon(forFile: app.path))
+        applyFilter(.app(types), title: name, icon: appIcon(atPath: app.path))
     }
 
     private var selectionIsFirst: Bool {

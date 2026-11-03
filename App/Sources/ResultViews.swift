@@ -84,7 +84,7 @@ final class ResultCellView: NSTableCellView {
 
     func configure(_ item: ResultItem, terms: [String]) {
         // System file icons (apps show their own icon), as in Spotlight. NSWorkspace caches them.
-        icon.image = NSWorkspace.shared.icon(forFile: item.path)
+        icon.image = item.kind == .app ? appIcon(atPath: item.path) : NSWorkspace.shared.icon(forFile: item.path)
         path.stringValue = PathUtil.abbreviate((item.path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
         meta.stringValue = item.meta
         name.attributedStringValue = Self.highlight(item.name, terms: terms)

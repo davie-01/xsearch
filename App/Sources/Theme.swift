@@ -118,6 +118,13 @@ enum PerfLog {
     }
 }
 
+/// An app's own icon. Some system apps in /Applications (Safari) are links into
+/// /System/Cryptexes, and a link's icon carries the alias arrow; Spotlight shows the app's.
+@MainActor
+func appIcon(atPath path: String) -> NSImage {
+    NSWorkspace.shared.icon(forFile: URL(fileURLWithPath: path).resolvingSymlinksInPath().path)
+}
+
 /// Brings one of XSearch's normal windows in front of every app. Activation is cooperative
 /// (macOS 14+): a request made while the status menu closes is often declined, which leaves
 /// the window above other inactive apps but below the active one. `orderFrontRegardless`
