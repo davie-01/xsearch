@@ -3400,6 +3400,17 @@ public func extractSpreadsheet(path: String, maxUnpackedBytes: UInt64)throws  ->
 })
 }
 /**
+ * Word 97–2003 binary documents (.doc, WPS Writer's binary form). Versioned on the Swift side.
+ */
+public func extractWord97(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_word97(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+/**
  * Unpacks members whose extension is in `extensions` (lowercase, no dot) into `dest`.
  */
 public func unpackArchive(path: String, dest: String, extensions: [String], maxMemberBytes: UInt64, maxTotalBytes: UInt64, maxMembers: UInt32)throws  -> ArchiveListing  {
@@ -3455,6 +3466,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_spreadsheet() != 16974) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_word97() != 23624) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_unpack_archive() != 28679) {

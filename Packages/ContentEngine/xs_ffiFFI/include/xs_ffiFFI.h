@@ -462,6 +462,11 @@ RustBuffer uniffi_xs_ffi_fn_func_extract_pptx(RustBuffer path, uint64_t max_unpa
 RustBuffer uniffi_xs_ffi_fn_func_extract_spreadsheet(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_WORD97
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_WORD97
+RustBuffer uniffi_xs_ffi_fn_func_extract_word97(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_UNPACK_ARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_UNPACK_ARCHIVE
 RustBuffer uniffi_xs_ffi_fn_func_unpack_archive(RustBuffer path, RustBuffer dest, RustBuffer extensions, uint64_t max_member_bytes, uint64_t max_total_bytes, uint32_t max_members, RustCallStatus *_Nonnull out_status
@@ -798,6 +803,12 @@ uint16_t uniffi_xs_ffi_checksum_func_extract_pptx(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_SPREADSHEET
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_SPREADSHEET
 uint16_t uniffi_xs_ffi_checksum_func_extract_spreadsheet(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_WORD97
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_WORD97
+uint16_t uniffi_xs_ffi_checksum_func_extract_word97(void
     
 );
 #endif

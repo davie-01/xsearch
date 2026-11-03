@@ -53,9 +53,9 @@ extension ContentType {
 
 public enum Extractor {
     public static let pdfVersion: UInt64 = 1
-    public static let docVersion: UInt64 = 1
+    public static let docVersion: UInt64 = 2
     public static let rtfVersion: UInt64 = 1
-    public static let wpsVersion: UInt64 = 1
+    public static let wpsVersion: UInt64 = 2
 
     /// Current extractor version per type (Rust ones come from the engine).
     public static func version(of type: ContentType) -> UInt64 {
@@ -107,7 +107,7 @@ public enum Extractor {
             return try pdf(path, maxBytes: limits.maxUnpackedBytes)
         case .doc:
             try checkSize(path, limits)
-            return try doc(path)
+            return try doc(path, limits: limits)
         case .wps:
             // WPS Writer saves either an OOXML package (= docx) or Word 97 binary (= doc).
             try checkSize(path, limits)
@@ -117,8 +117,8 @@ public enum Extractor {
                 r.extractorVersion = wpsVersion
                 return r
             }
-            var r = try attributed(path, type: .docFormat, method: "wps/doc", version: wpsVersion)
-            if r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { r.state = "partial"; r.warnings.append("没有读到正文") }
+            var r = try word97(path, limits: limits, fallback: "wps/doc", version: wpsVersion)
+            if r.method == "word97" { r.method = "wps/word97" }
             return r
         case .rtf:
             try checkSize(path, limits)
@@ -202,10 +202,22 @@ public enum Extractor {
 
     // MARK: DOC
 
-    /// Legacy Word: NSAttributedString first (M0: identical to textutil on all real samples),
-    /// textutil as fallback. One paragraph anchor per non-empty line.
-    static func doc(_ path: String) throws -> ExtractionResult {
-        try attributed(path, type: .docFormat, method: "nsattributedstring", version: docVersion)
+    /// Legacy Word: our own Word 97 reader first (AppKit returns no text at all for some real
+    /// documents), AppKit / textutil when it fails or finds nothing. No text from either is
+    /// partial, not complete: the file is then worth another try with a later version.
+    static func doc(_ path: String, limits: ExtractionLimits) throws -> ExtractionResult {
+        try word97(path, limits: limits, fallback: "nsattributedstring", version: docVersion)
+    }
+
+    static func word97(_ path: String, limits: ExtractionLimits, fallback: String, version: UInt64) throws -> ExtractionResult {
+        if var r = try? rust({ try extractWord97(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }),
+           !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            r.extractorVersion = version
+            return r
+        }
+        var r = try attributed(path, type: .docFormat, method: fallback, version: version)
+        if r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { r.state = "partial"; r.warnings.append("没有读到正文") }
+        return r
     }
 
     /// AppKit's readers (.doc, RTF), textutil as fallback; a paragraph anchor per non-empty line.

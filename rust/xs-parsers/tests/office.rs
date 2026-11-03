@@ -228,3 +228,69 @@ fn workbook_declaring_too_much_is_refused_before_reading() {
     let small = Limits { max_file_bytes: 1 << 20, max_unpacked_bytes: 1000 };
     assert!(office::spreadsheet(&p, small).unwrap_err().to_string().contains("uncompressed size limit"));
 }
+
+/// A minimal Word 97 file: FIB, a UTF-16 piece and a cp1252 piece, a field, a tracked deletion.
+#[test]
+fn word97_pieces_fields_and_deletions() {
+    let put16 = |d: &mut Vec<u8>, o: usize, v: u16| d[o..o + 2].copy_from_slice(&v.to_le_bytes());
+    let put32 = |d: &mut Vec<u8>, o: usize, v: u32| d[o..o + 4].copy_from_slice(&v.to_le_bytes());
+    let unicode: Vec<u16> = "合同金额已删除\r\u{13} HYPERLINK \"http://x\" \u{14}链接\u{15}文字\r表格\u{07}单元\u{07}\r".encode_utf16().collect();
+    let ascii = b"Total 100\r";
+    let mut wd = vec![0u8; 3072];
+    put16(&mut wd, 0, 0xA5EC);
+    put16(&mut wd, 2, 193);
+    put16(&mut wd, 0x0A, 0x0200);
+    put16(&mut wd, 32, 14);
+    put16(&mut wd, 62, 22);
+    put32(&mut wd, 76, (unicode.len() + ascii.len()) as u32);
+    put16(&mut wd, 152, 93);
+    for (i, u) in unicode.iter().enumerate() {
+        put16(&mut wd, 1024 + i * 2, *u);
+    }
+    wd[1536..1536 + ascii.len()].copy_from_slice(ascii);
+    // CHPX FKP on page 4: "已删除" (characters 4..7 of the UTF-16 piece) is a tracked deletion.
+    let page = 4 * 512;
+    put32(&mut wd, page, 1024 + 8);
+    put32(&mut wd, page + 4, 1024 + 14);
+    wd[page + 8] = 100;
+    wd[page + 200] = 3;
+    put16(&mut wd, page + 201, 0x0800);
+    wd[page + 203] = 1;
+    wd[page + 511] = 1;
+
+    let mut table = vec![0u8; 128];
+    let cps = [0u32, unicode.len() as u32, (unicode.len() + ascii.len()) as u32];
+    let mut plc = vec![];
+    cps.iter().for_each(|c| plc.extend(c.to_le_bytes()));
+    for fc in [1024u32, (1536 * 2) | 0x4000_0000] {
+        plc.extend([0, 0]);
+        plc.extend(fc.to_le_bytes());
+        plc.extend([0, 0]);
+    }
+    let mut clx = vec![2u8];
+    clx.extend((plc.len() as u32).to_le_bytes());
+    clx.extend(plc);
+    table[..clx.len()].copy_from_slice(&clx);
+    put32(&mut wd, 154 + 33 * 8, 0);
+    put32(&mut wd, 154 + 33 * 8 + 4, clx.len() as u32);
+    for (i, v) in [1024u32 + 8, 1024 + 14, 4].iter().enumerate() {
+        put32(&mut table, 100 + i * 4, *v);
+    }
+    put32(&mut wd, 154 + 12 * 8, 100);
+    put32(&mut wd, 154 + 12 * 8 + 4, 12);
+
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("old.doc");
+    let mut ole = cfb::create(&p).unwrap();
+    ole.create_stream("/WordDocument").unwrap().write_all(&wd).unwrap();
+    ole.create_stream("/1Table").unwrap().write_all(&table).unwrap();
+    ole.flush().unwrap();
+    drop(ole);
+    let e = office::word97(&p, Limits::default()).unwrap();
+    assert_eq!(e.method, "word97");
+    assert_eq!(e.text.lines().collect::<Vec<_>>(), vec!["合同金额", "链接文字", "表格\t单元", "Total 100"]);
+    assert_eq!(e.anchors.len(), 4);
+    assert_eq!(e.anchors[1].kind, AnchorKind::Paragraph { index: 2 });
+    assert_eq!(e.anchors[1].start, 5);
+    assert_eq!(e.state, ExtractState::Complete);
+}

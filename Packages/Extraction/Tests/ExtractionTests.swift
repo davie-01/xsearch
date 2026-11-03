@@ -56,13 +56,15 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(r.warnings.contains { $0.contains("1 页") })
 }
 
-@Test func docViaAttributedString() throws {
+@Test func docFallsBackToAttributedString() throws {
     let path = tmp("legacy.doc")
     let source = NSAttributedString(string: "旧版 Word 文档\n\n第二段 合同金额 100 万元\n")
     let data = try source.data(from: NSRange(location: 0, length: source.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.docFormat])
     try data.write(to: URL(fileURLWithPath: path))
     let r = try Extractor.extract(path: path, limits: ExtractionLimits())
+    // AppKit writes a MiniFAT our OLE reader refuses: the Word 97 reader fails, AppKit reads it.
     #expect(r.method == "nsattributedstring")
+    #expect(r.extractorVersion == Extractor.docVersion)
     #expect(r.text.contains("第二段 合同金额 100 万元"))
     let anchors = try JSONDecoder().decode([AnchorJSON].self, from: Data(r.anchorsJSON.utf8))
     #expect(anchors.map(\.kind) == ["paragraph", "paragraph"])

@@ -559,6 +559,13 @@ pub fn extract_docx(
     Ok(output(e, xs_parsers::DOCX_EXTRACTOR_VERSION))
 }
 
+/// Word 97–2003 binary documents (.doc, WPS Writer's binary form). Versioned on the Swift side.
+#[uniffi::export]
+pub fn extract_word97(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::office::word97(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, 0))
+}
+
 #[uniffi::export]
 pub fn extract_spreadsheet(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
     let e = xs_parsers::office::spreadsheet(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;

@@ -693,3 +693,171 @@ mod budget_tests {
         assert_eq!(o.text, "😀");
     }
 }
+
+/// Text of a Word 97–2003 binary document ([MS-DOC]): the FIB locates the piece table (CLX) in
+/// the table stream, and each piece is either 8-bit (cp1252) or UTF-16 text in the WordDocument
+/// stream. AppKit's .doc reader returns nothing for some real documents; this does not depend
+/// on it. Field codes are dropped (their results kept); one paragraph anchor per non-empty line.
+pub fn word97(path: &Path, limits: Limits) -> Result<Extraction> {
+    let mut ole = cfb::open(path).context("not an OLE2 file")?;
+    let mut wd = vec![];
+    ole.open_stream("/WordDocument").context("missing WordDocument stream")?.read_to_end(&mut wd)?;
+    let u16at = |d: &[u8], o: usize| d.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let u32at = |d: &[u8], o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    if u16at(&wd, 0) != Some(0xA5EC) {
+        bail!("not a Word document");
+    }
+    // Word 6 / 95 files use another FIB layout.
+    if u16at(&wd, 2).unwrap_or(0) < 101 {
+        bail!("Word 95 or older");
+    }
+    let flags = u16at(&wd, 0x0A).context("short FIB")?;
+    if flags & 0x0100 != 0 {
+        bail!("文档已加密，无法提取");
+    }
+    let mut table = vec![];
+    let name = if flags & 0x0200 != 0 { "/1Table" } else { "/0Table" };
+    ole.open_stream(name).context("missing table stream")?.read_to_end(&mut table)?;
+
+    // FibBase (32 bytes), then counted blocks: fibRgW, fibRgLw, fibRgFcLcb.
+    let csw = u16at(&wd, 32).context("short FIB")? as usize;
+    let lw = 34 + csw * 2;
+    let cslw = u16at(&wd, lw).context("short FIB")? as usize;
+    // ccpText, ccpFtn, ccpHdd, ccpMcr, ccpAtn, ccpEdn, ccpTxbx, ccpHdrTxbx: every story.
+    let total: u64 = (3..11).filter(|&i| i < cslw).map(|i| u32at(&wd, lw + 2 + i * 4).unwrap_or(0) as u64).sum();
+    let fclcb = lw + 2 + cslw * 4 + 2;
+    let fc_clx = u32at(&wd, fclcb + 33 * 8).context("short FIB")? as usize;
+    let lcb_clx = u32at(&wd, fclcb + 33 * 8 + 4).context("short FIB")? as usize;
+    let clx = table.get(fc_clx..fc_clx.saturating_add(lcb_clx)).context("piece table outside the table stream")?;
+    let mut pos = 0;
+    let plc = loop {
+        match clx.get(pos) {
+            Some(1) => pos += 3 + u16at(clx, pos + 1).context("bad CLX")? as usize,
+            Some(2) => {
+                let lcb = u32at(clx, pos + 1).context("bad CLX")? as usize;
+                break clx.get(pos + 5..pos + 5 + lcb).context("bad CLX")?;
+            }
+            _ => bail!("bad CLX"),
+        }
+    };
+    let n = plc.len().saturating_sub(4) / 12;
+    let hidden = word97_hidden_runs(&wd, &table, fclcb);
+    // Characters whose run is deleted (tracked change) or hidden are not part of the document.
+    let shown = |fc: u32| {
+        let i = hidden.partition_point(|r| r.1 <= fc);
+        !hidden.get(i).is_some_and(|r| r.0 <= fc)
+    };
+    let mut raw = String::new();
+    for i in 0..n {
+        let start = u32at(plc, i * 4).unwrap_or(0) as u64;
+        let end = (u32at(plc, i * 4 + 4).unwrap_or(0) as u64).min(if total > 0 { total } else { u64::MAX });
+        if end <= start {
+            continue;
+        }
+        let len = (end - start) as usize;
+        let fc = u32at(plc, (n + 1) * 4 + i * 8 + 2).unwrap_or(0);
+        if fc & 0x4000_0000 != 0 {
+            let off = (fc & 0x3FFF_FFFF) as usize / 2;
+            let Some(b) = wd.get(off..off.saturating_add(len).min(wd.len())) else { continue };
+            let kept: Vec<u8> = b.iter().enumerate().filter(|(j, _)| shown((off + j) as u32)).map(|(_, &c)| c).collect();
+            raw.push_str(&encoding_rs::WINDOWS_1252.decode_without_bom_handling(&kept).0);
+        } else {
+            let off = fc as usize;
+            let Some(b) = wd.get(off..off.saturating_add(len * 2).min(wd.len())) else { continue };
+            let units: Vec<u16> = b.as_chunks::<2>().0.iter().enumerate().filter(|(j, _)| shown((off + j * 2) as u32)).map(|(_, c)| u16::from_le_bytes(*c)).collect();
+            raw.push_str(&String::from_utf16_lossy(&units));
+        }
+    }
+
+    // Special characters: 0x13 field begin, 0x14 separator, 0x15 end (code between begin and
+    // separator is dropped); 0x0D paragraph, 0x0B line, 0x0C page/section, 0x07 cell end.
+    let mut text = String::with_capacity(raw.len());
+    let mut fields: Vec<bool> = vec![];
+    for c in raw.chars() {
+        match c {
+            '\u{13}' => fields.push(true),
+            '\u{14}' => {
+                if let Some(code) = fields.last_mut() {
+                    *code = false;
+                }
+            }
+            '\u{15}' => {
+                fields.pop();
+            }
+            _ if fields.iter().any(|&code| code) => {}
+            '\r' | '\u{0B}' | '\u{0C}' | '\u{0E}' => text.push('\n'),
+            '\u{07}' => text.push('\t'),
+            '\u{1E}' => text.push('-'),
+            '\u{A0}' => text.push(' '),
+            '\t' => text.push('\t'),
+            c if (c as u32) < 0x20 => {}
+            c => text.push(c),
+        }
+    }
+    drop(raw);
+
+    let mut out = Out::new(limits);
+    let mut index = 0;
+    for line in text.split('\n') {
+        let line = line.trim_end_matches('\t');
+        if line.trim().is_empty() {
+            continue;
+        }
+        index += 1;
+        out.anchor(AnchorKind::Paragraph { index });
+        if !out.push(line) || !out.push("\n") {
+            break;
+        }
+    }
+    Ok(out.done("word97"))
+}
+
+/// Byte ranges [start, end) of the WordDocument stream whose character properties mark the text
+/// deleted (sprmCFRMarkDel) or hidden (sprmCFVanish), sorted. From the CHPX FKPs that
+/// PlcBteChpx points to; anything unreadable simply yields no ranges.
+fn word97_hidden_runs(wd: &[u8], table: &[u8], fclcb: usize) -> Vec<(u32, u32)> {
+    let u16at = |d: &[u8], o: usize| d.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let u32at = |d: &[u8], o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let mut runs = vec![];
+    let (Some(fc), Some(lcb)) = (u32at(wd, fclcb + 12 * 8), u32at(wd, fclcb + 12 * 8 + 4)) else { return runs };
+    let Some(plc) = table.get(fc as usize..(fc as usize).saturating_add(lcb as usize)) else { return runs };
+    let n = plc.len().saturating_sub(4) / 8;
+    for i in 0..n {
+        let Some(pn) = u32at(plc, (n + 1) * 4 + i * 4) else { break };
+        let base = (pn & 0x3F_FFFF) as usize * 512;
+        let Some(page) = wd.get(base..base + 512) else { continue };
+        let crun = page[511] as usize;
+        for r in 0..crun.min(101) {
+            let (Some(start), Some(end)) = (u32at(page, r * 4), u32at(page, r * 4 + 4)) else { break };
+            let Some(&word) = page.get((crun + 1) * 4 + r) else { break };
+            if word == 0 {
+                continue;
+            }
+            let at = word as usize * 2;
+            let Some(&cb) = page.get(at) else { continue };
+            let Some(grpprl) = page.get(at + 1..(at + 1 + cb as usize).min(511)) else { continue };
+            let mut p = 0;
+            let mut hide = false;
+            while let Some(op) = u16at(grpprl, p) {
+                p += 2;
+                let size = match op >> 13 {
+                    0 | 1 => 1,
+                    2 | 4 | 5 => 2,
+                    3 => 4,
+                    7 => 3,
+                    _ => 1 + *grpprl.get(p).unwrap_or(&0) as usize,
+                };
+                // 1 = on, 0x81 = the opposite of the style (assumed off there, so on).
+                if (op == 0x0800 || op == 0x083C) && matches!(grpprl.get(p), Some(1 | 0x81)) {
+                    hide = true;
+                }
+                p += size;
+            }
+            if hide && end > start {
+                runs.push((start, end));
+            }
+        }
+    }
+    runs.sort_unstable();
+    runs
+}
