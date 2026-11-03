@@ -105,6 +105,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         field.placeholderString = "搜索文件名，或切换到内容"
         field.font = .systemFont(ofSize: 15)
         field.controlSize = .large
+        // No blue focus ring: the caret already shows where typing goes (as in Spotlight and Finder).
+        field.focusRingType = .none
         field.delegate = self
         field.sendsSearchStringImmediately = true
         modeControl.target = self

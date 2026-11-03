@@ -125,12 +125,20 @@ enum PerfLog {
 @MainActor
 func bringToFront(_ window: NSWindow?) {
     guard let window else { return }
-    NSApp.activate()
+    activateXSearch()
     window.makeKeyAndOrderFront(nil)
     window.orderFrontRegardless()
     DispatchQueue.main.async {
-        NSApp.activate()
+        activateXSearch()
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
     }
+}
+
+/// The launcher never activates XSearch, so a window opened from it (⌘E, the reader) is opened
+/// by an app that is not in front, and macOS declines a plain `activate()` then: the window
+/// showed with no keyboard focus. Only the older call still takes the front for it.
+@MainActor
+private func activateXSearch() {
+    NSApp.activate(ignoringOtherApps: true)
 }
