@@ -1326,8 +1326,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             },
             read: nil,
             quickLook: { [weak self] in
-                // Wait for the context menu to close; keyboard and menu now use one path.
-                DispatchQueue.main.async { self?.toggleQuickLook() }
+                // Wait for the context menu to close.
+                DispatchQueue.main.async { self?.quickLookFromKeyEvent() }
             },
             toggleFavorite: { [weak self] in self?.toggleFavorite() },
             trash: { [weak self] in self?.trashSelected() },
@@ -1445,6 +1445,26 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             self.panel.makeFirstResponder(self.mode == .content ? self.contentPane.table : self.table)
         }
     }
+
+    /// Quick Look waits for the preview before it shows only when a key press opens it (the
+    /// event being handled is a key down); opened from a menu click it waited out its timeout
+    /// and faded in an empty panel first. The menu opens it from a key event of its own.
+    private func quickLookFromKeyEvent() {
+        let code: UInt16 = 0xFFFF  // no real key
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: panel.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "",
+                                       isARepeat: false, keyCode: code) else { toggleQuickLook(); return }
+        if quickLookMonitor == nil {
+            quickLookMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard event.keyCode == code else { return event }
+                MainActor.assumeIsolated { self?.toggleQuickLook() }
+                return nil
+            }
+        }
+        NSApp.postEvent(e, atStart: false)
+    }
+
+    private var quickLookMonitor: Any?
 
     private var quickLookVisible: Bool { QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible }
 
