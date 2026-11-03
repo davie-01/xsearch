@@ -191,7 +191,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentChip.wantsLayer = true
         contentChip.layer?.cornerRadius = 8
         contentChip.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
-        contentChip.contentTintColor = .controlAccentColor
+        contentChip.contentTintColor = Theme.matchText
         contentChip.font = Self.tokenFont
         contentChip.title = "内容"
         contentChip.widthAnchor.constraint(equalToConstant: ceil(("内容" as NSString).size(withAttributes: [.font: Self.tokenFont]).width) + 24).isActive = true

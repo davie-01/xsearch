@@ -102,7 +102,7 @@ final class ResultCellView: NSTableCellView {
             // Display-only approximation of the folded-key match; the index decides membership.
             let r = ns.range(of: term, options: [.caseInsensitive, .widthInsensitive])
             guard r.location != NSNotFound else { continue }
-            s.addAttributes([.font: Theme.nameMatchFont, .foregroundColor: NSColor.controlAccentColor], range: r)
+            s.addAttributes([.font: Theme.nameMatchFont, .foregroundColor: Theme.matchText], range: r)
         }
         return s
     }

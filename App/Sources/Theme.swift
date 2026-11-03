@@ -51,6 +51,13 @@ enum Theme {
     /// Spotlight's dark glass is a light grey veil, not a black one: measured against a
     /// Spotlight screenshot over the same kind of dark window.
     static let panelTint = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 0.45, alpha: 0.38) : NSColor.white.withAlphaComponent(0.5) }
+    /// Matched text over the grey glass: the accent alone is too dark on a selected row, so it
+    /// is lifted toward white in dark mode (and deepened a little in light mode).
+    static let matchText = NSColor(name: nil) { a in
+        let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) ?? .systemBlue
+        let dark = a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return (dark ? accent.blended(withFraction: 0.55, of: .white) : accent.blended(withFraction: 0.15, of: .black)) ?? accent
+    }
     static var selectionFill: NSColor { NSColor.labelColor.withAlphaComponent(0.2) }
     static var capsuleFill: NSColor { NSColor.labelColor.withAlphaComponent(0.14) }
 
