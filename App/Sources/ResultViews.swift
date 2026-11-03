@@ -8,7 +8,7 @@ final class ResultRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard !isGroup, selectionHighlightStyle != .none else { return }
         Theme.selectionFill.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 1), xRadius: 10, yRadius: 10).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 1), xRadius: 14, yRadius: 14).fill()
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }

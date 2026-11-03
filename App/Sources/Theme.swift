@@ -48,9 +48,11 @@ enum Theme {
     static let warnText = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua]) == .darkAqua ? hex(0xFFD98A) : hex(0x6B4A00) }
     /// Spotlight-style translucent fills that read on top of glass in both appearances.
     /// Over the launcher's glass: strong enough for text over any window behind it.
-    static let panelTint = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.black.withAlphaComponent(0.55) : NSColor.white.withAlphaComponent(0.62) }
-    static var selectionFill: NSColor { NSColor.labelColor.withAlphaComponent(0.11) }
-    static var capsuleFill: NSColor { NSColor.labelColor.withAlphaComponent(0.08) }
+    /// Spotlight's dark glass is a light grey veil, not a black one: measured against a
+    /// Spotlight screenshot over the same kind of dark window.
+    static let panelTint = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 0.45, alpha: 0.38) : NSColor.white.withAlphaComponent(0.5) }
+    static var selectionFill: NSColor { NSColor.labelColor.withAlphaComponent(0.2) }
+    static var capsuleFill: NSColor { NSColor.labelColor.withAlphaComponent(0.14) }
 
     static let chipBackground = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua]) == .darkAqua ? NSColor.white.withAlphaComponent(0.12) : hex(0xEFEFF2) }
 

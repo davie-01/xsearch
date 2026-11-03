@@ -670,7 +670,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             chip.isBordered = false
             chip.wantsLayer = true
             chip.layer?.cornerRadius = 13
-            chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+            chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
             let text = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 14.5), .foregroundColor: NSColor.labelColor.withAlphaComponent(0.85)])
             chip.attributedTitle = text
             let chipWidth = ceil(text.size().width) + 17
