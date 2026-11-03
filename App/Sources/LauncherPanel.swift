@@ -9,6 +9,8 @@ import XSearchCore
 /// leaves the previously active app in front (§13).
 final class LauncherPanel: NSPanel {
     var onKeyEquivalent: ((NSEvent) -> Bool)?
+    /// Esc anywhere in the panel: the controller's hide (it also hands the front back).
+    var onCancel: (() -> Void)?
 
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 720, height: 120),
@@ -34,7 +36,9 @@ final class LauncherPanel: NSPanel {
         return super.performKeyEquivalent(with: event)
     }
 
-    override func cancelOperation(_ sender: Any?) { orderOut(nil) }
+    override func cancelOperation(_ sender: Any?) {
+        if let onCancel { onCancel() } else { orderOut(nil) }
+    }
 }
 
 /// Text field that reports IME composition so searches and key handling can wait (§5.3).
@@ -91,10 +95,13 @@ final class ResultTable: NSTableView {
             panel.delegate = owner as? QLPreviewPanelDelegate
         }
     }
+    /// Quick Look closed: the launcher takes the keyboard back.
+    var onPreviewEnded: (() -> Void)?
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
         MainActor.assumeIsolated {
             panel.dataSource = nil
             panel.delegate = nil
+            onPreviewEnded?()
         }
     }
 }
@@ -153,6 +160,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         super.init()
         build()
         panel.onKeyEquivalent = { [weak self] in self?.keyEquivalent($0) ?? false }
+        panel.onCancel = { [weak self] in self?.hide() }
+        // ⌘W closes Quick Look: XSearch has no File menu whose Close would, and the key never
+        // reaches the panel's own key handling.
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 13, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isKeyWindow else { return event }
+            QLPreviewPanel.shared().orderOut(nil)
+            return nil
+        }
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
             // Clicking elsewhere dismisses the launcher; Quick Look and drags keep it.
             MainActor.assumeIsolated {
@@ -279,6 +295,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         table.setDraggingSourceOperationMask([.copy, .link, .generic], forLocal: false)
         table.setAccessibilityLabel("搜索结果")
         table.contextMenu = { [weak self] row in self?.contextMenu(content: false, row: row) }
+        table.onPreviewEnded = { [weak self] in self?.previewEnded() }
         scroll.documentView = table
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -310,6 +327,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentPane.table.onTyping = { [weak self] in self?.typeInInput($0) }
         contentPane.table.contextMenu = { [weak self] row in self?.contextMenu(content: true, row: row) }
         contentPane.table.previewController = self
+        contentPane.table.onPreviewEnded = { [weak self] in self?.previewEnded() }
         contentPane.onOpen = { [weak self] hit, reveal in self?.openContent(hit, reveal: reveal) }
         contentPane.onRead = { [weak self] hit, n in self?.openReader(hit, at: n) }
         contentPane.isHidden = true
@@ -444,6 +462,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func hide() {
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
         panel.orderOut(nil)
+        if activatedForQuickLook {
+            activatedForQuickLook = false
+            // Back to the app that was in front, unless another XSearch window is in use.
+            if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) { NSApp.deactivate() }
+        }
         // Nobody is looking: stop the query and any queued preview. `show` searches again.
         session.content.cancel()
         contentPane.invalidatePreview()
@@ -1146,7 +1169,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             let focus = panel.firstResponder === table ? "list" : panel.firstResponder is NSTextView ? "input" : "other"
             let ql = QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible
             let preview = mode == .content ? " selected=\(contentPane.selected?.name ?? "-") preview=\(contentPane.preview.title.stringValue)|\(contentPane.preview.position.stringValue) hitVisible=\(contentPane.preview.currentHitVisible)" : ""
-            let line = "\(step)\(preview) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
+            let line = "\(step)\(preview) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) active=\(NSApp.isActive) panelKey=\(panel.isKeyWindow) qlKey=\(QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isKeyWindow) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
             if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
         }
     }
@@ -1274,7 +1297,16 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func contextMenu(content: Bool, row: Int) -> NSMenu? {
         let menu = NSMenu()
         fillMenu(menu, content: content, row: row)
+        menu.delegate = menuCloser
         return menu.items.isEmpty ? nil : menu
+    }
+
+    /// Takes the keyboard back for the launcher when a context menu closes and the panel stays.
+    private lazy var menuCloser = MenuCloser { [weak self] in
+        DispatchQueue.main.async {
+            guard let self, self.panel.isVisible, !(QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible) else { return }
+            self.panel.makeKey()
+        }
     }
 
     private func fillMenu(_ menu: NSMenu, content: Bool, row: Int) {
@@ -1296,7 +1328,20 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 if content { if let h = contentPane.selected { openContent(h, reveal: true) } } else { activate(.reveal) }
             },
             read: nil,
-            quickLook: { [weak self] in self?.toggleQuickLook() },
+            quickLook: { [weak self] in
+                // After the menu closes the system hands the keyboard back to the app that was
+                // active before (the launcher never activates XSearch), so Esc and ⌘W reached
+                // that app instead of Quick Look. XSearch comes to the front for the preview and
+                // gives the front back when the launcher closes.
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.activatedForQuickLook = true
+                    NSApp.activate()
+                    self.panel.makeKey()
+                    self.panel.makeFirstResponder(list)
+                    self.toggleQuickLook()
+                }
+            },
             toggleFavorite: { [weak self] in self?.toggleFavorite() },
             trash: { [weak self] in self?.trashSelected() },
             removeRecent: { [weak self] in
@@ -1404,6 +1449,17 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     // MARK: Quick Look
+
+    private func previewEnded() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.panel.isVisible else { return }
+            // As when summoned: the panel takes the keyboard without activating anything.
+            self.panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// XSearch was brought to the front for Quick Look from the context menu.
+    private var activatedForQuickLook = false
 
     private func toggleQuickLook() {
         refreshPreviewURL()
@@ -1630,4 +1686,11 @@ final class FrameDriver: NSObject {
         }
         step(t)
     }
+}
+
+/// NSMenuDelegate that only reports the menu closing.
+final class MenuCloser: NSObject, NSMenuDelegate {
+    private let closed: () -> Void
+    init(_ closed: @escaping () -> Void) { self.closed = closed }
+    func menuDidClose(_ menu: NSMenu) { closed() }
 }
