@@ -347,7 +347,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
         let from = mainGlass.frame.offsetBy(dx: -Shell.inset, dy: -Shell.inset)
         let fromBodyAlpha = body.alphaValue
-        let collapsing = targetH < from.height - 0.5
+        // Only collapsing to the bare bar fades the content out first; a body that merely gets
+        // shorter (a notice line gone) keeps its content and simply resizes.
+        let collapsing = targetH < from.height - 0.5 && bodyHeight == 0
         let expanding = targetH > from.height + 0.5
         let widthCurve = SpringCurve(response: 0.3, damping: 0.86)
         // Spotlight: content gone in ~25 ms, a ~0.1 s hold, then a quick height snap (~0.1 s).
