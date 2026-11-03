@@ -650,6 +650,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         setChips(out.query.chips)
         setFilters(for: out)
         table.reloadData()
+        // The clip view moves an empty list up inside the 8 pt empty body (4 pt insets), further
+        // with each empty result; the rows that followed kept the offset and the first was cut.
+        table.setFrameOrigin(.zero)
         // Start at the top so the first group header stays visible.
         scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
         scroll.reflectScrolledClipView(scroll.contentView)
