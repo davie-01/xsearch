@@ -190,8 +190,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentChip.isBordered = false
         contentChip.wantsLayer = true
         contentChip.layer?.cornerRadius = 8
-        contentChip.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
-        contentChip.contentTintColor = Theme.matchText
+        // Same look as the Tab scope token, without an icon.
+        contentChip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
+        contentChip.contentTintColor = .labelColor
         contentChip.font = Self.tokenFont
         contentChip.title = "内容"
         contentChip.widthAnchor.constraint(equalToConstant: ceil(("内容" as NSString).size(withAttributes: [.font: Self.tokenFont]).width) + 24).isActive = true
@@ -1102,7 +1103,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
             let focus = panel.firstResponder === table ? "list" : panel.firstResponder is NSTextView ? "input" : "other"
             let ql = QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible
-            let preview = mode == .content ? " selected=\(contentPane.selected?.name ?? "-") preview=\(contentPane.preview.title.stringValue)|\(contentPane.preview.position.stringValue)" : ""
+            let preview = mode == .content ? " selected=\(contentPane.selected?.name ?? "-") preview=\(contentPane.preview.title.stringValue)|\(contentPane.preview.position.stringValue) hitVisible=\(contentPane.preview.currentHitVisible)" : ""
             let line = "\(step)\(preview) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
             if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
         }

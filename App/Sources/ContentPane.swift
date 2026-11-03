@@ -237,6 +237,10 @@ final class PreviewPane: NSView {
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 8, height: 12)
+        for v in [textView, scroll.contentView] as [NSView] {
+            v.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(textViewFrameChanged), name: NSView.frameDidChangeNotification, object: v)
+        }
         textView.isVerticallyResizable = true
         // Large documents (millions of characters) must not be laid out in full on the main
         // thread: only what is shown or asked for gets laid out.
@@ -370,7 +374,7 @@ final class PreviewPane: NSView {
     }
 
     func go(to i: Int) {
-        guard !hits.isEmpty, let lm = textView.layoutManager, let storage = textView.textStorage else { return }
+        guard !hits.isEmpty, let storage = textView.textStorage else { return }
         let previous = currentHit
         currentHit = (i % hits.count + hits.count) % hits.count
         let target = hits[currentHit]
@@ -382,20 +386,44 @@ final class PreviewPane: NSView {
         }
         guard let r = PreviewWindow.visible(target, in: shownRange) else { return }
         storage.addAttributes([.backgroundColor: HitColors.current, .foregroundColor: NSColor.black], range: r)
-        // Center the current hit; non-contiguous layout lays out only around it.
-        lm.ensureLayout(forCharacterRange: r)
-        if let tc = textView.textContainer {
-            let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc)
-            let y = max(0, rect.midY - scroll.contentView.bounds.height / 2)
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
-            scroll.reflectScrolledClipView(scroll.contentView)
-        }
+        centerCurrentHit()
         marks.current = currentHit
         // A hit longer than the window is shown from its start.
         position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处" + (totalHits > UInt64(hits.count) ? "（共 \(Theme.count(Int(totalHits))) 处）" : "") + (r.length < target.length ? "（命中过长，只显示开头）" : "")
         let loc = anchors.last { $0.utf16 <= target.location }?.info.location
         subtitle.stringValue = [locationOverride ?? PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
         ruler.needsDisplay = true
+    }
+
+    /// Text width and visible height the current hit was last centered for.
+    private var centeredFor = NSSize.zero
+    private var viewSize: NSSize { NSSize(width: textView.frame.width, height: scroll.contentView.bounds.height) }
+
+    /// Centers the current hit; non-contiguous layout lays out only around it.
+    private func centerCurrentHit() {
+        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
+              let lm = textView.layoutManager, let tc = textView.textContainer else { return }
+        centeredFor = viewSize
+        lm.ensureLayout(forCharacterRange: r)
+        let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc)
+        let y = max(0, rect.midY - scroll.contentView.bounds.height / 2)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    /// A preview can arrive while the launcher is still expanding: the text then rewraps and
+    /// the hit moves, so it is centered again for the final size.
+    /// Dev log: is the current hit inside the visible part of the text?
+    var currentHitVisible: Bool {
+        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
+              let lm = textView.layoutManager, let tc = textView.textContainer else { return false }
+        let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc)
+        return scroll.contentView.bounds.intersects(rect.offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y))
+    }
+
+    @objc private func textViewFrameChanged() {
+        let size = viewSize
+        if currentHit >= 0, abs(size.width - centeredFor.width) > 0.5 || abs(size.height - centeredFor.height) > 0.5 { centerCurrentHit() }
     }
 
     private var currentPath = ""
