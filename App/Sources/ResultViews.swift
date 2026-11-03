@@ -35,7 +35,7 @@ final class GroupHeaderView: NSTableCellView {
 final class ResultCellView: NSTableCellView {
     let icon = NSImageView()
     let name = NSTextField(labelWithString: "")
-    /// “2.6 MB · 2026/10/13 10:06 · ” before the folder, as in Spotlight; it stays whole while
+    /// “2026/10/13 10:06 · 2.6 MB · ” before the folder, as in Spotlight; it stays whole while
     /// the folder is shortened in the middle.
     let details = NSTextField(labelWithString: "")
     let path = NSTextField(labelWithString: "")
@@ -91,12 +91,11 @@ final class ResultCellView: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Size (files) and modification date; apps and missing files show only where they are.
+    /// Modification date and size (files); apps and missing files show only where they are.
     static func details(_ item: ResultItem) -> String {
         guard item.kind != .app, item.mtime > 0 else { return "" }
-        var parts: [String] = []
+        var parts = [Theme.fullDate(item.mtime)]
         if item.kind != .folder { parts.append(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)) }
-        parts.append(Theme.fullDate(item.mtime))
         return parts.joined(separator: " · ") + " · "
     }
 
