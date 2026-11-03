@@ -124,7 +124,8 @@ final class SearchSession {
                     // Packages (.framework, .bundle, …) are shown like files, not folders.
                     let isFolder = h.flags.contains(.directory) && !h.flags.contains(.package)
                     let kind = FileKind.of(extension: NameKey.key(ext), isDirectory: isFolder, isApp: h.flags.isApp && ext == "app")
-                    let meta = kind == .folder ? "文件夹" : kind == .app ? "应用" : Theme.shortDate(h.mtime)
+                    // A file's date and size are on its path line (ResultCellView).
+                    let meta = kind == .folder ? "文件夹" : kind == .app ? "应用" : ""
                     items.append(ResultItem(group: .files, name: h.name, path: h.path, fileId: h.fileId, kind: kind, ext: ext, meta: meta,
                                             size: h.size, mtime: h.mtime))
                 }
@@ -181,7 +182,7 @@ final class SearchSession {
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
         let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let missing = attrs == nil
-        let meta = missing ? "文件已不存在" : kind == .folder ? "文件夹" : kind == .app ? "应用" : Theme.shortDate(Int64(mtime))
+        let meta = missing ? "文件已不存在" : kind == .folder ? "文件夹" : kind == .app ? "应用" : ""
         return ResultItem(group: group, name: isApp ? (name as NSString).deletingPathExtension : name, path: path, fileId: fileId, kind: kind, ext: ext, meta: meta,
                           size: (attrs?[.size] as? Int64) ?? 0, mtime: Int64(mtime))
     }

@@ -87,6 +87,11 @@ enum Theme {
         return formatter(format).string(from: date)
     }
 
+    /// Date and time in full, as Spotlight puts it before a result's folder.
+    nonisolated static func fullDate(_ seconds: Int64) -> String {
+        formatter("yyyy/M/d HH:mm").string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+    }
+
     nonisolated static func count(_ n: Int) -> String {
         let f = NumberFormatter()
         f.numberStyle = .decimal

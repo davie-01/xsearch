@@ -35,12 +35,15 @@ final class GroupHeaderView: NSTableCellView {
 final class ResultCellView: NSTableCellView {
     let icon = NSImageView()
     let name = NSTextField(labelWithString: "")
+    /// “2.6 MB · 2026/10/13 10:06 · ” before the folder, as in Spotlight; it stays whole while
+    /// the folder is shortened in the middle.
+    let details = NSTextField(labelWithString: "")
     let path = NSTextField(labelWithString: "")
     let meta = NSTextField(labelWithString: "")
 
     init() {
         super.init(frame: .zero)
-        for v in [icon, name, path, meta] as [NSView] {
+        for v in [icon, name, details, path, meta] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -55,6 +58,10 @@ final class ResultCellView: NSTableCellView {
         }
         path.font = Theme.pathFont
         path.textColor = .secondaryLabelColor
+        details.font = Theme.pathFont
+        details.textColor = .secondaryLabelColor
+        details.setContentCompressionResistancePriority(.required, for: .horizontal)
+        details.setContentHuggingPriority(.required, for: .horizontal)
         meta.font = Theme.metaFont
         meta.textColor = .secondaryLabelColor
         meta.alignment = .right
@@ -70,7 +77,9 @@ final class ResultCellView: NSTableCellView {
             name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
             name.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             name.trailingAnchor.constraint(lessThanOrEqualTo: meta.leadingAnchor, constant: -12),
-            path.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            details.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            details.firstBaselineAnchor.constraint(equalTo: path.firstBaselineAnchor),
+            path.leadingAnchor.constraint(equalTo: details.trailingAnchor),
             path.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 1),
             path.trailingAnchor.constraint(lessThanOrEqualTo: meta.leadingAnchor, constant: -12),
             meta.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
@@ -82,13 +91,23 @@ final class ResultCellView: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Size (files) and modification date; apps and missing files show only where they are.
+    static func details(_ item: ResultItem) -> String {
+        guard item.kind != .app, item.mtime > 0 else { return "" }
+        var parts: [String] = []
+        if item.kind != .folder { parts.append(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)) }
+        parts.append(Theme.fullDate(item.mtime))
+        return parts.joined(separator: " · ") + " · "
+    }
+
     func configure(_ item: ResultItem, terms: [String]) {
         // System file icons (apps show their own icon), as in Spotlight. NSWorkspace caches them.
         icon.image = item.kind == .app ? appIcon(atPath: item.path) : NSWorkspace.shared.icon(forFile: item.path)
         path.stringValue = PathUtil.abbreviate((item.path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
+        details.stringValue = Self.details(item)
         meta.stringValue = item.meta
         name.attributedStringValue = Self.highlight(item.name, terms: terms)
-        setAccessibilityLabel("\(item.name)，\(path.stringValue)，\(item.meta)")
+        setAccessibilityLabel("\(item.name)，\(details.stringValue)\(path.stringValue)，\(item.meta)")
     }
 
     /// Matched parts semibold in the accent color (§4.2).
