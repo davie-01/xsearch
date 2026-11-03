@@ -160,15 +160,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         super.init()
         build()
         panel.onKeyEquivalent = { [weak self] in self?.keyEquivalent($0) ?? false }
-        panel.onCancel = { [weak self] in self?.hide() }
-        // ⌘W closes Quick Look: XSearch has no File menu whose Close would, and the key never
-        // reaches the panel's own key handling.
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.keyCode == 13, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isKeyWindow else { return event }
-            QLPreviewPanel.shared().orderOut(nil)
-            return nil
-        }
+        panel.onCancel = { [weak self] in self?.cancel() }
+        QuickLookKeyboard.install()
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
             // Clicking elsewhere dismisses the launcher; Quick Look and drags keep it.
             MainActor.assumeIsolated {
@@ -462,11 +455,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func hide() {
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
         panel.orderOut(nil)
-        if activatedForQuickLook {
-            activatedForQuickLook = false
-            // Back to the app that was in front, unless another XSearch window is in use.
-            if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) { NSApp.deactivate() }
-        }
         // Nobody is looking: stop the query and any queued preview. `show` searches again.
         session.content.cancel()
         contentPane.invalidatePreview()
@@ -1090,17 +1078,25 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             delay += 0.15
             for ch in chunk {
                 // Long enough for what a key starts (Quick Look opening) to finish.
-                delay += "↓↑␣⌨◉◌☰".contains(ch) ? 1 : 0.15
+                delay += "↓↑␣⌨◉◌☰⌁⌘◇".contains(ch) ? 1 : 0.15
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
                     if ch == "⇥" { _ = self.scopeToSelection(); return }
-                    // "↓" "↑" "␣" "⌨" (the letter x) are real key events through the window;
-                    // "◉" clicks the first quick filter. XS_TYPE_LOG records the state after each.
-                    let codes: [Character: (UInt16, String)] = ["↓": (125, "\u{F701}"), "↑": (126, "\u{F700}"), "␣": (49, " "), "⌨": (7, "x")]
-                    if let (code, text) = codes[ch] {
-                        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: self.panel.windowNumber,
+                    // "↓" "↑" "␣" "⌨" (the letter x) "⌁" (Esc) "⌘" (⌘W) are key events through the
+                    // key window; "◉" clicks the first quick filter; "◇" sends XSearch to the
+                    // background, as when summoned over another app. XS_TYPE_LOG records the state after each.
+                    if ch == "◇" {
+                        NSApp.deactivate()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.panel.makeKeyAndOrderFront(nil); self.logTestState("◇") }
+                        return
+                    }
+                    let codes: [Character: (UInt16, String, NSEvent.ModifierFlags)] = ["↓": (125, "\u{F701}", []), "↑": (126, "\u{F700}", []), "␣": (49, " ", []),
+                                                                                       "⌨": (7, "x", []), "⌁": (53, "\u{1B}", []), "⌘": (13, "w", .command)]
+                    if let (code, text, flags) = codes[ch] {
+                        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: self.panel.windowNumber,
                                                     context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code) {
-                            (NSApp.keyWindow ?? self.panel).sendEvent(e)
+                            // Shortcuts go the application's way (key equivalents first).
+                            if flags.isEmpty { (NSApp.keyWindow ?? self.panel).sendEvent(e) } else { NSApp.sendEvent(e) }
                         }
                         self.logTestState(String(ch))
                         return
@@ -1215,7 +1211,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             return true
         case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
         case #selector(NSResponder.insertNewline(_:)): activate(.open); return true
-        case #selector(NSResponder.cancelOperation(_:)): hide(); return true
+        case #selector(NSResponder.cancelOperation(_:)): cancel(); return true
         case #selector(NSResponder.insertTab(_:)):
             if scopeToSelection() { return true }
             if !rows.isEmpty { panel.makeFirstResponder(table) }
@@ -1229,6 +1225,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if field.isComposing { return false }
         let key = event.charactersIgnoringModifiers ?? ""
         switch (flags, key, event.keyCode) {
+        case (.command, "w", _) where quickLookVisible: QLPreviewPanel.shared().orderOut(nil); return true
         case (.command, "1", _): switchMode(.name); return true
         case (.command, "2", _): switchMode(.content); return true
         case (.command, _, 36), (.command, _, 76):
@@ -1329,18 +1326,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             },
             read: nil,
             quickLook: { [weak self] in
-                // After the menu closes the system hands the keyboard back to the app that was
-                // active before (the launcher never activates XSearch), so Esc and ⌘W reached
-                // that app instead of Quick Look. XSearch comes to the front for the preview and
-                // gives the front back when the launcher closes.
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.activatedForQuickLook = true
-                    NSApp.activate()
-                    self.panel.makeKey()
-                    self.panel.makeFirstResponder(list)
-                    self.toggleQuickLook()
-                }
+                // Wait for the context menu to close; keyboard and menu now use one path.
+                DispatchQueue.main.async { self?.toggleQuickLook() }
             },
             toggleFavorite: { [weak self] in self?.toggleFavorite() },
             trash: { [weak self] in self?.trashSelected() },
@@ -1455,17 +1442,32 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             guard let self, self.panel.isVisible else { return }
             // As when summoned: the panel takes the keyboard without activating anything.
             self.panel.makeKeyAndOrderFront(nil)
+            self.panel.makeFirstResponder(self.mode == .content ? self.contentPane.table : self.table)
         }
     }
 
-    /// XSearch was brought to the front for Quick Look from the context menu.
-    private var activatedForQuickLook = false
+    private var quickLookVisible: Bool { QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible }
 
+    /// Esc: closes Quick Look first, then the launcher.
+    private func cancel() {
+        if quickLookVisible { QLPreviewPanel.shared().orderOut(nil) } else { hide() }
+    }
+
+    /// The launcher never activates XSearch, so the app in front stays in front. Quick Look's own
+    /// panel activates its app, and in an app that is not in front ordering it in handed the
+    /// keyboard back to that other app: space, Esc and ⌘W went there. Non-activating like the
+    /// launcher, the preview takes the keyboard itself (QuickLookKeyboard closes it) and the
+    /// launcher takes it back when it closes.
     private func toggleQuickLook() {
+        let ql = QLPreviewPanel.shared()!
+        if ql.isVisible { ql.orderOut(nil); return }
         refreshPreviewURL()
         guard previewURL != nil else { return }
-        let ql = QLPreviewPanel.shared()!
-        if ql.isVisible { ql.orderOut(nil) } else { ql.makeKeyAndOrderFront(nil) }
+        panel.makeKey()
+        panel.makeFirstResponder(mode == .content ? contentPane.table : table)
+        ql.styleMask.insert(.nonactivatingPanel)
+        ql.updateController()
+        ql.orderFront(nil)
     }
 
     /// Quick Look calls its data source on the main thread; the URL is mirrored here for it.
@@ -1484,10 +1486,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     /// ↑ ↓ keep moving through the list while the panel is up.
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
-        guard event.type == .keyDown else { return false }
-        let code = event.keyCode
-        guard code == 125 || code == 126 else { return false }
-        MainActor.assumeIsolated {
+        guard event != nil, event.type == .keyDown else { return false }
+        nonisolated(unsafe) let event = event!  // Quick Look delivers synchronously on the main thread.
+        return MainActor.assumeIsolated {
+            if QuickLookKeyboard.closeIfRequested(event, panel: panel) { return true }
+            let code = event.keyCode
+            guard code == 125 || code == 126 else { return false }
             if mode == .content {
                 contentPane.moveSelection(code == 125 ? 1 : -1)
                 refreshPreviewURL()
@@ -1495,8 +1499,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             } else {
                 moveSelection(code == 125 ? 1 : -1)
             }
+            return true
         }
-        return true
     }
 
     nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { previewURL == nil ? 0 : 1 }

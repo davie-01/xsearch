@@ -87,6 +87,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         window.center()
         window.setFrameAutosaveName("XSearchFull")
         super.init(window: window)
+        QuickLookKeyboard.install()
         window.delegate = self
         window.onKey = { [weak self] in self?.key($0) ?? false }
         build()
@@ -553,9 +554,10 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
 
     /// Arrow keys keep moving through the list while the panel is up, as in Finder.
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
-        guard event.type == .keyDown else { return false }
-        nonisolated(unsafe) let event = event!  // delivered on the main thread
+        guard event != nil, event.type == .keyDown else { return false }
+        nonisolated(unsafe) let event = event!  // Quick Look delivers synchronously on the main thread.
         return MainActor.assumeIsolated {
+            if QuickLookKeyboard.closeIfRequested(event, panel: panel) { return true }
             guard [123, 124, 125, 126].contains(event.keyCode), table.selectedRowIndexes.count == 1 else { return false }
             table.keyDown(with: event)
             return true
