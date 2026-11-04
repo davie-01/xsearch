@@ -211,6 +211,8 @@ final class PreviewPane: NSView {
     private var anchors: [(utf16: Int, info: AnchorInfo)] = []
     private(set) var currentHit = -1
     private var stale = false
+    /// Progress of laying out the text up to the current hit (shown past 150 ms).
+    private let progress = NSProgressIndicator()
     var onLocate: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -247,7 +249,6 @@ final class PreviewPane: NSView {
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 8, height: 12)
-        NotificationCenter.default.addObserver(self, selector: #selector(userScrolled), name: NSScrollView.willStartLiveScrollNotification, object: scroll)
         for v in [textView, scroll.contentView] as [NSView] {
             v.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(textViewFrameChanged), name: NSView.frameDidChangeNotification, object: v)
@@ -280,7 +281,12 @@ final class PreviewPane: NSView {
         titles.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         // The buttons keep their full titles (English ones are longer); the file name gives way.
         for v in [position, locate] as [NSView] { v.setContentCompressionResistancePriority(.required, for: .horizontal) }
-        for v in [head, banner, scroll, marks, placeholder] as [NSView] {
+        progress.style = .spinning
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 1
+        progress.isHidden = true
+        for v in [head, banner, scroll, marks, placeholder, progress] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -299,6 +305,8 @@ final class PreviewPane: NSView {
             marks.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
             marks.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             marks.widthAnchor.constraint(equalToConstant: 6),
+            progress.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            progress.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
             placeholder.centerXAnchor.constraint(equalTo: centerXAnchor),
             placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -318,6 +326,7 @@ final class PreviewPane: NSView {
         anchors = []
         marks.fractions = []
         ruler.anchors = []
+        endPositioning()
         banner.isHidden = true
         placeholder.isHidden = false
         for v in [prev, next, locate] { v.isHidden = true }
@@ -378,6 +387,9 @@ final class PreviewPane: NSView {
             if let part = PreviewWindow.visible(r, in: range) { text.addAttribute(.backgroundColor, value: HitColors.hit, range: part) }
         }
         textView.textStorage?.setAttributedString(text)
+        // A new text shows once the current hit is in place (centerCurrentHit).
+        laidOut = 0
+        scroll.alphaValue = hits.isEmpty ? 1 : 0
         ruler.anchors = anchors.filter { NSLocationInRange($0.utf16, range) }.map { ($0.utf16 - range.location, $0.info.gutter) }
         ruler.needsDisplay = true
         let windowed = range.length < fullText.length
@@ -412,55 +424,78 @@ final class PreviewPane: NSView {
     private var centeredFor = NSSize.zero
     private var viewSize: NSSize { NSSize(width: textView.frame.width, height: scroll.contentView.bounds.height) }
 
-    /// Centers the current hit; non-contiguous layout lays out only around it.
+    // MARK: Positioning
+
+    /// Characters laid out from the start of the shown text: positions before it are exact.
+    private var laidOut = 0
+    /// Text width `laidOut` holds for.
+    private var layoutWidth: CGFloat = 0
+    private var positionGeneration = 0
+
+    /// Centers the current hit once the text before it is laid out. Non-contiguous layout
+    /// places text it has not laid out by an estimated height, and the hit moved out of view
+    /// when the text above it was laid out later. Layout runs in slices of about 8 ms so typing
+    /// and the list stay responsive; past 150 ms, when the rest still takes a while, a ring
+    /// shows the real progress (most texts are done before anything shows). The text stays hidden until a new one is in place.
     private func centerCurrentHit() {
-        guard scrollToCurrentHit() else { return }
-        centeredFor = viewSize
-        recenterWhileLayoutSettles()
+        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
+              let lm = textView.layoutManager else { endPositioning(); return }
+        positionGeneration += 1
+        let generation = positionGeneration
+        if abs(textView.frame.width - layoutWidth) > 0.5 { laidOut = 0 }
+        layoutWidth = textView.frame.width
+        let target = NSMaxRange(r)
+        let started = Date()
+        func step() {
+            guard generation == positionGeneration else { return }
+            let sliceEnd = Date().addingTimeInterval(0.008)
+            while laidOut < target && Date() < sliceEnd {
+                let n = min(4000, target - laidOut)
+                lm.ensureLayout(forCharacterRange: NSRange(location: laidOut, length: n))
+                laidOut += n
+            }
+            if laidOut >= target {
+                // Hit colors re-lay their own lines; anything left before the hit is filled in.
+                lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: target))
+                centeredFor = viewSize
+                scrollToCurrentHit()
+                endPositioning()
+                return
+            }
+            // Past 150 ms, and only when it will take noticeably longer (no ring that flashes
+            // for a few frames): the rate so far tells how long the rest takes.
+            let elapsed = Date().timeIntervalSince(started)
+            let done = Double(laidOut) / Double(target)
+            if elapsed > 0.15, !progress.isHidden || elapsed / max(done, 0.01) * (1 - done) > 0.15 {
+                progress.doubleValue = done
+                progress.isHidden = false
+            }
+            DispatchQueue.main.async { step() }
+        }
+        step()
     }
 
-    /// Scrolls so the current hit is in the middle; false when there is none.
-    @discardableResult
-    private func scrollToCurrentHit() -> Bool {
-        guard let y = currentHitCenterY() else { return false }
+    private func endPositioning() {
+        positionGeneration += 1
+        progress.isHidden = true
+        scroll.alphaValue = 1
+    }
+
+    /// Dev log: still laying out up to the current hit.
+    var isPositioning: Bool { scroll.alphaValue < 1 || !progress.isHidden }
+
+    /// Scrolls so the current hit (laid out by now) is in the middle.
+    private func scrollToCurrentHit() {
+        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
+              let lm = textView.layoutManager, let tc = textView.textContainer else { return }
+        let y = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc).midY + textView.textContainerOrigin.y
         let target = max(0, y - scroll.contentView.bounds.height / 2)
         // Only y: the gutter is a negative x origin of the clip view (macOS 26 rulers), and
         // x 0 slid the text under the labels until the user scrolled.
         scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: target))
         scroll.reflectScrolledClipView(scroll.contentView)
-        return true
     }
 
-    /// The current hit's vertical middle in the text view, laid out around it.
-    private func currentHitCenterY() -> CGFloat? {
-        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
-              let lm = textView.layoutManager, let tc = textView.textContainer else { return nil }
-        lm.ensureLayout(forCharacterRange: r)
-        return lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc).midY + textView.textContainerOrigin.y
-    }
-
-    private var settleGeneration = 0
-
-    /// Non-contiguous layout places text it has not laid out yet by an estimated height. Laying
-    /// out the part around the hit corrects the text above it, and the hit moved out of view
-    /// (most longer documents, also on ⌘G). It is centered again until it stays put; a scroll
-    /// by the user ends this at once.
-    private func recenterWhileLayoutSettles() {
-        settleGeneration += 1
-        let generation = settleGeneration
-        for delay in [0.03, 0.1, 0.25, 0.5, 0.9] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, generation == self.settleGeneration, let y = self.currentHitCenterY() else { return }
-                let middle = self.scroll.contentView.bounds.midY
-                if abs(y - middle) > 4 { self.scrollToCurrentHit() }
-            }
-        }
-    }
-
-    @objc private func userScrolled() { settleGeneration += 1 }
-
-    /// A preview can arrive while the launcher is still expanding: the text then rewraps and
-    /// the hit moves, so it is centered again for the final size.
     /// Dev log: is the current hit inside the visible part of the text?
     var currentHitVisible: Bool {
         guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
@@ -472,9 +507,20 @@ final class PreviewPane: NSView {
     /// Dev log: the clip view's x origin (minus the gutter width while the text sits beside it).
     var clipOriginX: CGFloat { scroll.contentView.bounds.origin.x }
 
+    /// A preview can arrive while the launcher is still expanding: the text then rewraps and
+    /// the hit moves, so it is laid out and centered again for the final size. (The text view
+    /// also grows while it is laid out; only the width matters for the layout.)
     @objc private func textViewFrameChanged() {
         let size = viewSize
-        if currentHit >= 0, abs(size.width - centeredFor.width) > 0.5 || abs(size.height - centeredFor.height) > 0.5 { centerCurrentHit() }
+        guard currentHit >= 0 else { return }
+        if abs(size.width - layoutWidth) > 0.5 {
+            // Rewrapped: the layout so far no longer holds.
+            laidOut = 0
+            centerCurrentHit()
+        } else if abs(size.height - centeredFor.height) > 0.5, !isPositioning {
+            centeredFor = size
+            scrollToCurrentHit()
+        }
     }
 
     private var currentPath = ""
