@@ -35,9 +35,13 @@ impl ContentWriter {
         let (index, meta) = open_or_create(path, new_instance_id)?;
         let f = Fields::of(&index.schema())?;
         let writer = index.writer_with_num_threads(1, 50_000_000)?;
+        // No doc store block cache, as for queries (ContentReader::open): a large document is one
+        // block of its whole size, and reading stored texts back (extraction cache hits) kept
+        // them: 233 MB after 32 reads of 8 MiB documents, 16 MB without.
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
+            .doc_store_cache_num_blocks(0)
             .try_into()?;
         Ok(Self {
             index,

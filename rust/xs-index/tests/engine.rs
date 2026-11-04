@@ -645,3 +645,29 @@ fn session_creation_and_big_document_cost() {
     let b = s.next(Duration::from_millis(1), 1, &cancel).unwrap();
     println!("big doc candidates={} one_step_ms={} hits={}", s.candidates(), t.elapsed().as_millis(), b.hits.len());
 }
+
+/// Measurement, not run by default: memory the writer keeps after reading back large stored
+/// documents (extraction cache hits), with its reader's doc store cache.
+#[test]
+#[ignore]
+fn writer_reads_of_large_documents_memory() {
+    fn rss_mb() -> u64 {
+        let out = std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().unwrap() / 1024
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "mem").unwrap();
+    let body: String = "项目 验收 数据 alpha ".repeat(8 << 20 >> 5); // ~ 8 MiB
+    for id in 1..=32u64 {
+        let mut d = doc(id, &format!("{id} {body}"));
+        d.extract_key = format!("key-{id}");
+        w.put(&d).unwrap();
+    }
+    w.commit(1).unwrap();
+    let before = rss_mb();
+    for id in 1..=32u64 {
+        let v = w.find_by_extract_key(&format!("key-{id}")).unwrap().unwrap();
+        assert!(v.text.len() > 1 << 20);
+    }
+    println!("writer reads: rss before {before} MB, after 32 reads of 8 MiB {} MB", rss_mb());
+}
