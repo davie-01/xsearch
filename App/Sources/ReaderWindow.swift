@@ -16,7 +16,10 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         var context: String
     }
 
-    private let searcher: ContentSearcher
+    /// Its own searcher over the launcher's index: a new search or preview there no longer
+    /// drops this window's queued preview (it stayed on "正在载入…").
+    private let searcher = ContentSearcher()
+    private let source: ContentSearcher
     private let titleLabel = NSTextField(labelWithString: "")
     private let pathLabel = NSTextField(labelWithString: "")
     private let banner = NSTextField(labelWithString: "")
@@ -38,8 +41,8 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     private var token = 0
     var onOpenFile: ((String, Int64?) -> Void)?
 
-    init(searcher: ContentSearcher) {
-        self.searcher = searcher
+    init(searcher source: ContentSearcher) {
+        self.source = source
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1220, height: 770),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
         window.titlebarAppearsTransparent = true
@@ -147,10 +150,30 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     // MARK: Loading
 
     /// Shows `hit` and jumps to its `startAt`-th occurrence.
+    /// Closed (the controller stays for next time): a preview still loading must not fill it,
+    /// and the document — whole text, PDF, its marks — is let go.
+    func windowWillClose(_ notification: Notification) {
+        token += 1
+        searcher.cancel()
+        textPane.clear()
+        pdfView.document = nil
+        pdfMarks = [:]
+        pdfSelections = [:]
+        pdfRowsByPage = [:]
+        pdfAnchors = []
+        rows = []
+        current = -1
+        table.reloadData()
+        shownHit = nil
+    }
+
     /// `live`: a live scan's hit, which has no document in the index.
     func show(_ hit: ContentHit, expression: String, mode: MatchMode? = nil, live: Bool = false, startAt: Int = 0) {
         token += 1
         let token = self.token
+        searcher.indexSource = source
+        searcher.mode = source.mode
+        searcher.maxFileBytes = source.maxFileBytes
         path = hit.path
         shownHit = hit
         window?.title = hit.displayName
@@ -198,6 +221,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         if isPDF, let pdf = PDFDocument(url: URL(fileURLWithPath: path)) {
             pdfView.isHidden = false
             textPane.isHidden = true
+            textPane.clear()  // a text shown before must not stay behind the PDF
             pdfView.document = pdf
             pdfAnchors = anchors
             for (i, row) in rows.enumerated() {

@@ -291,11 +291,15 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         table.tableColumns.first { $0.identifier.rawValue == "hits" }?.isHidden = mode != .content
     }
 
-    /// Closed: stop the query and any queued preview. `show` searches again.
+    /// Closed: stop the query and any queued preview, and let the shown document go (the window
+    /// itself stays for next time). `show` searches again and selects anew.
     func windowWillClose(_ notification: Notification) {
         content.cancel()
         previewToken += 1
         closeQuickLook()
+        table.deselectAll(nil)
+        previewToken += 1
+        textPreview.clear()
     }
 
     // MARK: Query
