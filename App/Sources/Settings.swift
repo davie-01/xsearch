@@ -143,7 +143,10 @@ final class SettingsModel: ObservableObject {
 
     private var monitor: Any?
 
+    /// The monitor sees keys for every XSearch window: recording ends with the Settings window
+    /// (closed, or another window such as the launcher takes the keyboard) and with its page.
     func startRecording() {
+        stopRecording()
         recording = true
         hotKeyError = nil
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -171,7 +174,7 @@ final class SettingsModel: ObservableObject {
 }
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let model: SettingsModel
     var names: NameService {
         get { model.names }
@@ -187,7 +190,11 @@ final class SettingsWindowController: NSWindowController {
         window.contentViewController = NSHostingController(rootView: SettingsView(model: model))
         window.setContentSize(NSSize(width: 940, height: 660))
         window.center()
+        window.delegate = self
     }
+
+    func windowWillClose(_ notification: Notification) { model.stopRecording() }
+    func windowDidResignKey(_ notification: Notification) { model.stopRecording() }
 
     required init?(coder: NSCoder) { fatalError() }
 
@@ -285,6 +292,7 @@ struct GeneralPane: View {
                 if let e = model.hotKeyError { Text(e).font(.system(size: 12)).foregroundStyle(.orange) }
             }
         }
+        .onDisappear { model.stopRecording() }
         Card(title: L("语言"), subtitle: L("切换后重新启动 XSearch 生效")) {
             HStack {
                 // Each language in its own words, as in System Settings.
