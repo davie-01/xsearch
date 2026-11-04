@@ -593,7 +593,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         // Archive members are unpacked and opened one by one; ⌘↵ shows the archive.
         if !reveal && selectedRows.contains(where: \.isMember) {
             for r in selectedRows {
-                if let h = r.hit, h.isMember { MemberOpener.open(h) } else { NSWorkspace.shared.open(URL(fileURLWithPath: r.path)) }
+                if let h = r.hit, h.isMember { MemberOpener.open(h) } else { NSWorkspace.shared.openInBackground(URL(fileURLWithPath: r.path)) }
             }
             return
         }
@@ -607,7 +607,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             }
             return
         }
-        if reveal { NSWorkspace.shared.activateFileViewerSelecting(urls) } else { urls.forEach { NSWorkspace.shared.open($0) } }
+        if reveal { NSWorkspace.shared.activateFileViewerSelecting(urls) } else { urls.forEach { NSWorkspace.shared.openInBackground($0) } }
     }
 
     private func openReader() {

@@ -42,14 +42,17 @@ enum Editor: String, CaseIterable, Codable, Sendable {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
         switch self {
         case .system:
-            return NSWorkspace.shared.open(url)
+            NSWorkspace.shared.openInBackground(url)
+            return true
         case .vscode, .cursor:
             guard isInstalled, let u = URL(string: "\(self == .vscode ? "vscode" : "cursor")://file\(encoded):\(line)") else { return false }
-            return NSWorkspace.shared.open(u)
+            NSWorkspace.shared.openInBackground(u)
+            return true
         case .textmate:
             let file = url.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
             guard isInstalled, let u = URL(string: "txmt://open?url=\(file)&line=\(line)") else { return false }
-            return NSWorkspace.shared.open(u)
+            NSWorkspace.shared.openInBackground(u)
+            return true
         case .sublime:
             guard let app = appURL else { return false }
             return run(app.appendingPathComponent("Contents/SharedSupport/bin/subl").path, ["\(path):\(line)"])
@@ -95,13 +98,22 @@ enum Opener {
         let name = (path as NSString).lastPathComponent
         if ContentType.of(name: name) == .text, prefs.editor != .system, let line {
             if prefs.editor.open(path: path, line: line) { return nil }
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            NSWorkspace.shared.openInBackground(URL(fileURLWithPath: path))
             return L("%@ 不可用，已用默认应用打开", "\(prefs.editor.title)")
         }
         if ContentType.of(name: name) == .pdf, prefs.pdfAtPage, let page {
             return ExternalPDF.open(path: path, page: page).map { $0.title + L("。") + $0.detail }
         }
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        NSWorkspace.shared.openInBackground(URL(fileURLWithPath: path))
         return nil
+    }
+}
+
+extension NSWorkspace {
+    /// Opens a file, app or URL without waiting. The synchronous `open(_:)` holds the calling
+    /// thread until Launch Services has the app up: on the main thread a slow or first launch
+    /// froze XSearch (spinning cursor) for seconds after the app had already appeared.
+    func openInBackground(_ url: URL) {
+        open(url, configuration: OpenConfiguration(), completionHandler: nil)
     }
 }

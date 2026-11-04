@@ -319,7 +319,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             return
         }
         onOpenFile?(path, nil)
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        NSWorkspace.shared.openInBackground(URL(fileURLWithPath: path))
     }
 
     @objc private func reveal() { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
@@ -334,7 +334,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             if let window {
                 alert.beginSheetModal(for: window) { resp in
                     if resp == .alertSecondButtonReturn {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                        NSWorkspace.shared.openInBackground(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                     }
                 }
             }
@@ -420,7 +420,7 @@ enum ExternalPDF {
             return nil
         }
         guard let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
-            NSWorkspace.shared.open(url)
+            NSWorkspace.shared.openInBackground(url)
             return nil
         }
         NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())

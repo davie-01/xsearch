@@ -41,7 +41,7 @@ enum MemberOpener {
                 try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 let file = try extractArchiveMember(path: path, member: member, dest: dest.path, maxMemberBytes: 512 << 20)
                 DispatchQueue.main.async {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: file))
+                    NSWorkspace.shared.openInBackground(URL(fileURLWithPath: file))
                     done(nil)
                 }
             } catch {

@@ -1159,11 +1159,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             delay += 0.15
             for ch in chunk {
                 // Long enough for what a key starts (Quick Look opening) to finish.
-                delay += "↓↑␣⌨◉◌☰⌁⌘ⒺⒼ◇".contains(ch) ? 1 : 0.15
+                delay += "↓↑␣⌨◉◌☰⌁⌘ⒺⒼ⏎◇".contains(ch) ? 1 : 0.15
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
                     if ch == "⇥" { _ = self.scopeToSelection(); return }
-                    // "↓" "↑" "␣" "⌨" (the letter x) "⌁" (Esc) "⌘" (⌘W) "Ⓔ" (⌘E) "Ⓖ" (⌘G) are key events through the
+                    // "↓" "↑" "␣" "⌨" (the letter x) "⌁" (Esc) "⌘" (⌘W) "Ⓔ" (⌘E) "Ⓖ" (⌘G) "⏎" (Return) are key events through the
                     // key window; "◉" clicks the first quick filter; "◇" sends XSearch to the
                     // background, as when summoned over another app. XS_TYPE_LOG records the state after each.
                     if ch == "◇" {
@@ -1172,7 +1172,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                         return
                     }
                     let codes: [Character: (UInt16, String, NSEvent.ModifierFlags)] = ["↓": (125, "\u{F701}", []), "↑": (126, "\u{F700}", []), "␣": (49, " ", []),
-                                                                                       "⌨": (7, "x", []), "⌁": (53, "\u{1B}", []), "⌘": (13, "w", .command), "Ⓔ": (14, "e", .command), "Ⓖ": (5, "g", .command)]
+                                                                                       "⌨": (7, "x", []), "⌁": (53, "\u{1B}", []), "⌘": (13, "w", .command), "Ⓔ": (14, "e", .command), "Ⓖ": (5, "g", .command), "⏎": (36, "\r", [])]
                     if let (code, text, flags) = codes[ch] {
                         if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: self.panel.windowNumber,
                                                     context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code) {
@@ -1365,7 +1365,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
         usage?.recordOpen(path: item.path, fileId: item.fileId)
         hide()
-        if action == .open { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        if action == .open { NSWorkspace.shared.openInBackground(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
     // MARK: Context menu

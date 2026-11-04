@@ -201,7 +201,7 @@ struct OnboardingView: View {
                     Image(systemName: model.fullDiskAccess ? "checkmark.circle.fill" : "lock")
                         .foregroundStyle(model.fullDiskAccess ? Color.green : Color.secondary)
                     Button(L("打开系统设置")) {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                        NSWorkspace.shared.openInBackground(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
                     }
                     Button(L("重新检查")) { model.refreshAccess() }.buttonStyle(.link)
                 }
