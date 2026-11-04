@@ -280,10 +280,13 @@ final class FileCatalog {
     }
 
     /// Tombstones are needed only until a snapshot at or after their sequence is on disk, and
-    /// until the indexer has processed their tasks.
+    /// until the indexer has processed their tasks. The row with the highest id always stays:
+    /// SQLite gives a new row the highest id + 1, so deleting it would hand its id to an
+    /// unrelated file, and a favorite or open count stored by id would follow that file.
     func purgeTombstones(upTo seq: Int64) throws {
         try db.prepare("""
             DELETE FROM files WHERE deleted = 1 AND change_seq <= ?
+              AND id < (SELECT MAX(id) FROM files)
               AND NOT EXISTS (SELECT 1 FROM content_tasks t WHERE t.file_id = files.id)
             """).bind(seq).run()
     }
