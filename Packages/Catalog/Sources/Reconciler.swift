@@ -110,7 +110,15 @@ final class Reconciler {
     private func begin() throws {
         try catalog.db.exec("BEGIN IMMEDIATE")
         inTransaction = true
+        transactionStart = Date()
     }
+
+    private var transactionStart = Date()
+    /// The content indexer writes the same database: no write lock is held while the scan
+    /// waits for the disk (a slow listing took seconds, past its busy timeout), and none for
+    /// longer than this while results keep coming. Commits in between are what the chunked
+    /// commits already are; the watermark still moves only at the end.
+    static let maxTransaction: TimeInterval = 0.5
 
     private func commit() throws {
         try settleContent()
@@ -309,7 +317,17 @@ final class Reconciler {
     }
 
     private func drain() throws {
-        while let out = lister.next() {
+        defer { if !inTransaction { try? begin() } }  // callers write on
+        while lister.pending > 0 {
+            if inTransaction && Date().timeIntervalSince(transactionStart) >= Self.maxTransaction {
+                try commit()
+                try begin()
+            }
+            guard let out = lister.next(until: Date().addingTimeInterval(0.25)) else {
+                if inTransaction { try commit() }
+                continue
+            }
+            if !inTransaction { try begin() }
             let job = out.job
             inFlight[job.id] = nil
             defer { if let t = deferred.removeValue(forKey: job.id) { submit(t) } }

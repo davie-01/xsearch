@@ -3,6 +3,7 @@ import Testing
 @testable import Catalog
 import NameEngine
 import XSearchCore
+import SQLite3
 
 /// Real files, real FSEvents, real SQLite. Each test gets its own scan root and data directory.
 final class Sandbox {
@@ -455,4 +456,49 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     #expect(tasks.isEmpty, "\(tasks)")
     let rows = indexedPaths(s, box).filter { PathUtil.isWithin($0, box.p("xsdata")) }
     #expect(rows.isEmpty, "\(rows)")
+}
+
+/// Ids identify a file for good: purging tombstones never frees the highest id, which SQLite
+/// would give the next new file.
+@Test func fileIdsAreNotReusedAfterTombstonesGo() throws {
+    let box = try Sandbox("ids")
+    try box.write("f.txt")
+    try FileManager.default.createDirectory(at: box.data, withIntermediateDirectories: true)
+    let c = try FileCatalog(url: box.data.appendingPathComponent("catalog.sqlite"))
+    guard case .success(let e) = DiskLister.stat(box.p("f.txt")) else { Issue.record("stat"); return }
+    let a = try c.insert(parent: 0, name: "a", e, seq: 1)
+    let b = try c.insert(parent: 0, name: "b", e, seq: 1)
+    _ = try c.deleteSubtree(b.id, seq: 2)
+    try c.purgeTombstones(upTo: 5)
+    let n = try c.insert(parent: 0, name: "n", e, seq: 3)
+    #expect(n.id > b.id)
+    // Other tombstones still go.
+    _ = try c.deleteSubtree(a.id, seq: 4)
+    try c.purgeTombstones(upTo: 5)
+    #expect(try c.db.prepare("SELECT COUNT(*) FROM files WHERE id = ?").bind(a.id).first { $0.int(0) } == 0)
+}
+
+/// A slow listing does not keep the write lock: another writer of the catalog (the content
+/// indexer) gets in while the scan waits for the disk.
+@Test func slowListingDoesNotHoldTheWriteLock() throws {
+    let box = try Sandbox("slowlist")
+    for i in 0..<3 { try box.write("d\(i)/f.txt") }
+    try box.write("slow/f.txt")
+    let s = NameService(directory: box.data, home: "/nonexistent-home")
+    let slow = box.p("slow")
+    DiskLister.beforeListForTests = { path in if path == slow { usleep(3_000_000) } }
+    defer { DiskLister.beforeListForTests = nil }
+    s.start(scope: box.scope)
+    defer { s.shutdown() }
+    usleep(1_000_000)  // the scan is waiting for the slow directory now
+    let other = try SQLite(path: box.data.appendingPathComponent("catalog.sqlite").path)
+    sqlite3_busy_timeout(other.db, 0)
+    let t = Date()
+    var got = false
+    while !got && Date().timeIntervalSince(t) < 1.5 {
+        got = (try? other.exec("BEGIN IMMEDIATE; COMMIT")) != nil
+        if !got { usleep(50_000) }
+    }
+    #expect(got, "write lock still held during the slow listing")
+    #expect(s.waitUntilIdle())
 }

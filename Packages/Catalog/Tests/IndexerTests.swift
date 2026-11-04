@@ -833,3 +833,25 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     #expect(fired <= 2, "\(fired) timer wake-ups in 1.5 s")
     #expect(p.until(timeout: 10) { try p.search("kappa9") == ["r.txt"] })
 }
+
+/// The file keeps differing from what the catalog recorded and no event comes (here the name
+/// service is stopped): the task backs off instead of being rewritten at a fixed short pace,
+/// and is neither dropped nor quarantined.
+@Test func staleVersionBacksOff() throws {
+    let p = try Pipeline("stale") { $0.staleRetryBase = 0.2 }
+    defer { p.stop() }
+    try p.box.write("docs/s.txt", "第一版 mu9")
+    try FileManager.default.createDirectory(atPath: p.box.p("docs"), withIntermediateDirectories: true)
+    p.names.start(scope: p.box.scope, content: ContentScope(folders: [p.box.p("docs")]))
+    #expect(p.names.waitUntilIdle())
+    p.names.shutdown()
+    try "第二版 longer nu9".write(toFile: p.box.p("docs/s.txt"), atomically: false, encoding: .utf8)
+    try p.indexer.start()
+    usleep(300_000)
+    let before = p.indexer.timerFirings.withLock { $0 }
+    usleep(3_000_000)
+    let fired = p.indexer.timerFirings.withLock { $0 } - before
+    // 0.2 s doubling: about 0.4, 0.8, 1.6 s apart here; a fixed 0.2 s would be ~15.
+    #expect(fired <= 6, "\(fired) wake-ups in 3 s")
+    #expect(p.indexer.status.pending == 1 && p.indexer.status.failed == 0)
+}

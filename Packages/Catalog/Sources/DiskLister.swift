@@ -73,9 +73,12 @@ enum DiskLister {
 
     /// Test hook: pretend the kernel reported an error for entries with these names.
     nonisolated(unsafe) static var unreadableForTests: (@Sendable (String) -> Bool)?
+    /// Test hook: a slow disk, run before listing `path`.
+    nonisolated(unsafe) static var beforeListForTests: (@Sendable (String) -> Void)?
 
     /// Lists a directory (no symlink following). Returns entries or an errno.
     static func list(_ path: String) -> Result<Listing, POSIXError> {
+        beforeListForTests?(path)
         let box = Box()
         var skipped: Int32 = 0
         let rc = path.withCString { cpath in
@@ -173,11 +176,14 @@ final class ParallelLister: @unchecked Sendable {
         }
     }
 
-    /// Blocks for the next finished listing; nil when nothing is outstanding.
-    func next() -> Output? {
+    /// Blocks for the next finished listing; nil when nothing is outstanding, or (with
+    /// `deadline`) when none finished by then.
+    func next(until deadline: Date = .distantFuture) -> Output? {
         guard pending > 0 else { return nil }
         lock.lock()
-        while done.isEmpty { lock.wait() }
+        while done.isEmpty {
+            if !lock.wait(until: deadline) && done.isEmpty { lock.unlock(); return nil }
+        }
         let out = done.removeLast()  // order does not matter; ids are already assigned
         lock.unlock()
         pending -= 1
