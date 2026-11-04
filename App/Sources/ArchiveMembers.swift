@@ -45,13 +45,13 @@ enum MemberOpener {
                     done(nil)
                 }
             } catch {
-                let message = "无法从压缩包中取出“\(name)”：\(error)"
+                let message = L("无法从压缩包中取出“%@”：%@", "\(name)", "\(error)")
                 DispatchQueue.main.async { done(message) }
             }
         }
     }
 
-    static let notAlone = "压缩包内的文件不能单独收藏或移到废纸篓"
+    static let notAlone = L("压缩包内的文件不能单独收藏或移到废纸篓")
 
     /// Members opened from archives live in $TMPDIR/XSearch-open/<uuid>; an app may still have
     /// today's open, so only folders older than a day are removed (at launch).

@@ -1,5 +1,6 @@
 import AppKit
 import Sparkle
+import XSearchCore
 
 /// Auto-update through Sparkle (M5). Updates are EdDSA-signed (public key in Info.plist, the
 /// private key in the developer's Keychain); the feed URL is set at build time. A build
@@ -19,7 +20,7 @@ final class Updater {
 
     var version: String {
         let info = Bundle.main.infoDictionary ?? [:]
-        return "\(info["CFBundleShortVersionString"] as? String ?? "?")（\(info["CFBundleVersion"] as? String ?? "?")）"
+        return L("%@（%@）", info["CFBundleShortVersionString"] as? String ?? "?", info["CFBundleVersion"] as? String ?? "?")
     }
 
     var automaticallyChecks: Bool {
@@ -31,8 +32,8 @@ final class Updater {
         NSApp.activate()
         guard let controller else {
             let alert = NSAlert()
-            alert.messageText = "这个版本没有配置更新地址"
-            alert.informativeText = "请到发布页下载新版 DMG 安装。"
+            alert.messageText = L("这个版本没有配置更新地址")
+            alert.informativeText = L("请到发布页下载新版 DMG 安装。")
             alert.runModal()
             return
         }

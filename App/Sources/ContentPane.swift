@@ -29,12 +29,12 @@ struct AnchorInfo: Decodable {
     var gutter: String {
         switch kind {
         case "page": "p.\(page ?? 0)"
-        case "paragraph": "段 \(index ?? 0)"
-        case "cell": "表 \(table ?? 0)·\(cell ?? "")"
-        case "part": name ?? ""
-        case "line": "行 \(line ?? index ?? 0)"
+        case "paragraph": L("段 %@", "\(index ?? 0)")
+        case "cell": L("表 %@·%@", "\(table ?? 0)", cell ?? "")
+        case "part": Loc.display(name ?? "")
+        case "line": L("行 %@", "\(line ?? index ?? 0)")
         case "sheet": "\(sheet ?? "")!\(cell ?? "")"
-        case "slide": "幻灯片 \(slide ?? 0)"
+        case "slide": L("幻灯片 %@", "\(slide ?? 0)")
         case "member": ((name ?? "") as NSString).lastPathComponent
         default: ""
         }
@@ -43,7 +43,7 @@ struct AnchorInfo: Decodable {
     /// Header location: "PDF 第 14 页" / "段 13" / "表 2·B3".
     var location: String {
         switch kind {
-        case "page": "第 \(page ?? 0) 页"
+        case "page": L("第 %@ 页", "\(page ?? 0)")
         default: gutter
         }
     }
@@ -110,7 +110,7 @@ final class ContentHitCell: NSTableCellView {
     func configure(_ h: ContentHit, live: Bool = false) {
         icon.image = h.icon
         name.stringValue = h.displayName
-        count.stringValue = "\(h.hitCount) 处"
+        count.stringValue = L("%@ 处", "\(h.hitCount)")
         let s = NSMutableAttributedString(string: h.snippet, attributes: [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor])
         for r in h.snippetHighlights where Int(r.end) <= (h.snippet as NSString).length {
             s.addAttributes([.backgroundColor: HitColors.hit, .foregroundColor: NSColor.labelColor], range: NSRange(location: Int(r.start), length: Int(r.end - r.start)))
@@ -119,18 +119,18 @@ final class ContentHitCell: NSTableCellView {
         meta.stringValue = h.displayLocation + " · " + Theme.shortDate(h.mtime)
         // UI-SPEC §4.5 status badges.
         let stateBadge: (String, NSColor, NSColor) = switch h.state {
-        case .waitingOcr: ("等待 OCR", Theme.warnBackground, Theme.warnText)
-        case .partial: ("部分索引", Theme.warnBackground, Theme.warnText)
-        case .failed: ("提取失败", Theme.warnBackground, Theme.warnText)
+        case .waitingOcr: (L("等待 OCR"), Theme.warnBackground, Theme.warnText)
+        case .partial: (L("部分索引"), Theme.warnBackground, Theme.warnText)
+        case .failed: (L("提取失败"), Theme.warnBackground, Theme.warnText)
         case .complete: ("", .clear, .clear)
         }
         // Live-scan hits are read from the file, not the index.
-        let (text, bg, fg) = live ? ("实时", Theme.hex(0xE6F0FF), Theme.hex(0x1F4FA8)) : stateBadge
+        let (text, bg, fg) = live ? (L("实时"), Theme.hex(0xE6F0FF), Theme.hex(0x1F4FA8)) : stateBadge
         badge.stringValue = text.isEmpty ? "" : " \(text) "
         badge.isHidden = text.isEmpty
         badge.textColor = fg
         badge.layer?.backgroundColor = bg.cgColor
-        setAccessibilityLabel("\(h.displayName)，\(h.hitCount) 处，\(h.snippet)")
+        setAccessibilityLabel(L("%@，%@ 处，%@", "\(h.displayName)", "\(h.hitCount)", "\(h.snippet)"))
     }
 }
 
@@ -188,11 +188,11 @@ final class PreviewPane: NSView {
     let title = NSTextField(labelWithString: "")
     let subtitle = NSTextField(labelWithString: "")
     let position = NSTextField(labelWithString: "")
-    let prev = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "上一处")!, target: nil, action: nil)
-    let next = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "下一处")!, target: nil, action: nil)
-    let locate = NSButton(title: "阅读窗口 ⌘↵", target: nil, action: nil)
+    let prev = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: L("上一处"))!, target: nil, action: nil)
+    let next = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: L("下一处"))!, target: nil, action: nil)
+    let locate = NSButton(title: L("阅读窗口 ⌘↵"), target: nil, action: nil)
     let banner = NSTextField(labelWithString: "")
-    let placeholder = NSTextField(labelWithString: "选中左侧结果后在这里预览")
+    let placeholder = NSTextField(labelWithString: L("选中左侧结果后在这里预览"))
     let textView = NSTextView()
     let scroll = NSScrollView()
     let marks = HitMarks()
@@ -267,6 +267,8 @@ final class PreviewPane: NSView {
         let head = NSStackView(views: [titles, NSView(), controls])
         head.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 10, right: 14)
         titles.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The buttons keep their full titles (English ones are longer); the file name gives way.
+        for v in [position, locate] as [NSView] { v.setContentCompressionResistancePriority(.required, for: .horizontal) }
         for v in [head, banner, scroll, marks, placeholder] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
@@ -321,7 +323,7 @@ final class PreviewPane: NSView {
         for v in [prev, next, locate] { v.isHidden = false }
         title.stringValue = doc.name
         stale = Self.isStale(doc, path: path)
-        banner.stringValue = stale ? "  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  " : ""
+        banner.stringValue = stale ? L("  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  ") : ""
         banner.isHidden = !stale
 
         // Anchors are scalar offsets; convert to UTF-16 once.
@@ -336,7 +338,7 @@ final class PreviewPane: NSView {
         shownRange = NSRange(location: NSNotFound, length: 0)
         if hits.isEmpty {
             render(for: NSRange(location: 0, length: 0))
-            position.stringValue = stale ? "" : "没有可定位的命中"
+            position.stringValue = stale ? "" : L("没有可定位的命中")
             subtitle.stringValue = locationOverride ?? PathUtil.abbreviate((path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
             textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
         } else {
@@ -368,8 +370,8 @@ final class PreviewPane: NSView {
         ruler.anchors = anchors.filter { NSLocationInRange($0.utf16, range) }.map { ($0.utf16 - range.location, $0.info.gutter) }
         ruler.needsDisplay = true
         let windowed = range.length < fullText.length
-        banner.stringValue = stale ? "  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  "
-            : windowed ? "  文档较大，只显示当前命中附近约 20 万字；切换命中时会跟着移动。  " : ""
+        banner.stringValue = stale ? L("  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  ")
+            : windowed ? L("  文档较大，只显示当前命中附近约 20 万字；切换命中时会跟着移动。  ") : ""
         banner.isHidden = !stale && !windowed
     }
 
@@ -389,7 +391,7 @@ final class PreviewPane: NSView {
         centerCurrentHit()
         marks.current = currentHit
         // A hit longer than the window is shown from its start.
-        position.stringValue = "第 \(currentHit + 1)/\(hits.count) 处" + (totalHits > UInt64(hits.count) ? "（共 \(Theme.count(Int(totalHits))) 处）" : "") + (r.length < target.length ? "（命中过长，只显示开头）" : "")
+        position.stringValue = L("第 %@/%@ 处", "\(currentHit + 1)", "\(hits.count)") + (totalHits > UInt64(hits.count) ? L("（共 %@ 处）", "\(Theme.count(Int(totalHits)))") : "") + (r.length < target.length ? L("（命中过长，只显示开头）") : "")
         let loc = anchors.last { $0.utf16 <= target.location }?.info.location
         subtitle.stringValue = [locationOverride ?? PathUtil.abbreviate(subtitlePath, home: NSHomeDirectory()), loc].compactMap { $0 }.joined(separator: " · ")
         ruler.needsDisplay = true
@@ -500,7 +502,7 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.doubleAction = #selector(doubleClicked)
         table.onReturn = { [weak self] flags in self?.openSelected(reveal: flags.contains(.command)) }
         table.setDraggingSourceOperationMask([.copy, .link, .generic], forLocal: false)
-        table.setAccessibilityLabel("内容搜索结果")
+        table.setAccessibilityLabel(L("内容搜索结果"))
         listScroll.documentView = table
         listScroll.drawsBackground = false
         listScroll.hasVerticalScroller = true

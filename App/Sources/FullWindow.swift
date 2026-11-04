@@ -41,7 +41,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     /// The match mode of this window's results (the reader needs the same one).
     var matchMode: MatchMode { content.mode }
     private let field = NSSearchField()
-    private let modeControl = NSSegmentedControl(labels: ["名称", "内容"], trackingMode: .selectOne, target: nil, action: nil)
+    private let modeControl = NSSegmentedControl(labels: [L("名称"), L("内容")], trackingMode: .selectOne, target: nil, action: nil)
     private let countLabel = NSTextField(labelWithString: "")
     private let table = ResultTable()
     private let tableScroll = NSScrollView()
@@ -67,12 +67,12 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     var nameScope: () -> NameScope = { .default }
     var contentScope: () -> ContentScope = { .default }
 
-    static let times: [(String, String?)] = [("不限", nil), ("今天", "today"), ("最近 7 天", "7d"), ("最近 30 天", "30d"), ("今年", "thisyear")]
-    static let kinds: [(FileKind, String)] = [(.folder, "文件夹"), (.pdf, "PDF"), (.word, "文档"), (.sheet, "表格"), (.slide, "演示"), (.ofd, "OFD"),
-                                              (.text, "文本 / 代码"), (.image, "图片"), (.video, "视频"), (.audio, "音频"), (.archive, "压缩包"), (.app, "应用")]
-    static let contentTypes: [(ContentType, String)] = [(.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"),
+    static let times: [(String, String?)] = [(L("不限"), nil), (L("今天"), "today"), (L("最近 7 天"), "7d"), (L("最近 30 天"), "30d"), (L("今年"), "thisyear")]
+    static let kinds: [(FileKind, String)] = [(.folder, L("文件夹")), (.pdf, "PDF"), (.word, L("文档")), (.sheet, L("表格")), (.slide, L("演示")), (.ofd, "OFD"),
+                                              (.text, L("文本 / 代码")), (.image, L("图片")), (.video, L("视频")), (.audio, L("音频")), (.archive, L("压缩包")), (.app, L("应用"))]
+    static let contentTypes: [(ContentType, String)] = [(.text, L("文本 / 代码")), (.pdf, "PDF"), (.docx, L("Word（docx）")), (.doc, L("Word（doc）")),
                                                         (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"),
-                                                        (.web, "网页"), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, "压缩包"), (.wps, "WPS 文字")]
+                                                        (.web, L("网页")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包")), (.wps, L("WPS 文字"))]
 
     init(session: SearchSession, usage: UsageStore?) {
         self.session = session
@@ -102,7 +102,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
 
-        field.placeholderString = "搜索文件名，或切换到内容"
+        field.placeholderString = L("搜索文件名，或切换到内容")
         field.font = .systemFont(ofSize: 15)
         field.controlSize = .large
         // No blue focus ring: the caret already shows where typing goes (as in Spotlight and Finder).
@@ -136,7 +136,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         sidebarBox.wantsLayer = true
         sidebarBox.layer?.backgroundColor = Theme.sidebar.cgColor
 
-        for (id, title, width) in [("name", "名称", 300.0), ("dir", "位置", 280.0), ("hits", "命中", 60.0), ("size", "大小", 80.0), ("mtime", "修改时间", 130.0)] {
+        for (id, title, width) in [("name", L("名称"), 300.0), ("dir", L("位置"), 280.0), ("hits", L("命中"), 60.0), ("size", L("大小"), 80.0), ("mtime", L("修改时间"), 130.0)] {
             let c = NSTableColumn(identifier: .init(id))
             c.title = title
             c.width = width
@@ -165,7 +165,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         tableScroll.documentView = table
         tableScroll.hasVerticalScroller = true
 
-        textPreview.locate.title = "阅读窗口 ⌘↵"
+        textPreview.locate.title = L("阅读窗口 ⌘↵")
         textPreview.onLocate = { [weak self] in self?.openReader() }
         let preview = NSView()
         for v in [textPreview] as [NSView] {
@@ -225,7 +225,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         timePopup.addItems(withTitles: Self.times.map(\.0))
         timePopup.target = self
         timePopup.action = #selector(filtersChanged)
-        matchPopup.addItems(withTitles: ["宽松（默认）", "区分大小写", "严格原文"])
+        matchPopup.addItems(withTitles: [L("宽松（默认）"), L("区分大小写"), L("严格原文")])
         matchPopup.target = self
         matchPopup.action = #selector(filtersChanged)
         rebuildSidebar()
@@ -257,16 +257,16 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             let scope = nameScope()
             folders = scope.wholeDisk ? ["~/Desktop", "~/Documents", "~/Downloads"].map { home + $0.dropFirst() } : scope.folders.map { $0.hasPrefix("~") ? home + $0.dropFirst() : $0 }
         }
-        sidebar.addArrangedSubview(sectionTitle(mode == .content ? "内容索引范围" : "位置"))
+        sidebar.addArrangedSubview(sectionTitle(mode == .content ? L("内容索引范围") : L("位置")))
         folderChecks = folders.map { path in
             let b = check(PathUtil.abbreviate(path, home: home))
             b.toolTip = path
             sidebar.addArrangedSubview(b)
             return (path, b)
         }
-        if folders.isEmpty { sidebar.addArrangedSubview(sectionTitle("（未设置）")) }
+        if folders.isEmpty { sidebar.addArrangedSubview(sectionTitle(L("（未设置）"))) }
         sidebar.setCustomSpacing(16, after: sidebar.arrangedSubviews.last!)
-        sidebar.addArrangedSubview(sectionTitle("文件类型"))
+        sidebar.addArrangedSubview(sectionTitle(L("文件类型")))
         if mode == .content {
             typeChecks = Self.contentTypes.map { type, label in
                 let b = check(label)
@@ -281,11 +281,11 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             }
         }
         sidebar.setCustomSpacing(16, after: sidebar.arrangedSubviews.last!)
-        sidebar.addArrangedSubview(sectionTitle("修改时间"))
+        sidebar.addArrangedSubview(sectionTitle(L("修改时间")))
         sidebar.addArrangedSubview(timePopup)
         if mode == .content {
             sidebar.setCustomSpacing(16, after: timePopup)
-            sidebar.addArrangedSubview(sectionTitle("匹配模式"))
+            sidebar.addArrangedSubview(sectionTitle(L("匹配模式")))
             sidebar.addArrangedSubview(matchPopup)
         }
         table.tableColumns.first { $0.identifier.rawValue == "hits" }?.isHidden = mode != .content
@@ -392,7 +392,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             Row(name: item.name, path: item.path, dir: (item.path as NSString).deletingLastPathComponent, size: item.size, mtime: item.mtime,
                 hits: nil, kind: item.kind, isFolder: item.kind == .folder, fileId: item.fileId, hit: nil)
         }
-        countLabel.stringValue = out.query.isEmpty ? "" : "\(Theme.count(out.total)) 项" + (out.total > ranked.count ? "（显示前 \(Theme.count(ranked.count)) 项）" : "")
+        countLabel.stringValue = out.query.isEmpty ? "" : L("%@ 项", "\(Theme.count(out.total))") + (out.total > ranked.count ? L("（显示前 %@ 项）", "\(Theme.count(ranked.count))") : "")
         resort(keepSelection: false)
     }
 
@@ -407,9 +407,9 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         }
         ranked = out.append ? ranked + new : new
         if let e = out.error {
-            countLabel.stringValue = e
+            countLabel.stringValue = Loc.display(e)
         } else {
-            countLabel.stringValue = out.query.isEmpty ? "" : "\(Theme.count(ranked.count)) 个文件" + (out.capped ? "（前 \(Theme.count(ranked.count)) 个）" : out.done ? "" : " · 仍在搜索… 已核验 \(out.verified)/\(out.candidates)")
+            countLabel.stringValue = out.query.isEmpty ? "" : L("%@ 个文件", "\(Theme.count(ranked.count))") + (out.capped ? L("（前 %@ 个）", "\(Theme.count(ranked.count))") : out.done ? "" : L(" · 仍在搜索… 已核验 %@/%@", "\(out.verified)", "\(out.candidates)"))
         }
         resort(keepSelection: out.append)
         if openFirstInReader, let first = rows.first?.hit {
@@ -659,10 +659,10 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = targets.count == 1 ? "将“\(targets[0].name)”移到废纸篓？" : "将选中的 \(targets.count) 项移到废纸篓？"
-        alert.informativeText = "可以在废纸篓中恢复。"
-        alert.addButton(withTitle: "移到废纸篓")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = targets.count == 1 ? L("将“%@”移到废纸篓？", "\(targets[0].name)") : L("将选中的 %@ 项移到废纸篓？", "\(targets.count)")
+        alert.informativeText = L("可以在废纸篓中恢复。")
+        alert.addButton(withTitle: L("移到废纸篓"))
+        alert.addButton(withTitle: L("取消"))
         alert.beginSheetModal(for: window) { [weak self] resp in
             guard let self, resp == .alertFirstButtonReturn else { return }
             var failed: [String] = []
@@ -680,8 +680,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             self.resort(keepSelection: false)
             if !failed.isEmpty {
                 let a = NSAlert()
-                a.messageText = "有 \(failed.count) 项没能移到废纸篓"
-                a.informativeText = failed.prefix(5).joined(separator: "、")
+                a.messageText = L("有 %@ 项没能移到废纸篓", "\(failed.count)")
+                a.informativeText = failed.prefix(5).joined(separator: L("、"))
                 a.beginSheetModal(for: window)
             }
         }

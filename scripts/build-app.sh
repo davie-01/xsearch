@@ -15,6 +15,9 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp App/Resources/Info.plist "$app/Contents/Info.plist"
 cp App/Resources/XSearchTemplate-18.png App/Resources/XSearchTemplate-18@2x.png "$app/Contents/Resources/"
+# Localizations (permission prompts; the UI strings live in code). Their presence also lets
+# the system and Sparkle pick English when the language setting asks for it.
+cp -R App/Resources/en.lproj App/Resources/zh-Hans.lproj "$app/Contents/Resources/"
 # An Icon Composer document: the only source format that keeps the dark variant on macOS.
 xcrun actool App/Resources/AppIcon.icon --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 26.0 \
     --app-icon AppIcon --output-partial-info-plist "$(mktemp)" > /dev/null

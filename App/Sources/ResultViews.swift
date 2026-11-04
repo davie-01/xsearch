@@ -106,7 +106,7 @@ final class ResultCellView: NSTableCellView {
         details.stringValue = Self.details(item)
         meta.stringValue = item.meta
         name.attributedStringValue = Self.highlight(item.name, terms: terms)
-        setAccessibilityLabel("\(item.name)，\(details.stringValue)\(path.stringValue)，\(item.meta)")
+        setAccessibilityLabel(L("%@，%@%@，%@", "\(item.name)", "\(details.stringValue)", "\(path.stringValue)", "\(item.meta)"))
     }
 
     /// Matched parts semibold in the accent color (§4.2).

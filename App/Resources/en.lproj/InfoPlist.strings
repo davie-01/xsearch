@@ -1,0 +1,7 @@
+/* Permission prompts (English). The Chinese ones are in Info.plist and zh-Hans.lproj. */
+"NSDesktopFolderUsageDescription" = "XSearch reads the file names in your Desktop folder to build a search index on this Mac. File names never leave this Mac.";
+"NSDocumentsFolderUsageDescription" = "XSearch reads the file names in your Documents folder to build a search index on this Mac. File names never leave this Mac.";
+"NSDownloadsFolderUsageDescription" = "XSearch reads the file names in your Downloads folder to build a search index on this Mac. File names never leave this Mac.";
+"NSRemovableVolumesUsageDescription" = "XSearch reads the file names on removable volumes to build a search index on this Mac.";
+"NSNetworkVolumesUsageDescription" = "XSearch reads the file names on network volumes to build a search index on this Mac.";
+"NSAppleEventsUsageDescription" = "XSearch uses this to have Skim or Preview open a PDF at the page of a match.";

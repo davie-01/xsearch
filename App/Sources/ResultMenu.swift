@@ -1,4 +1,5 @@
 import AppKit
+import XSearchCore
 
 /// Context menu of a launcher result (docs/m5/右键菜单.md): Finder's file menu, trimmed per
 /// kind of result. Built fresh on each right click from what the row is.
@@ -48,36 +49,36 @@ enum ResultMenu {
         switch t.kind {
         case .missing:
             // Only what still makes sense for a path that is gone.
-            if t.isFavorite { add("从收藏中移除", a.toggleFavorite) }
-            if t.isRecent { add("从最近打开中移除", a.removeRecent) }
+            if t.isFavorite { add(L("从收藏中移除"), a.toggleFavorite) }
+            if t.isRecent { add(L("从最近打开中移除"), a.removeRecent) }
             separator()
-            add("复制路径") { copy(string: t.copyPathText); a.toast("已复制路径") }
+            add(L("复制路径")) { copy(string: t.copyPathText); a.toast(L("已复制路径")) }
             return
         case .member:
-            add("打开", key: "\r", a.open)
-            if let read = a.read { add("在阅读窗口中打开", key: "\r", modifiers: .command, read) }
-            add("在访达中显示压缩包", a.reveal)
+            add(L("打开"), key: "\r", a.open)
+            if let read = a.read { add(L("在阅读窗口中打开"), key: "\r", modifiers: .command, read) }
+            add(L("在访达中显示压缩包"), a.reveal)
             separator()
-            add("复制路径") { copy(string: t.copyPathText); a.toast("已复制路径") }
+            add(L("复制路径")) { copy(string: t.copyPathText); a.toast(L("已复制路径")) }
             return
         case .app, .folder, .file:
             break
         }
 
-        add("打开", key: "\r", a.open)
-        if t.canRead, let read = a.read { add("在阅读窗口中打开", key: "\r", modifiers: .command, read) }
+        add(L("打开"), key: "\r", a.open)
+        if t.canRead, let read = a.read { add(L("在阅读窗口中打开"), key: "\r", modifiers: .command, read) }
         if t.kind == .file, let sub = openWith(url, willLeave: a.willLeave) {
-            let item = NSMenuItem(title: "打开方式", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: L("打开方式"), action: nil, keyEquivalent: "")
             item.submenu = sub
             menu.addItem(item)
         }
         // ⌘↵ reveals in name mode only (content mode uses it for the reader).
-        if t.canRead { add("在访达中显示", a.reveal) } else { add("在访达中显示", key: "\r", modifiers: .command, a.reveal) }
+        if t.canRead { add(L("在访达中显示"), a.reveal) } else { add(L("在访达中显示"), key: "\r", modifiers: .command, a.reveal) }
         if t.kind != .app, let quickLook = a.quickLook {
-            if t.canRead { add("快速查看", quickLook) } else { add("快速查看", key: " ", quickLook) }
+            if t.canRead { add(L("快速查看"), quickLook) } else { add(L("快速查看"), key: " ", quickLook) }
         }
         if t.kind == .folder {
-            add("在终端中打开") {
+            add(L("在终端中打开")) {
                 a.willLeave()
                 if let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
                     NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
@@ -85,19 +86,19 @@ enum ResultMenu {
             }
         }
         separator()
-        add("复制“\(t.name)”") {
+        add(L("复制“%@”", "\(t.name)")) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects([url as NSURL])
-            a.toast("已复制")
+            a.toast(L("已复制"))
         }
-        add("复制路径") { copy(string: t.copyPathText); a.toast("已复制路径") }
+        add(L("复制路径")) { copy(string: t.copyPathText); a.toast(L("已复制路径")) }
         separator()
-        add(t.isFavorite ? "取消收藏" : "收藏", key: "d", modifiers: .command, a.toggleFavorite)
-        if t.isRecent { add("从最近打开中移除", a.removeRecent) }
+        add(t.isFavorite ? L("取消收藏") : L("收藏"), key: "d", modifiers: .command, a.toggleFavorite)
+        if t.isRecent { add(L("从最近打开中移除"), a.removeRecent) }
         // Apps are left out: moving one to the trash from a search list is too easy a mistake.
         if t.kind != .app {
             separator()
-            add("移到废纸篓", key: "\u{8}", modifiers: .command, a.trash)
+            add(L("移到废纸篓"), key: "\u{8}", modifiers: .command, a.trash)
         }
     }
 
@@ -114,7 +115,7 @@ enum ResultMenu {
             let name = FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: "")
             // The same app installed twice shows once.
             guard seen.insert(name).inserted else { continue }
-            let item = ClosureItem(title: i == 0 && preferred != nil ? "\(name)（默认）" : name) {
+            let item = ClosureItem(title: i == 0 && preferred != nil ? L("%@（默认）", "\(name)") : name) {
                 willLeave()
                 ws.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
             }

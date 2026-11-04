@@ -121,7 +121,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private let header = FlippedView()
     private let body = FlippedView()
     private var driver: FrameDriver?
-    private let contentChip = NSButton(title: "内容  ×", target: nil, action: nil)
+    private let contentChip = NSButton(title: L("内容  ×"), target: nil, action: nil)
     /// Spotlight-style scope: Tab on an app (its documents) or a folder (its contents).
     private let scopeChip = NSButton(title: "", target: nil, action: nil)
     private var scopeChipWidth: NSLayoutConstraint!
@@ -193,7 +193,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         mainContent.addSubview(header)
         mainContent.addSubview(body)
 
-        let icon = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "搜索")!)
+        let icon = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("搜索"))!)
         icon.symbolConfiguration = .init(pointSize: 22, weight: .medium)
         icon.contentTintColor = .secondaryLabelColor
 
@@ -204,7 +204,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         field.delegate = self
         field.cell?.isScrollable = true
         field.cell?.wraps = false
-        field.setAccessibilityLabel("搜索")
+        field.setAccessibilityLabel(L("搜索"))
 
         contentChip.bezelStyle = .inline
         contentChip.isBordered = false
@@ -214,12 +214,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentChip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
         contentChip.contentTintColor = .labelColor
         contentChip.font = Self.tokenFont
-        contentChip.title = "内容"
-        contentChip.widthAnchor.constraint(equalToConstant: ceil(("内容" as NSString).size(withAttributes: [.font: Self.tokenFont]).width) + 24).isActive = true
+        contentChip.title = L("内容")
+        contentChip.widthAnchor.constraint(equalToConstant: ceil((L("内容") as NSString).size(withAttributes: [.font: Self.tokenFont]).width) + 24).isActive = true
         contentChip.heightAnchor.constraint(equalToConstant: 30).isActive = true
         contentChip.target = self
         contentChip.action = #selector(removeContentPrefix)
-        contentChip.setAccessibilityLabel("移除内容前缀")
+        contentChip.setAccessibilityLabel(L("移除内容前缀"))
         contentChip.isHidden = true
 
         scopeChip.bezelStyle = .inline
@@ -286,7 +286,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         table.onTyping = { [weak self] in self?.typeInInput($0) }
         table.onReturn = { [weak self] flags in self?.activate(flags.contains(.command) ? .reveal : .open) }
         table.setDraggingSourceOperationMask([.copy, .link, .generic], forLocal: false)
-        table.setAccessibilityLabel("搜索结果")
+        table.setAccessibilityLabel(L("搜索结果"))
         table.contextMenu = { [weak self] row in self?.contextMenu(content: false, row: row) }
         table.onPreviewEnded = { [weak self] in self?.previewEnded() }
         scroll.documentView = table
@@ -521,10 +521,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func updatePlaceholder() {
         switch scope {
-        case .app(let t)?: field.placeholderString = "在“\(t.appName)”可打开的文档中搜索"
-        case .folder(let p)?: field.placeholderString = "在“\(FileManager.default.displayName(atPath: p))”中搜索"
-        case .kind?: field.placeholderString = "搜索应用和文件"
-        case nil: field.placeholderString = mode == .name ? "搜索应用和文件" : "在文件内容中查找"
+        case .app(let t)?: field.placeholderString = L("在“%@”可打开的文档中搜索", "\(t.appName)")
+        case .folder(let p)?: field.placeholderString = L("在“%@”中搜索", "\(FileManager.default.displayName(atPath: p))")
+        case .kind?: field.placeholderString = L("搜索应用和文件")
+        case nil: field.placeholderString = mode == .name ? L("搜索应用和文件") : L("在文件内容中查找")
         }
     }
 
@@ -536,7 +536,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         switch item.kind {
         case .app:
             var types = DocumentTypes(appPath: item.path)
-            if types.isEmpty { toast("“\(item.name)”没有声明可打开的文档类型"); return true }
+            if types.isEmpty { toast(L("“%@”没有声明可打开的文档类型", "\(item.name)")); return true }
             // The name as Finder shows it (localized: “预览”, not “Preview”).
             types.appName = (FileManager.default.displayName(atPath: item.path) as NSString).deletingPathExtension
             setScope(.app(types), icon: appIcon(atPath: item.path), title: types.appName)
@@ -557,7 +557,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             // Icon and text sit together, centred, with about Spotlight's padding around them.
             let textWidth = ceil((title as NSString).size(withAttributes: [.font: Self.tokenFont]).width)
             scopeChipWidth.constant = textWidth + (icon == nil ? 24 : 46)
-            scopeChip.setAccessibilityLabel("移除范围 \(title)")
+            scopeChip.setAccessibilityLabel(L("移除范围 %@", "\(title)"))
             if !keepText { field.stringValue = "" }
         }
         scopeChip.isHidden = s == nil
@@ -642,7 +642,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         for item in out.items {
             // Plain results need no heading (Spotlight); favorites and recents keep theirs.
             if item.group != lastGroup {
-                if item.group != .files { rows.append(.group(item.group.rawValue)) }
+                if item.group != .files { rows.append(.group(L(item.group.rawValue, context: "group"))) }
                 lastGroup = item.group
             }
             rows.append(.item(item))
@@ -667,8 +667,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     private static let kindLabels: [(FileKind, String)] = [
-        (.folder, "文件夹"), (.app, "应用"), (.pdf, "PDF"), (.word, "文档"), (.sheet, "表格"), (.slide, "演示"), (.ofd, "OFD"),
-        (.text, "文本"), (.image, "图片"), (.video, "视频"), (.audio, "音频"), (.archive, "压缩包"),
+        (.folder, L("文件夹")), (.app, L("应用")), (.pdf, "PDF"), (.word, L("文档")), (.sheet, L("表格")), (.slide, L("演示")), (.ofd, "OFD"),
+        (.text, L("文本")), (.image, L("图片")), (.video, L("视频")), (.audio, L("音频")), (.archive, L("压缩包")),
     ]
 
     /// The kinds among the results, most frequent first, then the apps that open them, as many
@@ -711,7 +711,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             if width > room { continue }
             room -= width
             chip.tag = filterActions.count
-            chip.setAccessibilityLabel("筛选 \(title)")
+            chip.setAccessibilityLabel(L("筛选 %@", "\(title)"))
             filters.addArrangedSubview(chip)
             filterActions.append(action)
         }
@@ -753,7 +753,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func applyAppFilter(_ app: URL, name: String) {
         var types = DocumentTypes(appPath: app.path)
-        if types.isEmpty { toast("“\(name)”没有声明可打开的文档类型"); return }
+        if types.isEmpty { toast(L("“%@”没有声明可打开的文档类型", "\(name)")); return }
         types.appName = name
         applyFilter(.app(types), title: name, icon: appIcon(atPath: app.path))
     }
@@ -778,7 +778,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func setChips(_ list: [NameQuery.Chip]) {
         chips.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for chip in list where !isScopeChip(chip.label) {
-            chips.addArrangedSubview(CapsuleLabel(chip.valid ? chip.label : chip.label + "（无法识别）", warning: !chip.valid))
+            chips.addArrangedSubview(CapsuleLabel(chip.valid ? Loc.display(chip.label) : Loc.display(chip.label) + L("（无法识别）"), warning: !chip.valid))
         }
     }
 
@@ -812,14 +812,14 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if out.query.isEmpty { return }  // empty input: just the search bar
         let phase = session.names.status.phase
         if phase == .scanning || phase == .starting {
-            addNotice("文件名索引仍在建立，已处理的部分可以搜索。", color: Theme.warnText, size: 12.5)
+            addNotice(L("文件名索引仍在建立，已处理的部分可以搜索。"), color: Theme.warnText, size: 12.5)
         }
         for dir in out.unresolvedDirs {
-            addNotice("目录 \(PathUtil.abbreviate(dir, home: NSHomeDirectory())) 不在文件名索引中（不存在、被排除或不在范围内）。", size: 12.5)
+            addNotice(L("目录 %@ 不在文件名索引中（不存在、被排除或不在范围内）。", "\(PathUtil.abbreviate(dir, home: NSHomeDirectory()))"), size: 12.5)
         }
         let text = out.query.terms.joined(separator: " ")
-        addNotice("文件名索引中没有匹配“\(text.isEmpty ? out.text : text)”的项目")
-        addLink("查看可能的原因（范围、排除规则、权限）", action: #selector(showScopeSettings))
+        addNotice(L("文件名索引中没有匹配“%@”的项目", "\(text.isEmpty ? out.text : text)"))
+        addLink(L("查看可能的原因（范围、排除规则、权限）"), action: #selector(showScopeSettings))
     }
 
     private func applyContent(_ out: ContentOutput) {
@@ -846,21 +846,21 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         clearNotice()
         if out.query.isEmpty { return }
         if let error = out.error {
-            addNotice(error, color: Theme.warnText, size: 12.5)
+            addNotice(Loc.display(error), color: Theme.warnText, size: 12.5)
             return
         }
         switch out.recall {
-        case .pair?: addNotice("两个字节的查询用前缀区间召回，结果完整。", color: Theme.warnText, size: 12.5)
-        case .scan?: addNotice("单字符或只含排除条件的查询会扫描全部已索引正文；加上 dir: 或 ext: 可以更快。", color: Theme.warnText, size: 12.5)
-        case .longTermsThenVerify?: addNotice("先用长词找候选，再核验短词。", color: .tertiaryLabelColor, size: 12.5)
+        case .pair?: addNotice(L("两个字节的查询用前缀区间召回，结果完整。"), color: Theme.warnText, size: 12.5)
+        case .scan?: addNotice(L("单字符或只含排除条件的查询会扫描全部已索引正文；加上 dir: 或 ext: 可以更快。"), color: Theme.warnText, size: 12.5)
+        case .longTermsThenVerify?: addNotice(L("先用长词找候选，再核验短词。"), color: .tertiaryLabelColor, size: 12.5)
         default: break
         }
         // §8.7: a dir: outside the content scope can be scanned live, on request only.
         let uncovered = uncoveredDirs(out.query)
         if !uncovered.isEmpty && !out.live {
-            let names = uncovered.map { PathUtil.abbreviate($0, home: NSHomeDirectory()) }.joined(separator: "、")
-            addNotice("\(names) 没有建立内容索引，结果只包含已索引的文件。", color: Theme.warnText, size: 12.5)
-            addLink("实时扫描其中的文本文件", action: #selector(startLiveScan))
+            let names = uncovered.map { PathUtil.abbreviate($0, home: NSHomeDirectory()) }.joined(separator: L("、"))
+            addNotice(L("%@ 没有建立内容索引，结果只包含已索引的文件。", "\(names)"), color: Theme.warnText, size: 12.5)
+            addLink(L("实时扫描其中的文本文件"), action: #selector(startLiveScan))
             // Dev: XS_LIVE_SCAN=1 starts the scan without the click.
             if ProcessInfo.processInfo.environment["XS_LIVE_SCAN"] == "1" && out.done && !autoScanned {
                 autoScanned = true
@@ -868,13 +868,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             }
         }
         guard out.done && contentShown == 0 && uncovered.isEmpty else { return }
-        addNotice("已索引的内容中没有找到“\(out.query.expression)”。")
+        addNotice(L("已索引的内容中没有找到“%@”。", "\(out.query.expression)"))
         let stats = session.contentStats?() ?? ContentStats()
-        var parts = ["内容索引 \(Theme.count(stats.indexed)) 个文件"]
-        if stats.pending > 0 { parts.append("\(stats.pending) 个文件等待处理") }
-        if stats.failed > 0 { parts.append("\(stats.failed) 个文件提取失败") }
+        var parts = [L("内容索引 %@ 个文件", "\(Theme.count(stats.indexed))")]
+        if stats.pending > 0 { parts.append(L("%@ 个文件等待处理", "\(stats.pending)")) }
+        if stats.failed > 0 { parts.append(L("%@ 个文件提取失败", "\(stats.failed)")) }
         addNotice(parts.joined(separator: " · "), color: .tertiaryLabelColor, size: 12.5)
-        addLink("为什么可能搜不到？", action: #selector(showDiagnostics))
+        addLink(L("为什么可能搜不到？"), action: #selector(showDiagnostics))
     }
 
     private var autoScanned = false
@@ -897,9 +897,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func beginLiveScan(_ out: ContentOutput, files: [LiveFile], unresolved: [String], truncated: Bool) {
         clearNotice()
         for d in unresolved {
-            addNotice("\(PathUtil.abbreviate(d, home: NSHomeDirectory())) 不在文件名索引中，无法扫描。", color: Theme.warnText, size: 12.5)
+            addNotice(L("%@ 不在文件名索引中，无法扫描。", "\(PathUtil.abbreviate(d, home: NSHomeDirectory()))"), color: Theme.warnText, size: 12.5)
         }
-        addNotice("实时扫描只读取文本类文件（\(truncated ? "前 " : "")\(Theme.count(files.count)) 个），不会写入索引。", color: .tertiaryLabelColor, size: 12.5)
+        addNotice(truncated ? L("实时扫描只读取文本类文件（前 %@ 个），不会写入索引。", Theme.count(files.count))
+                            : L("实时扫描只读取文本类文件（%@ 个），不会写入索引。", Theme.count(files.count)), color: .tertiaryLabelColor, size: 12.5)
         resize()
         session.content.liveScan(out.query, text: out.text, files: files) { [weak self] batch in self?.applyContent(batch) }
     }
@@ -912,7 +913,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func openContent(_ hit: ContentHit, reveal: Bool) {
         let path = hit.dir + "/" + hit.name
         guard FileManager.default.fileExists(atPath: path) else {
-            toast("文件已不存在，索引会自动更新")
+            toast(L("文件已不存在，索引会自动更新"))
             return
         }
         usage?.recordOpen(path: path, fileId: Int64(hit.fileId))
@@ -947,8 +948,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func updateHints() {
         hints.attributedStringValue = Self.hintString(mode == .name
-            ? [("↵", "打开"), ("⌘↵", "在访达中显示"), ("⌘D", "收藏"), ("⌘E", "完整窗口")]
-            : [("↵", "打开"), ("⌘↵", "阅读窗口"), ("⌘G", "下一处"), ("⇧⌘G", "上一处"), ("⌘E", "完整窗口")])
+            ? [("↵", L("打开")), ("⌘↵", L("在访达中显示", context: "hint")), ("⌘D", L("收藏")), ("⌘E", L("完整窗口", context: "hint"))]
+            : [("↵", L("打开")), ("⌘↵", L("阅读窗口")), ("⌘G", L("下一处")), ("⇧⌘G", L("上一处")), ("⌘E", L("完整窗口", context: "hint"))])
     }
 
     static func hintString(_ pairs: [(String, String)]) -> NSAttributedString {
@@ -966,25 +967,25 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let st = session.names.status
         var parts: [String] = []
         switch st.phase {
-        case .starting: parts.append("正在打开文件名索引")
-        case .scanning: parts.append("正在建立文件名索引 · \(Theme.count(st.count)) 项")
-        case .ready: parts.append("名称索引 \(Theme.count(st.count)) 项")
-        case .failed: parts.append("文件名索引出错，详见设置")
+        case .starting: parts.append(L("正在打开文件名索引"))
+        case .scanning: parts.append(L("正在建立文件名索引 · %@ 项", "\(Theme.count(st.count))"))
+        case .ready: parts.append(L("名称索引 %@ 项", "\(Theme.count(st.count))"))
+        case .failed: parts.append(L("文件名索引出错，详见设置"))
         }
         if mode == .content {
             let stats = session.contentStats?() ?? ContentStats()
-            parts = ["内容索引 \(Theme.count(stats.indexed)) 个文件"]
-            if stats.pending > 0 { parts.append("待处理 \(Theme.count(stats.pending))") }
+            parts = [L("内容索引 %@ 个文件", "\(Theme.count(stats.indexed))")]
+            if stats.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(stats.pending))")) }
             if let out = contentOutput, !out.query.isEmpty, out.error == nil {
                 if out.live {
-                    parts.append(out.done ? "实时扫描完成 · \(Theme.count(contentShown)) 个结果"
-                                          : "实时扫描… \(Theme.count(out.scanned)) / \(Theme.count(out.scanTotal)) 个文件")
+                    parts.append(out.done ? L("实时扫描完成 · %@ 个结果", "\(Theme.count(contentShown))")
+                                          : L("实时扫描… %@ / %@ 个文件", "\(Theme.count(out.scanned))", "\(Theme.count(out.scanTotal))"))
                 } else {
-                    parts.append(out.capped ? "前 \(Theme.count(contentShown)) 个结果" : out.done ? "\(Theme.count(contentShown)) 个结果" : "仍在搜索… 已核验 \(Theme.count(Int(out.verified))) / \(Theme.count(Int(out.candidates)))")
+                    parts.append(out.capped ? L("前 %@ 个结果", "\(Theme.count(contentShown))") : out.done ? L("%@ 个结果", "\(Theme.count(contentShown))") : L("仍在搜索… 已核验 %@ / %@", "\(Theme.count(Int(out.verified)))", "\(Theme.count(Int(out.candidates)))"))
                 }
             }
         } else if let out = output, !out.query.isEmpty {
-            parts.append("\(Theme.count(out.total)) 个结果")
+            parts.append(L("%@ 个结果", "\(Theme.count(out.total))"))
             parts.append(String(format: "%.1f ms", out.elapsedMs))
         }
         status.stringValue = parts.joined(separator: " · ")
@@ -1030,7 +1031,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if memberSelected { toast(MemberOpener.notAlone); return }
         guard let t = currentTarget(), let usage else { return }
         let on = usage.toggleFavorite(path: t.path, fileId: t.fileId)
-        toast(on ? "已加入收藏" : "已取消收藏")
+        toast(on ? L("已加入收藏") : L("已取消收藏"))
         if field.stringValue.isEmpty { runSearch() }
     }
 
@@ -1045,8 +1046,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
         pendingTrash = t.path
         clearNotice()
-        addNotice("将“\((t.path as NSString).lastPathComponent)”移到废纸篓？再按一次 ⌘⌫ 确认。", color: Theme.warnText, size: 12.5)
-        addLink("移到废纸篓", action: #selector(confirmTrash))
+        addNotice(L("将“%@”移到废纸篓？再按一次 ⌘⌫ 确认。", "\((t.path as NSString).lastPathComponent)"), color: Theme.warnText, size: 12.5)
+        addLink(L("移到废纸篓"), action: #selector(confirmTrash))
         resize()
     }
 
@@ -1057,7 +1058,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         do {
             try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
             usage?.remove(path: path)
-            toast("已移到废纸篓")
+            toast(L("已移到废纸篓"))
             if mode == .content {
                 contentPane.remove(path: path)
             } else {
@@ -1068,7 +1069,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 }
             }
         } catch {
-            toast("无法移到废纸篓：\(error.localizedDescription)")
+            toast(L("无法移到废纸篓：%@", "\(error.localizedDescription)"))
         }
         resize()
     }
@@ -1282,7 +1283,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         guard let item = selectedItem else { return }
         let url = URL(fileURLWithPath: item.path)
         guard FileManager.default.fileExists(atPath: item.path) else {
-            toast("文件已不存在，索引会自动更新")
+            toast(L("文件已不存在，索引会自动更新"))
             return
         }
         usage?.recordOpen(path: item.path, fileId: item.fileId)
@@ -1337,7 +1338,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             removeRecent: { [weak self] in
                 guard let self else { return }
                 usage?.remove(path: target.path)
-                toast("已从最近打开中移除")
+                toast(L("已从最近打开中移除"))
                 runSearch()
             },
             toast: { [weak self] in self?.toast($0) },
@@ -1411,30 +1412,30 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         func row(_ example: String, _ text: String, enabled: Bool = true) {
             s.append(NSAttributedString(string: example, attributes: code))
             s.append(NSAttributedString(string: "  " + text, attributes: body))
-            if !enabled { s.append(NSAttributedString(string: "（已关闭，按普通字符搜索）", attributes: off)) }
+            if !enabled { s.append(NSAttributedString(string: L("（已关闭，按普通字符搜索）"), attributes: off)) }
             s.append(NSAttributedString(string: "\n"))
         }
-        title(mode == .name ? "名称模式语法" : "内容模式语法")
-        row("报告 2024", "同时包含多个词")
-        row("\"a b\"", "引号里的空格当作文字")
-        row("甲 | 乙", "任一即可", enabled: syntax.operators)
-        row("-草稿", "排除", enabled: syntax.operators)
-        row("(甲 | 乙) 丙", "分组", enabled: syntax.operators)
+        title(mode == .name ? L("名称模式语法") : L("内容模式语法"))
+        row(L("报告 2024"), L("同时包含多个词"))
+        row("\"a b\"", L("引号里的空格当作文字"))
+        row(L("甲 | 乙"), L("任一即可"), enabled: syntax.operators)
+        row(L("-草稿"), L("排除"), enabled: syntax.operators)
+        row(L("(甲 | 乙) 丙"), L("分组"), enabled: syntax.operators)
         if mode == .name {
-            row("*.pdf  报告?.docx", "通配符：* 不跨目录，? 匹配一个字符", enabled: syntax.wildcards)
-            row("**/合同/*.pdf", "含 / 时匹配完整路径，** 可跨目录", enabled: syntax.wildcards)
-            row("regex:^\\d+\\.txt$", "正则匹配文件名（含 / 时匹配路径）", enabled: syntax.regex)
+            row(L("*.pdf  报告?.docx"), L("通配符：* 不跨目录，? 匹配一个字符"), enabled: syntax.wildcards)
+            row(L("**/合同/*.pdf"), L("含 / 时匹配完整路径，** 可跨目录"), enabled: syntax.wildcards)
+            row("regex:^\\d+\\.txt$", L("正则匹配文件名（含 / 时匹配路径）"), enabled: syntax.regex)
         } else {
-            row("\"合同 金额\"~10", "邻近：几个词相距不超过 10 个字，顺序不限", enabled: syntax.proximity)
-            row("regex:HT-\\d{4}", "正则扫描已提取的正文；需含 3 字节以上的固定文字，或搭配 dir:/ext:", enabled: syntax.regex)
+            row(L("\"合同 金额\"~10"), L("邻近：几个词相距不超过 10 个字，顺序不限"), enabled: syntax.proximity)
+            row("regex:HT-\\d{4}", L("正则扫描已提取的正文；需含 3 字节以上的固定文字，或搭配 dir:/ext:"), enabled: syntax.regex)
         }
-        title("过滤条件")
-        row("dir:~/文稿", mode == .name ? "限定目录，可写多个；也可写目录名片段 dir:合同/2024" : "限定目录（完整路径），可写多个")
-        row("ext:pdf;docx", "扩展名")
-        if mode == .name { row("kind:文件夹", "类型：文件夹 / 应用 / pdf / doc / 图片 …") }
-        row("size:>10mb", "大小：> >= < <=、1m..10m、empty")
-        row("dm:today", "修改时间：today / 本周 / 7d / 2024-05 / >=2025 / 2024..2025-06")
-        s.append(NSAttributedString(string: "\n可在 设置 → 搜索语法 中开关各项语法。", attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        title(L("过滤条件"))
+        row(L("dir:~/文稿"), mode == .name ? L("限定目录，可写多个；也可写目录名片段 dir:合同/2024") : L("限定目录（完整路径），可写多个"))
+        row("ext:pdf;docx", L("扩展名"))
+        if mode == .name { row(L("kind:文件夹"), L("类型：文件夹 / 应用 / pdf / doc / 图片 …")) }
+        row("size:>10mb", L("大小：> >= < <=、1m..10m、empty"))
+        row("dm:today", L("修改时间：today / 本周 / 7d / 2024-05 / >=2025 / 2024..2025-06"))
+        s.append(NSAttributedString(string: L("\n可在 设置 → 搜索语法 中开关各项语法。"), attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
         return s
     }
 
@@ -1594,7 +1595,7 @@ final class CapsuleLabel: NSView {
         ])
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel("过滤条件 " + text)
+        setAccessibilityLabel(L("过滤条件 ") + text)
         restyle()
     }
 

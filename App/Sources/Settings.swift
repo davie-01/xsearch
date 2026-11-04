@@ -5,7 +5,7 @@ import SwiftUI
 import XSearchCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "通用", scope = "索引范围", syntax = "搜索语法", openWith = "打开方式", diagnostics = "诊断", privacy = "隐私与数据"
+    case general = "通用", scope = "索引范围", syntax = "搜索语法", openWith = "打开方式", diagnostics = "诊断", privacy = "隐私与数据"  // l10n: shown through L(rawValue)
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -40,6 +40,9 @@ final class SettingsModel: ObservableObject {
     @Published var contentStatus: ContentIndexer.Status?
     @Published var diagnosePath = ""
     @Published var diagnosis: [NameService.DiagnosisItem] = []
+    @Published var language = UILanguage.chosen { didSet { UILanguage.chosen = language } }
+    /// The language this run started with; another choice applies after a restart.
+    let launchLanguage = UILanguage.chosen
     weak var delegate: AppDelegate?
     var names: NameService
 
@@ -68,7 +71,7 @@ final class SettingsModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "添加"
+        panel.prompt = L("添加")
         guard panel.runModal() == .OK else { return }
         for url in panel.urls {
             let p = PathUtil.abbreviate(url.path, home: NSHomeDirectory())
@@ -94,7 +97,7 @@ final class SettingsModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "添加"
+        panel.prompt = L("添加")
         guard panel.runModal() == .OK else { return }
         let home = NSHomeDirectory()
         for url in panel.urls {
@@ -110,7 +113,7 @@ final class SettingsModel: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
         panel.showsHiddenFiles = true
-        panel.prompt = "添加"
+        panel.prompt = L("添加")
         guard panel.runModal() == .OK else { return }
         let home = NSHomeDirectory()
         for url in panel.urls {
@@ -118,6 +121,15 @@ final class SettingsModel: ObservableObject {
             if !scope.extraFolders.contains(p) { scope.extraFolders.append(p) }
         }
         commitScope()
+    }
+
+    /// Quits and opens the app again once this process is gone (the new language applies).
+    func relaunch() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done; open \"$0\"", Bundle.main.bundlePath]
+        try? p.run()
+        NSApp.terminate(nil)
     }
 
     func setLaunchAtLogin(_ on: Bool) {
@@ -138,13 +150,13 @@ final class SettingsModel: ObservableObject {
             guard let self else { return event }
             let mods = HotKey.Combo.carbonModifiers(event.modifierFlags)
             if event.keyCode == 53 && mods == 0 { self.stopRecording(); return nil }  // Esc cancels
-            guard mods != 0 else { self.hotKeyError = "需要至少一个修饰键（⌘ ⌥ ⌃ ⇧）"; return nil }
+            guard mods != 0 else { self.hotKeyError = L("需要至少一个修饰键（⌘ ⌥ ⌃ ⇧）"); return nil }
             let combo = HotKey.Combo(keyCode: UInt32(event.keyCode), modifiers: mods)
             if self.delegate?.changeHotKey(combo) == true {
                 self.hotKey = combo
                 self.hotKeyError = nil
             } else {
-                self.hotKeyError = "\(combo.display) 已被其他应用占用，请换一个组合"
+                self.hotKeyError = L("%@ 已被其他应用占用，请换一个组合", "\(combo.display)")
             }
             self.stopRecording()
             return nil
@@ -169,7 +181,7 @@ final class SettingsWindowController: NSWindowController {
     init(names: NameService, delegate: AppDelegate) {
         model = SettingsModel(names: names, delegate: delegate)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 660), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "XSearch 设置"
+        window.title = L("XSearch 设置")
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.contentViewController = NSHostingController(rootView: SettingsView(model: model))
@@ -197,7 +209,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(SettingsTab.allCases) { tab in
                     Button { model.tab = tab } label: {
-                        Label(tab.rawValue, systemImage: tab.symbol)
+                        Label(L(tab.rawValue), systemImage: tab.symbol)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6).padding(.horizontal, 10)
                             .background(model.tab == tab ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7))
@@ -263,48 +275,63 @@ struct Card<Content: View>: View {
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     var body: some View {
-        Text("通用").font(.system(size: 20, weight: .semibold))
-        Card(title: "呼出快捷键", subtitle: "点击后按下新的组合键；与其他应用冲突时会提示") {
+        Text(L("通用")).font(.system(size: 20, weight: .semibold))
+        Card(title: L("呼出快捷键"), subtitle: L("点击后按下新的组合键；与其他应用冲突时会提示")) {
             HStack {
-                Button(model.recording ? "请按下组合键…（Esc 取消）" : model.hotKey.display) {
+                Button(model.recording ? L("请按下组合键…（Esc 取消）") : model.hotKey.display) {
                     model.recording ? model.stopRecording() : model.startRecording()
                 }
                 .controlSize(.large)
                 if let e = model.hotKeyError { Text(e).font(.system(size: 12)).foregroundStyle(.orange) }
             }
         }
-        Card(title: "开机自动启动") {
-            Toggle("登录时打开 XSearch", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+        Card(title: L("语言"), subtitle: L("切换后重新启动 XSearch 生效")) {
+            HStack {
+                // Each language in its own words, as in System Settings.
+                Picker("", selection: $model.language) {
+                    Text(L("跟随系统")).tag(UILanguage.system)
+                    Text(verbatim: "简体中文").tag(UILanguage.zh)  // l10n: a language in its own words
+                    Text(verbatim: "English").tag(UILanguage.en)
+                }
+                .labelsHidden()
+                .fixedSize()
+                if model.language != model.launchLanguage {
+                    Button(L("立即重启")) { model.relaunch() }
+                }
+            }
+        }
+        Card(title: L("开机自动启动")) {
+            Toggle(L("登录时打开 XSearch"), isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                 .toggleStyle(.switch)
         }
-        Card(title: "软件更新", subtitle: "当前版本 \(Updater.shared.version)") {
+        Card(title: L("软件更新"), subtitle: L("当前版本 %@", "\(Updater.shared.version)")) {
             HStack {
-                Toggle("自动检查更新", isOn: Binding(get: { Updater.shared.automaticallyChecks }, set: { Updater.shared.automaticallyChecks = $0; model.objectWillChange.send() }))
+                Toggle(L("自动检查更新"), isOn: Binding(get: { Updater.shared.automaticallyChecks }, set: { Updater.shared.automaticallyChecks = $0; model.objectWillChange.send() }))
                     .toggleStyle(.switch)
                     .disabled(!Updater.shared.isConfigured)
                 Spacer()
-                Button("检查更新…") { Updater.shared.checkForUpdates() }
+                Button(L("检查更新…")) { Updater.shared.checkForUpdates() }
             }
             if !Updater.shared.isConfigured {
-                Text("这个版本没有配置更新地址，新版需要手动下载安装。").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text(L("这个版本没有配置更新地址，新版需要手动下载安装。")).font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
         }
-        Card(title: "历史记录", subtitle: "只保存在本机") {
-            Toggle("呼出时保留上次的搜索内容", isOn: $model.keepLastQuery).toggleStyle(.switch)
-            Toggle("输入框为空时显示最近打开的文件", isOn: $model.showRecents).toggleStyle(.switch)
+        Card(title: L("历史记录"), subtitle: L("只保存在本机")) {
+            Toggle(L("呼出时保留上次的搜索内容"), isOn: $model.keepLastQuery).toggleStyle(.switch)
+            Toggle(L("输入框为空时显示最近打开的文件"), isOn: $model.showRecents).toggleStyle(.switch)
             HStack {
-                Button("清除最近打开记录") {
+                Button(L("清除最近打开记录")) {
                     model.delegate?.clearRecents()
                     model.recentsCleared = true
                 }
-                if model.recentsCleared { Text("已清除").font(.system(size: 12)).foregroundStyle(.secondary) }
+                if model.recentsCleared { Text(L("已清除")).font(.system(size: 12)).foregroundStyle(.secondary) }
             }
-            Text("收藏不受影响。按使用频率排序的依据也会一并清除。").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(L("收藏不受影响。按使用频率排序的依据也会一并清除。")).font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
-        Card(title: "呼出时的模式") {
+        Card(title: L("呼出时的模式")) {
             Picker("", selection: Binding(get: { model.summonMode }, set: { model.summonMode = $0; Preferences.shared.summonMode = $0 })) {
-                Text("总是名称模式").tag(Preferences.SummonMode.alwaysName)
-                Text("记住上次的模式").tag(Preferences.SummonMode.rememberLast)
+                Text(L("总是名称模式")).tag(Preferences.SummonMode.alwaysName)
+                Text(L("记住上次的模式")).tag(Preferences.SummonMode.rememberLast)
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
@@ -315,18 +342,18 @@ struct GeneralPane: View {
 struct SyntaxPane: View {
     @ObservedObject var model: SettingsModel
     var body: some View {
-        Text("搜索语法").font(.system(size: 20, weight: .semibold))
-        Card(title: "语法开关", subtitle: "关闭后对应符号按普通字符搜索；按 ⌘/ 查看速查") {
-            Toggle(isOn: $model.syntax.operators) { Text(verbatim: "运算符　甲 | 乙、-草稿、(甲 | 乙) 丙　两种模式") }
-            Toggle(isOn: $model.syntax.wildcards) { Text(verbatim: "通配符　*.pdf、报告?.docx、**/合同/*.pdf　名称模式") }
-            Toggle(isOn: $model.syntax.regex) { Text(verbatim: "正则　regex:^\\d+\\.txt$") }
-            Toggle(isOn: $model.syntax.proximity) { Text(verbatim: "邻近查询　\"合同 金额\"~10　内容模式") }
+        Text(L("搜索语法")).font(.system(size: 20, weight: .semibold))
+        Card(title: L("语法开关"), subtitle: L("关闭后对应符号按普通字符搜索；按 ⌘/ 查看速查")) {
+            Toggle(isOn: $model.syntax.operators) { Text(L("运算符　甲 | 乙、-草稿、(甲 | 乙) 丙　两种模式")) }
+            Toggle(isOn: $model.syntax.wildcards) { Text(L("通配符　*.pdf、报告?.docx、**/合同/*.pdf　名称模式")) }
+            Toggle(isOn: $model.syntax.regex) { Text(L("正则　regex:^\\d+\\.txt$")) }
+            Toggle(isOn: $model.syntax.proximity) { Text(L("邻近查询　\"合同 金额\"~10　内容模式")) }
         }
-        Card(title: "内容匹配模式", subtitle: "只影响内容搜索；完整窗口里可以临时切换") {
+        Card(title: L("内容匹配模式"), subtitle: L("只影响内容搜索；完整窗口里可以临时切换")) {
             Picker("", selection: $model.matchMode) {
-                Text("宽松（默认）：不区分大小写、全角半角和空白差异").tag("loose")
-                Text("区分大小写：其余与宽松相同").tag("caseSensitive")
-                Text("严格原文：逐字符比较，不做任何归一化").tag("strict")
+                Text(L("宽松（默认）：不区分大小写、全角半角和空白差异")).tag("loose")
+                Text(L("区分大小写：其余与宽松相同")).tag("caseSensitive")
+                Text(L("严格原文：逐字符比较，不做任何归一化")).tag("strict")
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
@@ -337,21 +364,21 @@ struct SyntaxPane: View {
 struct OpenWithPane: View {
     @ObservedObject var model: SettingsModel
     var body: some View {
-        Text("打开方式").font(.system(size: 20, weight: .semibold))
-        Card(title: "文本与代码", subtitle: "在内容模式下打开时，用所选编辑器跳到命中所在的行") {
+        Text(L("打开方式")).font(.system(size: 20, weight: .semibold))
+        Card(title: L("文本与代码"), subtitle: L("在内容模式下打开时，用所选编辑器跳到命中所在的行")) {
             Picker("", selection: $model.openWith.editor) {
                 ForEach(Editor.allCases, id: \.self) { e in
-                    Text(e.isInstalled ? e.title : e.title + "（未安装）").tag(e).disabled(!e.isInstalled)
+                    Text(e.isInstalled ? e.title : e.title + L("（未安装）")).tag(e).disabled(!e.isInstalled)
                 }
             }
             .labelsHidden()
             .fixedSize()
         }
-        Card(title: "PDF", subtitle: "在内容模式下打开时，用外部阅读器跳到命中所在的页") {
-            Toggle("打开到命中页", isOn: $model.openWith.pdfAtPage)
+        Card(title: "PDF", subtitle: L("在内容模式下打开时，用外部阅读器跳到命中所在的页")) {
+            Toggle(L("打开到命中页"), isOn: $model.openWith.pdfAtPage)
             Text(NSWorkspace.shared.urlForApplication(withBundleIdentifier: ExternalPDF.skimID) != nil
-                 ? "已安装 Skim：直接跳页。"
-                 : "使用“预览”：需要在 系统设置 → 隐私与安全性 → 辅助功能 中允许 XSearch，否则打开第 1 页。安装 Skim 后不需要这项权限。")
+                 ? L("已安装 Skim：直接跳页。")
+                 : L("使用“预览”：需要在 系统设置 → 隐私与安全性 → 辅助功能 中允许 XSearch，否则打开第 1 页。安装 Skim 后不需要这项权限。"))
                 .font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
     }
@@ -364,20 +391,20 @@ struct ScopePane: View {
         let st = model.status
         let mem = ByteCountFormatter.string(fromByteCount: Int64(st.memoryBytes), countStyle: .memory)
         switch st.phase {
-        case .starting: return "正在打开…"
-        case .scanning: return "正在建立 · \(Theme.count(st.count)) 项"
-        case .ready: return "\(Theme.count(st.count)) 项 · 内存约 \(mem) · " + (st.watching ? "实时更新" : "未实时更新，正在重试")
-        case .failed(let m): return "出错：\(m)"
+        case .starting: return L("正在打开…")
+        case .scanning: return L("正在建立 · %@ 项", "\(Theme.count(st.count))")
+        case .ready: return L("%@ 项 · 内存约 %@ · ", Theme.count(st.count), mem) + (st.watching ? L("实时更新") : L("未实时更新，正在重试"))
+        case .failed(let m): return L("出错：%@", "\(m)")
         }
     }
 
     var body: some View {
-        Text("索引范围").font(.system(size: 20, weight: .semibold))
-        Text("文件名和内容分别设置。同一个文件只扫描、提取一次。").font(.system(size: 12.5)).foregroundStyle(.secondary)
-        Card(title: "文件名索引", subtitle: statusLine) {
+        Text(L("索引范围")).font(.system(size: 20, weight: .semibold))
+        Text(L("文件名和内容分别设置。同一个文件只扫描、提取一次。")).font(.system(size: 12.5)).foregroundStyle(.secondary)
+        Card(title: L("文件名索引"), subtitle: statusLine) {
             Picker("", selection: Binding(get: { model.scope.wholeDisk }, set: { model.scope.wholeDisk = $0; model.commitScope() })) {
-                Text("整盘").tag(true)
-                Text("指定文件夹").tag(false)
+                Text(L("整盘")).tag(true)
+                Text(L("指定文件夹")).tag(false)
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
@@ -388,7 +415,7 @@ struct ScopePane: View {
                             Image(systemName: "folder")
                             Text(folder).font(.system(size: 13))
                             Spacer()
-                            Button("移除") {
+                            Button(L("移除")) {
                                 model.scope.folders.removeAll { $0 == folder }
                                 model.commitScope()
                             }
@@ -396,15 +423,15 @@ struct ScopePane: View {
                             .buttonStyle(.borderless)
                         }
                     }
-                    if model.scope.folders.isEmpty { Text("还没有文件夹。").font(.system(size: 12)).foregroundStyle(.secondary) }
-                    Button("＋ 添加") { model.addFolders() }.buttonStyle(.borderless)
+                    if model.scope.folders.isEmpty { Text(L("还没有文件夹。")).font(.system(size: 12)).foregroundStyle(.secondary) }
+                    Button(L("＋ 添加")) { model.addFolders() }.buttonStyle(.borderless)
                 }
             }
             // Specified folders already take any folder; the list stays visible while it has entries.
             if model.scope.wholeDisk || !model.scope.extraFolders.isEmpty {
                 Divider()
-                Text("额外包含的文件夹").font(.system(size: 13, weight: .medium))
-                Text(verbatim: "被排除规则挡住、但仍想按名称搜到的文件夹，例如 ~/Library 里的微信文件。外层的排除规则对它不起作用，它里面的其他排除规则照常生效。")
+                Text(L("额外包含的文件夹")).font(.system(size: 13, weight: .medium))
+                Text(L("被排除规则挡住、但仍想按名称搜到的文件夹，例如 ~/Library 里的微信文件。外层的排除规则对它不起作用，它里面的其他排除规则照常生效。"))
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(model.scope.extraFolders, id: \.self) { folder in
@@ -412,7 +439,7 @@ struct ScopePane: View {
                             Image(systemName: "folder")
                             Text(folder).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                             Spacer()
-                            Button("移除") {
+                            Button(L("移除")) {
                                 model.scope.extraFolders.removeAll { $0 == folder }
                                 model.commitScope()
                             }
@@ -420,19 +447,19 @@ struct ScopePane: View {
                             .buttonStyle(.borderless)
                         }
                     }
-                    if model.scope.extraFolders.isEmpty { Text("没有。").font(.system(size: 12)).foregroundStyle(.secondary) }
-                    Button("＋ 添加") { model.addExtraFolders() }.buttonStyle(.borderless)
+                    if model.scope.extraFolders.isEmpty { Text(L("没有。")).font(.system(size: 12)).foregroundStyle(.secondary) }
+                    Button(L("＋ 添加")) { model.addExtraFolders() }.buttonStyle(.borderless)
                 }
             }
             Divider()
-            Text("排除规则").font(.system(size: 13, weight: .medium))
-            Text(verbatim: "路径（/System、~/Library）、名称（node_modules）或模式（*.log、**/build/**）。").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(L("排除规则")).font(.system(size: 13, weight: .medium))
+            Text(L("路径（/System、~/Library）、名称（node_modules）或模式（*.log、**/build/**）。")).font(.system(size: 11.5)).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(model.scope.excludes, id: \.self) { rule in
                     HStack {
                         Text(rule).font(.system(size: 12.5, design: .monospaced))
                         Spacer()
-                        Button("移除") {
+                        Button(L("移除")) {
                             model.scope.excludes.removeAll { $0 == rule }
                             model.commitScope()
                         }
@@ -441,19 +468,19 @@ struct ScopePane: View {
                     }
                 }
                 HStack {
-                    TextField("＋ 添加规则", text: $model.newRule)
+                    TextField(L("＋ 添加规则"), text: $model.newRule)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 260)
                         .onSubmit(addRule)
-                    Button("添加", action: addRule).disabled(model.newRule.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button(L("添加"), action: addRule).disabled(model.newRule.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
             Divider()
-            Toggle("包含隐藏文件", isOn: Binding(get: { model.scope.includeHidden }, set: { model.scope.includeHidden = $0; model.commitScope() }))
+            Toggle(L("包含隐藏文件"), isOn: Binding(get: { model.scope.includeHidden }, set: { model.scope.includeHidden = $0; model.commitScope() }))
                 .toggleStyle(.switch)
-            Toggle("包含应用包内部", isOn: Binding(get: { model.scope.includePackageContents }, set: { model.scope.includePackageContents = $0; model.commitScope() }))
+            Toggle(L("包含应用包内部"), isOn: Binding(get: { model.scope.includePackageContents }, set: { model.scope.includePackageContents = $0; model.commitScope() }))
                 .toggleStyle(.switch)
-            Text("修改后在后台重新核对范围，期间可以继续搜索。外置盘和网络盘在后续版本支持。").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(L("修改后在后台重新核对范围，期间可以继续搜索。外置盘和网络盘在后续版本支持。")).font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
         ContentCard(model: model)
     }
@@ -472,22 +499,22 @@ struct PrivacyPane: View {
     @State private var confirmRebuild = false
 
     var body: some View {
-        Text("隐私与数据").font(.system(size: 20, weight: .semibold))
-        Card(title: "数据位置") {
-            Text("文件名和搜索词只在本机处理。索引保存在 ~/Library/Application Support/XSearch（目录 0700，文件 0600），日志中不记录搜索词。")
+        Text(L("隐私与数据")).font(.system(size: 20, weight: .semibold))
+        Card(title: L("数据位置")) {
+            Text(L("文件名和搜索词只在本机处理。索引保存在 ~/Library/Application Support/XSearch（目录 0700，文件 0600），日志中不记录搜索词。"))
                 .font(.system(size: 12.5))
-            Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([Preferences.dataDirectory]) }
+            Button(L("在访达中显示")) { NSWorkspace.shared.activateFileViewerSelecting([Preferences.dataDirectory]) }
         }
-        Card(title: "重建内容索引", subtitle: "在后台重新提取全部内容文件；完成前继续使用旧索引，完成后删除旧索引并回收空间。") {
-            Button("重建内容索引…") { model.delegate?.rebuildContentIndex() }
+        Card(title: L("重建内容索引"), subtitle: L("在后台重新提取全部内容文件；完成前继续使用旧索引，完成后删除旧索引并回收空间。")) {
+            Button(L("重建内容索引…")) { model.delegate?.rebuildContentIndex() }
         }
-        Card(title: "重建文件名索引", subtitle: "删除文件名索引并重新扫描。最近打开记录和设置单独保存，不受影响。") {
-            Button("重建文件名索引…") { confirmRebuild = true }
+        Card(title: L("重建文件名索引"), subtitle: L("删除文件名索引并重新扫描。最近打开记录和设置单独保存，不受影响。")) {
+            Button(L("重建文件名索引…")) { confirmRebuild = true }
                 .foregroundStyle(.red)
-                .confirmationDialog("重建文件名索引？", isPresented: $confirmRebuild) {
-                    Button("重建", role: .destructive) { model.delegate?.rebuildNameIndex() }
+                .confirmationDialog(L("重建文件名索引？"), isPresented: $confirmRebuild) {
+                    Button(L("重建"), role: .destructive) { model.delegate?.rebuildNameIndex() }
                 } message: {
-                    Text("重新扫描期间，已处理的部分可以立即搜索。")
+                    Text(L("重新扫描期间，已处理的部分可以立即搜索。"))
                 }
         }
     }
@@ -497,23 +524,23 @@ struct ContentCard: View {
     @ObservedObject var model: SettingsModel
 
     var statusLine: String {
-        guard let st = model.contentStatus else { return "内容索引未启动" }
-        var parts = ["\(Theme.count(st.indexed)) 个文件"]
-        if st.lastError != nil { parts.append("写入暂时出错，正在自动重试") }
-        if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
-        if st.failed > 0 { parts.append("\(st.failed) 个提取失败") }
+        guard let st = model.contentStatus else { return L("内容索引未启动") }
+        var parts = [L("%@ 个文件", "\(Theme.count(st.indexed))")]
+        if st.lastError != nil { parts.append(L("写入暂时出错，正在自动重试")) }
+        if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
+        if st.failed > 0 { parts.append(L("%@ 个提取失败", "\(st.failed)")) }
         return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        Card(title: "内容索引", subtitle: "只提取下面的文件夹；网络盘默认不建内容索引。" + "  " + statusLine) {
+        Card(title: L("内容索引"), subtitle: L("只提取下面的文件夹；网络盘默认不建内容索引。") + "  " + statusLine) {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(model.content.folders, id: \.self) { folder in
                     HStack {
                         Image(systemName: "folder")
                         Text(folder).font(.system(size: 13))
                         Spacer()
-                        Button("移除") {
+                        Button(L("移除")) {
                             model.content.folders.removeAll { $0 == folder }
                             model.commitContent()
                         }
@@ -521,14 +548,14 @@ struct ContentCard: View {
                         .buttonStyle(.borderless)
                     }
                 }
-                if model.content.folders.isEmpty { Text("还没有文件夹，内容搜索暂不可用。").font(.system(size: 12)).foregroundStyle(.secondary) }
-                Button("＋ 添加文件夹") { model.addContentFolders() }.buttonStyle(.borderless)
+                if model.content.folders.isEmpty { Text(L("还没有文件夹，内容搜索暂不可用。")).font(.system(size: 12)).foregroundStyle(.secondary) }
+                Button(L("＋ 添加文件夹")) { model.addContentFolders() }.buttonStyle(.borderless)
             }
             Divider()
-            Text("提取的文件类型").font(.system(size: 13, weight: .medium))
+            Text(L("提取的文件类型")).font(.system(size: 13, weight: .medium))
             // A grid that wraps: twelve types do not fit one row.
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12, alignment: .leading)], alignment: .leading, spacing: 8) {
-                ForEach([(ContentType.text, "文本 / 代码"), (.pdf, "PDF"), (.docx, "Word（docx）"), (.doc, "Word（doc）"), (.wps, "WPS 文字"), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, "网页 HTML"), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, "压缩包")], id: \.0) { type, label in
+                ForEach([(ContentType.text, L("文本 / 代码")), (.pdf, "PDF"), (.docx, L("Word（docx）")), (.doc, L("Word（doc）")), (.wps, L("WPS 文字")), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, L("网页 HTML")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包"))], id: \.0) { type, label in
                     Toggle(isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
                         if on { model.content.types.insert(type) } else { model.content.types.remove(type) }
                         model.commitContent()
@@ -536,9 +563,9 @@ struct ContentCard: View {
                     .toggleStyle(.checkbox)
                 }
             }
-            Text("WPS 表格、演示分别归入 Excel、PowerPoint；压缩包只读一层；图片 OCR 在 M6").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(L("WPS 表格、演示分别归入 Excel、PowerPoint；压缩包只读一层；图片 OCR 在 M6")).font(.system(size: 11.5)).foregroundStyle(.secondary)
             HStack {
-                Text("单文件上限").font(.system(size: 13))
+                Text(L("单文件上限")).font(.system(size: 13))
                 Picker("", selection: Binding(get: { model.content.maxFileBytes }, set: { model.content.maxFileBytes = $0; model.commitContent() })) {
                     Text("50 MB").tag(UInt64(50 << 20))
                     Text("100 MB").tag(UInt64(100 << 20))
@@ -555,13 +582,13 @@ struct DiagnosticsPane: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        Text("诊断：为什么搜不到").font(.system(size: 20, weight: .semibold))
-        Text("输入或把文件拖到这里，逐项检查它在索引中的状态。").font(.system(size: 12.5)).foregroundStyle(.secondary)
+        Text(L("诊断：为什么搜不到")).font(.system(size: 20, weight: .semibold))
+        Text(L("输入或把文件拖到这里，逐项检查它在索引中的状态。")).font(.system(size: 12.5)).foregroundStyle(.secondary)
         HStack {
-            TextField("文件路径，例如 ~/Downloads/合同.docx", text: $model.diagnosePath)
+            TextField(L("文件路径，例如 ~/Downloads/合同.docx"), text: $model.diagnosePath)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { model.runDiagnosis() }
-            Button("检查") { model.runDiagnosis() }.keyboardShortcut(.defaultAction)
+            Button(L("检查")) { model.runDiagnosis() }.keyboardShortcut(.defaultAction)
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
@@ -580,8 +607,8 @@ struct DiagnosticsPane: View {
                         Image(systemName: item.level == .ok ? "checkmark.circle.fill" : item.level == .warning ? "exclamationmark.circle.fill" : "xmark.circle.fill")
                             .foregroundStyle(item.level == .ok ? Color(nsColor: Theme.hex(0x1E7A45)) : item.level == .warning ? .orange : Color(nsColor: Theme.hex(0xC2410C)))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(item.label).font(.system(size: 13, weight: .medium))
-                            Text(item.detail).font(.system(size: 12.5)).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(Loc.display(item.label)).font(.system(size: 13, weight: .medium))
+                            Text(Loc.display(item.detail)).font(.system(size: 12.5)).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                     }
                 }

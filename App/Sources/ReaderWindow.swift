@@ -21,9 +21,9 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     private let pathLabel = NSTextField(labelWithString: "")
     private let banner = NSTextField(labelWithString: "")
     private let countLabel = NSTextField(labelWithString: "")
-    private let externalButton = NSButton(title: "在外部打开到第 1 页", target: nil, action: nil)
-    private let openButton = NSButton(title: "用默认应用打开", target: nil, action: nil)
-    private let revealButton = NSButton(title: "在访达中显示", target: nil, action: nil)
+    private let externalButton = NSButton(title: L("在外部打开到第 1 页"), target: nil, action: nil)
+    private let openButton = NSButton(title: L("用默认应用打开"), target: nil, action: nil)
+    private let revealButton = NSButton(title: L("在访达中显示"), target: nil, action: nil)
     private let table = NSTableView()
     private let pdfView = PDFView()
     private let textPane = PreviewPane()
@@ -158,13 +158,13 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         pathLabel.stringValue = hit.displayLocation
         rows = []
         table.reloadData()
-        countLabel.stringValue = "正在载入…"
+        countLabel.stringValue = L("正在载入…")
         showWindow(nil)
         bringToFront(window)
         let deliver: @MainActor @Sendable (PreviewData?) -> Void = { [weak self] data in
             guard let self, token == self.token else { return }
             guard let data else {
-                self.countLabel.stringValue = live ? "无法读取这个文件" : "索引中已没有这个文件"
+                self.countLabel.stringValue = live ? L("无法读取这个文件") : L("索引中已没有这个文件")
                 return
             }
             self.load(data, startAt: startAt)
@@ -179,7 +179,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     private func load(_ data: PreviewData, startAt: Int) {
         let doc = data.document
         let stale = PreviewPane.isStale(doc, path: path)
-        banner.stringValue = stale ? "文件在建立索引后已修改，命中位置暂不显示；索引会自动更新。" : ""
+        banner.stringValue = stale ? L("文件在建立索引后已修改，命中位置暂不显示；索引会自动更新。") : ""
         banner.isHidden = !stale
         let text = doc.text as NSString
         let anchors = PreviewPane.utf16((try? JSONDecoder().decode([AnchorInfo].self, from: Data(doc.anchorsJson.utf8))) ?? [], in: doc.text)
@@ -189,7 +189,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             return HitRow(range: r, page: anchor?.info.kind == "page" ? anchor?.info.page : nil, location: anchor?.info.location ?? "",
                           context: Self.context(text, r))
         }
-        countLabel.stringValue = stale ? "命中暂不可用" : rows.isEmpty ? "没有可定位的命中" : data.totalHits > UInt64(rows.count) ? "前 \(Theme.count(rows.count)) 处（共 \(Theme.count(Int(data.totalHits))) 处）" : "共 \(rows.count) 处"
+        countLabel.stringValue = stale ? L("命中暂不可用") : rows.isEmpty ? L("没有可定位的命中") : data.totalHits > UInt64(rows.count) ? L("前 %@ 处（共 %@ 处）", "\(Theme.count(rows.count))", "\(Theme.count(Int(data.totalHits)))") : L("共 %@ 处", "\(rows.count)")
         let isPDF = (path as NSString).pathExtension.lowercased() == "pdf"
         pdfMarks = [:]
         pdfSelections = [:]
@@ -251,7 +251,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         let end = min(text.length, NSMaxRange(r) + 30)
         let s = text.substring(with: NSRange(location: start, length: end - start))
             .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
-        return (start > 0 ? "…" : "") + s + (end < text.length ? "…" : "")
+        return (start > 0 ? L("…") : "") + s + (end < text.length ? L("…") : "")
     }
 
     // MARK: Navigation
@@ -290,7 +290,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         return 1
     }
 
-    private func updateExternalTitle() { externalButton.title = "在外部打开到第 \(currentPage) 页" }
+    private func updateExternalTitle() { externalButton.title = L("在外部打开到第 %@ 页", "\(currentPage)") }
 
     @objc func goNext() { select(current + 1) }
     @objc func goPrev() { select(current - 1) }
@@ -329,8 +329,8 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
             let alert = NSAlert()
             alert.messageText = message.title
             alert.informativeText = message.detail
-            alert.addButton(withTitle: "好")
-            if message.offerSettings { alert.addButton(withTitle: "打开辅助功能设置") }
+            alert.addButton(withTitle: L("好"))
+            if message.offerSettings { alert.addButton(withTitle: L("打开辅助功能设置")) }
             if let window {
                 alert.beginSheetModal(for: window) { resp in
                     if resp == .alertSecondButtonReturn {
@@ -349,7 +349,7 @@ final class ReaderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         let cell = tableView.makeView(withIdentifier: .init("readerHit"), owner: nil) as? ReaderHitCell ?? ReaderHitCell()
         cell.identifier = .init("readerHit")
         let r = rows[row]
-        cell.title.stringValue = "第 \(row + 1) 处" + (r.location.isEmpty ? "" : " · " + r.location)
+        cell.title.stringValue = L("第 %@ 处", "\(row + 1)") + (r.location.isEmpty ? "" : " · " + r.location)
         cell.context.stringValue = r.context
         return cell
     }
@@ -413,8 +413,8 @@ enum ExternalPDF {
                 NSWorkspace.shared.open([url], withApplicationAt: skim, configuration: NSWorkspace.OpenConfiguration())
                 NSApp.activate()
                 let alert = NSAlert()
-                alert.messageText = "已用 Skim 打开，但没能跳到第 \(page) 页"
-                alert.informativeText = "请在 系统设置 → 隐私与安全性 → 自动化 中允许 XSearch 控制 Skim。"
+                alert.messageText = L("已用 Skim 打开，但没能跳到第 %@ 页", "\(page)")
+                alert.informativeText = L("请在 系统设置 → 隐私与安全性 → 自动化 中允许 XSearch 控制 Skim。")
                 alert.runModal()
             }
             return nil
@@ -426,7 +426,7 @@ enum ExternalPDF {
         NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())
         guard page > 1 else { return nil }
         guard AXIsProcessTrusted() else {
-            return Message(title: "已在“预览”中打开第 1 页", detail: "跳到第 \(page) 页需要辅助功能权限：在 系统设置 → 隐私与安全性 → 辅助功能 中允许 XSearch。安装 Skim 后不需要这项权限。", offerSettings: true)
+            return Message(title: L("已在“预览”中打开第 1 页"), detail: L("跳到第 %@ 页需要辅助功能权限：在 系统设置 → 隐私与安全性 → 辅助功能 中允许 XSearch。安装 Skim 后不需要这项权限。", "\(page)"), offerSettings: true)
         }
         let script = """
             delay 0.8

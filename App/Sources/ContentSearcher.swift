@@ -136,7 +136,7 @@ final class ContentSearcher: @unchecked Sendable {
         guard isCurrent(gen) else { return }
         var out = ContentOutput(text: text, query: q, hits: [], append: false, recall: nil, verified: 0, candidates: 0, done: true, error: nil)
         guard let index = openIndex() else {
-            out.error = "内容索引还没有建立完成"
+            out.error = L("内容索引还没有建立完成")
             send(out, generation: gen, to: deliver)
             return
         }
@@ -148,7 +148,7 @@ final class ContentSearcher: @unchecked Sendable {
                                                                                             mtimeRange: q.modified.map { [$0.lowerBound, $0.upperBound] }))
         } catch EngineError.Query(let message) {
             // Engine messages in Chinese are already user-facing (regex needs a scope…).
-            out.error = message.unicodeScalars.contains { $0.value >= 0x4E00 } ? message : "查询无法解析：\(message)"
+            out.error = message.unicodeScalars.contains { $0.value >= 0x4E00 } ? message : L("查询无法解析：%@", "\(message)")
             send(out, generation: gen, to: deliver)
             return
         } catch {
@@ -173,7 +173,7 @@ final class ContentSearcher: @unchecked Sendable {
                 out.hits = []
                 out.append = !first
                 out.done = true
-                out.error = "搜索中断：\(error)"
+                out.error = L("搜索中断：%@", "\(error)")
                 send(out, generation: gen, to: deliver)
                 break
             }
@@ -220,7 +220,7 @@ final class ContentSearcher: @unchecked Sendable {
                                     live: true, scanned: 0, scanTotal: files.count)
             guard let scan = try? LiveScan(query: q.expression, mode: mode, maxFileBytes: maxFileBytes) else {
                 out.done = true
-                out.error = "这个查询无法实时扫描"
+                out.error = L("这个查询无法实时扫描")
                 let batch = out
                 DispatchQueue.main.async { if current() { deliver(batch) } }
                 return

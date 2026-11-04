@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusTimer: Timer?
     private var menuOpen = false
     private var rebuildingNames = false
-    private let contentStatusItem = NSMenuItem(title: "内容索引：正在打开", action: nil, keyEquivalent: "")
+    private let contentStatusItem = NSMenuItem(title: L("内容索引：正在打开"), action: nil, keyEquivalent: "")
     private var usage: UsageStore?
     private var session: SearchSession!
     private var launcher: LauncherController!
@@ -52,15 +52,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             holder.submenu = menu
             main.addItem(holder)
         }
-        submenu("XSearch", [("退出 XSearch", #selector(NSApplication.terminate(_:)), "q", .command)])
-        submenu("编辑", [
-            ("撤销", Selector(("undo:")), "z", .command), ("重做", Selector(("redo:")), "z", [.command, .shift]),
-            ("剪切", #selector(NSText.cut(_:)), "x", .command), ("拷贝", #selector(NSText.copy(_:)), "c", .command),
-            ("粘贴", #selector(NSText.paste(_:)), "v", .command), ("全选", #selector(NSText.selectAll(_:)), "a", .command),
+        submenu("XSearch", [(L("退出 XSearch"), #selector(NSApplication.terminate(_:)), "q", .command)])
+        submenu(L("编辑"), [
+            (L("撤销"), Selector(("undo:")), "z", .command), (L("重做"), Selector(("redo:")), "z", [.command, .shift]),
+            (L("剪切"), #selector(NSText.cut(_:)), "x", .command), (L("拷贝"), #selector(NSText.copy(_:)), "c", .command),
+            (L("粘贴"), #selector(NSText.paste(_:)), "v", .command), (L("全选"), #selector(NSText.selectAll(_:)), "a", .command),
         ])
-        submenu("窗口", [
-            ("关闭", #selector(NSWindow.performClose(_:)), "w", .command),
-            ("最小化", #selector(NSWindow.performMiniaturize(_:)), "m", .command),
+        submenu(L("窗口"), [
+            (L("关闭"), #selector(NSWindow.performClose(_:)), "w", .command),
+            (L("最小化"), #selector(NSWindow.performMiniaturize(_:)), "m", .command),
         ])
         NSApp.mainMenu = main
     }
@@ -114,8 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotKey: HotKey!
     private var statusItem: NSStatusItem!
     private var settings: SettingsWindowController?
-    private let indexStatusItem = NSMenuItem(title: "文件名索引：正在打开", action: nil, keyEquivalent: "")
-    private let hotKeyItem = NSMenuItem(title: "打开搜索", action: #selector(showLauncher), keyEquivalent: "")
+    private let indexStatusItem = NSMenuItem(title: L("文件名索引：正在打开"), action: nil, keyEquivalent: "")
+    private let hotKeyItem = NSMenuItem(title: L("打开搜索"), action: #selector(showLauncher), keyEquivalent: "")
     private var hotKeyConflict = false
 
     /// Development overrides: XS_DATA_DIR (data directory), XS_NAME_ROOTS (comma-separated scan
@@ -142,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startIndexer() {
         let worker = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("xs-extract")
         let ix = IndexServiceClient(dataDirectory: dataDirectory, worker: worker)
-        ix.onError = { [weak self] message in self?.contentStatusItem.title = "内容索引出错：\(message.prefix(60))" }
+        ix.onError = { [weak self] message in self?.contentStatusItem.title = L("内容索引出错：%@", "\(message.prefix(60))") }
         ix.onUpdate = { [weak self] in self?.showContentStatus() }
         ix.maxFileBytes = contentScope.maxFileBytes
         names.onContentTasks = { [weak ix] in
@@ -250,17 +250,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func registerHotKey(_ combo: HotKey.Combo) -> Bool {
         let ok = hotKey.register(combo)
         hotKeyConflict = !ok
-        hotKeyItem.title = ok ? "打开搜索" : "快捷键 \(combo.display) 已被占用，点此修改"
+        hotKeyItem.title = ok ? L("打开搜索") : L("快捷键 %@ 已被占用，点此修改", "\(combo.display)")
         hotKeyItem.action = ok ? #selector(showLauncher) : #selector(openGeneralSettings)
         hotKeyItem.keyEquivalent = ""
         if ok { hotKeyItem.toolTip = combo.display }
         updateHotKeyHint(ok ? combo : nil)
         if !ok {
             let alert = NSAlert()
-            alert.messageText = "快捷键 \(combo.display) 已被其他应用占用"
-            alert.informativeText = "可以在设置中改用其他组合键，或者从菜单栏图标打开搜索。"
-            alert.addButton(withTitle: "打开设置")
-            alert.addButton(withTitle: "稍后")
+            alert.messageText = L("快捷键 %@ 已被其他应用占用", "\(combo.display)")
+            alert.informativeText = L("可以在设置中改用其他组合键，或者从菜单栏图标打开搜索。")
+            alert.addButton(withTitle: L("打开设置"))
+            alert.addButton(withTitle: L("稍后"))
             NSApp.activate()
             if alert.runModal() == .alertFirstButtonReturn { openSettings(tab: .general) }
         }
@@ -296,17 +296,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         hotKeyItem.target = self
         menu.addItem(hotKeyItem)
-        let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let update = NSMenuItem(title: L("检查更新…"), action: #selector(checkForUpdates), keyEquivalent: "")
         update.target = self
         menu.addItem(update)
-        let guide = NSMenuItem(title: "使用引导…", action: #selector(showOnboarding), keyEquivalent: "")
+        let guide = NSMenuItem(title: L("使用引导…"), action: #selector(showOnboarding), keyEquivalent: "")
         guide.target = self
         menu.addItem(guide)
-        let prefs = NSMenuItem(title: "设置…", action: #selector(openGeneralSettings), keyEquivalent: ",")
+        let prefs = NSMenuItem(title: L("设置…"), action: #selector(openGeneralSettings), keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出 XSearch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L("退出 XSearch"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         statusChanged()
     }
@@ -343,10 +343,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func statusChanged() {
         let st = names.status
         switch st.phase {
-        case .starting: indexStatusItem.title = "文件名索引：正在打开"
-        case .scanning: indexStatusItem.title = "文件名索引：正在建立 · \(Theme.count(st.count)) 项"
-        case .ready: indexStatusItem.title = "文件名索引：\(st.watching ? "已就绪" : "未实时更新") · \(Theme.count(st.count)) 项"
-        case .failed(let message): indexStatusItem.title = "文件名索引出错：\(message.prefix(60))"
+        case .starting: indexStatusItem.title = L("文件名索引：正在打开")
+        case .scanning: indexStatusItem.title = L("文件名索引：正在建立 · %@ 项", "\(Theme.count(st.count))")
+        case .ready: indexStatusItem.title = L("文件名索引：%@ · %@ 项", st.watching ? L("已就绪") : L("未实时更新"), Theme.count(st.count))
+        case .failed(let message): indexStatusItem.title = L("文件名索引出错：%@", "\(message.prefix(60))")
         }
         // The snapshot arrives asynchronously from the service (`showContentStatus`).
         indexer?.refresh()
@@ -356,9 +356,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func showContentStatus() {
         guard let st = indexer?.status else { return }
-        var parts = ["内容索引：\(Theme.count(st.indexed)) 个文件"]
-        if st.pending > 0 { parts.append("待处理 \(Theme.count(st.pending))") }
-        if st.failed > 0 { parts.append("\(st.failed) 个失败") }
+        var parts = [L("内容索引：%@ 个文件", "\(Theme.count(st.indexed))")]
+        if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
+        if st.failed > 0 { parts.append(L("%@ 个失败", "\(st.failed)")) }
         contentStatusItem.title = parts.joined(separator: " · ")
         settings?.refresh()
     }
@@ -403,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !rebuildingNames else { return }
         rebuildingNames = true
         guard let indexer else { finishNameRebuild(); return }
-        contentStatusItem.title = "内容索引：正在停止…"
+        contentStatusItem.title = L("内容索引：正在停止…")
         indexer.stopAndConfirm { [weak self] closed in
             guard let self else { return }
             guard closed else {
@@ -411,8 +411,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.rebuildingNames = false
                 indexer.resume()
                 let alert = NSAlert()
-                alert.messageText = "暂时无法重建文件名索引"
-                alert.informativeText = "内容索引还在收尾，没有删除任何文件。请稍后再试。"
+                alert.messageText = L("暂时无法重建文件名索引")
+                alert.informativeText = L("内容索引还在收尾，没有删除任何文件。请稍后再试。")
                 NSApp.activate()
                 alert.runModal()
                 return
@@ -446,7 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if hotKey.register(combo) {
             Preferences.shared.hotKey = combo
             hotKeyConflict = false
-            hotKeyItem.title = "打开搜索"
+            hotKeyItem.title = L("打开搜索")
             hotKeyItem.action = #selector(showLauncher)
             updateHotKeyHint(combo)
             return true

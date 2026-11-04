@@ -6,7 +6,7 @@ import XSearchCore
 
 /// One result row in the launcher list.
 struct ResultItem: Equatable {
-    enum Group: String { case apps = "应用", files = "文件与文件夹", favorites = "收藏", recents = "最近打开" }
+    enum Group: String { case apps = "应用", files = "文件与文件夹", favorites = "收藏", recents = "最近打开" }  // l10n: shown through L(_:context: "group")
     var group: Group
     var name: String
     var path: String
@@ -113,7 +113,7 @@ final class SearchSession {
                 if catalogId == nil { counts.byId = [:] }
                 let appHits = AppCatalog.search(apps, q, usage: counts.byPath).prefix(6)
                 for a in appHits {
-                    items.append(ResultItem(group: .apps, name: a.displayName, path: a.path, fileId: nil, kind: .app, ext: "app", meta: "应用"))
+                    items.append(ResultItem(group: .apps, name: a.displayName, path: a.path, fileId: nil, kind: .app, ext: "app", meta: L("应用")))
                 }
                 let appPaths = Set(appHits.map(\.path))
                 let result = names.search(q, limit: limit, usage: counts.byId)
@@ -125,7 +125,7 @@ final class SearchSession {
                     let isFolder = h.flags.contains(.directory) && !h.flags.contains(.package)
                     let kind = FileKind.of(extension: NameKey.key(ext), isDirectory: isFolder, isApp: h.flags.isApp && ext == "app")
                     // A file's date and size are on its path line (ResultCellView).
-                    let meta = kind == .folder ? "文件夹" : kind == .app ? "应用" : ""
+                    let meta = kind == .folder ? L("文件夹") : kind == .app ? L("应用") : ""
                     items.append(ResultItem(group: .files, name: h.name, path: h.path, fileId: h.fileId, kind: kind, ext: ext, meta: meta,
                                             size: h.size, mtime: h.mtime))
                 }
@@ -182,7 +182,7 @@ final class SearchSession {
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
         let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let missing = attrs == nil
-        let meta = missing ? "文件已不存在" : kind == .folder ? "文件夹" : kind == .app ? "应用" : ""
+        let meta = missing ? L("文件已不存在") : kind == .folder ? L("文件夹") : kind == .app ? L("应用") : ""
         return ResultItem(group: group, name: isApp ? (name as NSString).deletingPathExtension : name, path: path, fileId: fileId, kind: kind, ext: ext, meta: meta,
                           size: (attrs?[.size] as? Int64) ?? 0, mtime: Int64(mtime))
     }

@@ -227,8 +227,8 @@ public final class NameService: @unchecked Sendable {
 
     static func dateText(_ seconds: Int64) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "yyyy年M月d日 HH:mm"
+        f.locale = Loc.locale
+        f.dateFormat = Loc.isEnglish ? "MMM d, yyyy HH:mm" : "yyyy年M月d日 HH:mm"
         return f.string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
     }
 

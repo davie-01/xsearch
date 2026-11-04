@@ -8,7 +8,7 @@ enum Editor: String, CaseIterable, Codable, Sendable {
 
     var title: String {
         switch self {
-        case .system: "默认应用"
+        case .system: L("默认应用")
         case .vscode: "Visual Studio Code"
         case .cursor: "Cursor"
         case .sublime: "Sublime Text"
@@ -96,10 +96,10 @@ enum Opener {
         if ContentType.of(name: name) == .text, prefs.editor != .system, let line {
             if prefs.editor.open(path: path, line: line) { return nil }
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
-            return "\(prefs.editor.title) 不可用，已用默认应用打开"
+            return L("%@ 不可用，已用默认应用打开", "\(prefs.editor.title)")
         }
         if ContentType.of(name: name) == .pdf, prefs.pdfAtPage, let page {
-            return ExternalPDF.open(path: path, page: page).map { $0.title + "。" + $0.detail }
+            return ExternalPDF.open(path: path, page: page).map { $0.title + L("。") + $0.detail }
         }
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
         return nil

@@ -71,7 +71,7 @@ enum Theme {
         formatters.withLock { cache in
             if let f = cache[format] { return f }
             let f = DateFormatter()
-            f.locale = Locale(identifier: "zh_CN")
+            f.locale = Loc.locale
             f.dateFormat = format
             cache[format] = f
             return f
@@ -82,14 +82,14 @@ enum Theme {
         let date = Date(timeIntervalSince1970: TimeInterval(seconds))
         let cal = Calendar.current
         let format: String
-        if cal.isDateInToday(date) { format = "今天 HH:mm" } else if cal.isDateInYesterday(date) { format = "昨天 HH:mm" }
-        else if cal.component(.year, from: date) == cal.component(.year, from: Date()) { format = "M月d日" } else { format = "yyyy/M/d" }
+        if cal.isDateInToday(date) { format = L("今天 HH:mm") } else if cal.isDateInYesterday(date) { format = L("昨天 HH:mm") }
+        else if cal.component(.year, from: date) == cal.component(.year, from: Date()) { format = L("M月d日") } else { format = L("yyyy/M/d") }
         return formatter(format).string(from: date)
     }
 
     /// Date and time in full, as Spotlight puts it before a result's folder.
     nonisolated static func fullDate(_ seconds: Int64) -> String {
-        formatter("yyyy/M/d HH:mm").string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+        formatter(L("yyyy/M/d HH:mm")).string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
     }
 
     nonisolated static func count(_ n: Int) -> String {
