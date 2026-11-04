@@ -298,6 +298,10 @@ func indexedPaths(_ s: NameService, _ box: Sandbox) -> Set<String> {
     func names(_ s: NameService) -> Set<String> { Set(indexedPaths(s, box).map { ($0 as NSString).lastPathComponent }) }
     var s = box.service()
     #expect(s.waitUntilIdle())
+    // The files' own events may still arrive: applied now, they cannot be replayed later (a
+    // shutdown leaves a batch in progress for the next start) and re-add ghost.txt from disk.
+    usleep(800_000)
+    #expect(s.waitUntilIdle())
     s.shutdown()
     // What the old bug left behind: deleted in the catalog, present in the saved snapshot. The
     // file stays on disk so no reconcile could explain the outcome.
@@ -501,4 +505,25 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     }
     #expect(got, "write lock still held during the slow listing")
     #expect(s.waitUntilIdle())
+}
+
+/// Quitting during a scan does not wait for the rest of it; the next start scans again.
+@Test func shutdownStopsAScanInProgress() throws {
+    let box = try Sandbox("quitscan")
+    try box.write("fast/a.txt")
+    try box.write("slow/b.txt")
+    let slow = box.p("slow")
+    DiskLister.beforeListForTests = { path in if path == slow { usleep(4_000_000) } }
+    let s = NameService(directory: box.data, home: "/nonexistent-home")
+    s.start(scope: box.scope)
+    usleep(800_000)
+    let t = Date()
+    s.shutdown()
+    #expect(Date().timeIntervalSince(t) < 1.5, "shutdown waited \(Date().timeIntervalSince(t)) s")
+    DiskLister.beforeListForTests = nil
+    let again = NameService(directory: box.data, home: "/nonexistent-home")
+    again.start(scope: box.scope)
+    defer { again.shutdown() }
+    #expect(again.waitUntilIdle())
+    #expect(indexedPaths(again, box).contains(box.p("slow/b.txt")))
 }

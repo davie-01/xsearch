@@ -70,12 +70,20 @@ final class Reconciler {
     /// transaction nor publish nothing until the end. The watermark only moves at the very end.
     static let chunk = 20_000
 
-    init(catalog: FileCatalog, context: Context, seq: Int64, publish: @escaping ([NameChange]) -> Void) {
+    /// `cancelled`: asked between listings. A cancelled run throws `Cancelled` and rolls back
+    /// what it has not committed; the journal consumer has not moved, so the batch runs again
+    /// on the next start (replay is idempotent).
+    init(catalog: FileCatalog, context: Context, seq: Int64, cancelled: @escaping () -> Bool = { false },
+         publish: @escaping ([NameChange]) -> Void) {
         self.catalog = catalog
         ctx = context
         self.seq = seq
+        self.cancelled = cancelled
         self.publish = publish
     }
+
+    struct Cancelled: Error {}
+    private let cancelled: () -> Bool
 
     func run(_ ops: [JournalOp]) throws {
         try begin()
@@ -302,7 +310,18 @@ final class Reconciler {
     private func queue(_ job: ParallelLister.Job) {
         inFlight[job.id] = job.recursive
         submissions += 1
-        lister.submit(job)
+        if lister.pending < Self.maxListings { lister.submit(job) } else { waiting.append(job) }
+    }
+
+    /// Listings handed to the pool at once. The pool lists faster than the one writer applies,
+    /// and every finished listing holds a whole directory's entries until applied: a wide tree
+    /// piled them up. The rest wait here as jobs (an id and a path), newest first, which keeps
+    /// this list short on a wide tree.
+    static let maxListings = 64
+    private var waiting: [ParallelLister.Job] = []
+
+    private func topUp() {
+        while lister.pending < Self.maxListings, let job = waiting.popLast() { lister.submit(job) }
     }
 
     private func childPath(_ parent: String, _ name: String) -> String { (parent == "/" ? "" : parent) + "/" + name }
@@ -318,7 +337,10 @@ final class Reconciler {
 
     private func drain() throws {
         defer { if !inTransaction { try? begin() } }  // callers write on
-        while lister.pending > 0 {
+        while true {
+            topUp()
+            guard lister.pending > 0 else { break }
+            if cancelled() { throw Cancelled() }
             if inTransaction && Date().timeIntervalSince(transactionStart) >= Self.maxTransaction {
                 try commit()
                 try begin()

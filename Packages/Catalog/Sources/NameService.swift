@@ -35,6 +35,8 @@ public final class NameService: @unchecked Sendable {
     private var watcherRetry: DispatchWorkItem?
     /// Set on `queue`: a retry already scheduled or running must not watch for a stopped service.
     private var isShutDown = false
+    /// Set from any thread, before `shutdown` waits for the queue.
+    private let stopRequested = OSAllocatedUnfairLock(initialState: false)
     var watcherDelay: TimeInterval = 5
     /// Test hook: this many watcher starts fail.
     var failWatcherStarts = 0
@@ -123,7 +125,10 @@ public final class NameService: @unchecked Sendable {
     }
 
     /// Stops watching, folds the overlay and writes the snapshot. Safe to call more than once.
+    /// A scan in progress stops at its next listing instead of finishing first (quitting
+    /// during the first full scan waited for all of it).
     public func shutdown() {
+        stopRequested.withLock { $0 = true }
         queue.sync {
             isShutDown = true
             watcherRetry?.cancel(); watcherRetry = nil
@@ -472,12 +477,15 @@ public final class NameService: @unchecked Sendable {
                 let large = batch.contains { $0.kind != .fsevent || $0.flags != 0 }
                 rescanOps += batch.filter { $0.kind != .fsevent || $0.flags != 0 }.count
                 if large { updateStatus { $0.phase = .scanning } }
-                let reconciler = Reconciler(catalog: catalog, context: context, seq: last.jseq) { [weak self] changes in
+                let stop = stopRequested
+                let reconciler = Reconciler(catalog: catalog, context: context, seq: last.jseq, cancelled: { stop.withLock { $0 } }) { [weak self] changes in
                     self?.publish(changes)
                 }
                 do {
                     try reconciler.run(batch)
                     failedBatch = nil
+                } catch is Reconciler.Cancelled {
+                    return  // shutting down: the batch runs again on the next start
                 } catch {
                     lastBatchError = String(describing: error)
                     // A batch that keeps failing must not stall the pipeline: skip it and reconcile
