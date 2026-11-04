@@ -810,3 +810,26 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     let s = try c.db.prepare("SELECT COUNT(*) FROM files WHERE name LIKE 'b%.txt' AND content_state = 1")
     #expect(try s.first { $0.int(0) } == 9)
 }
+
+/// A task waiting for its retry, after the settle delay has passed: the timer waits for the
+/// retry instead of firing every 50 ms (the settle deadline only counts once nothing is left).
+@Test func waitingRetryDoesNotSpinTheTimer() throws {
+    let p = try Pipeline("retrywait") {
+        $0.backoffBase = 4
+        $0.settleDelay = 0.3
+    }
+    defer { p.stop() }
+    nonisolated(unsafe) var failures = 1
+    p.indexer.workerFault = { _ in
+        if failures > 0 { failures -= 1; return "crash" }
+        return nil
+    }
+    try p.box.write("docs/r.txt", "等待 kappa9")
+    try p.start()
+    usleep(1_200_000)  // crashed, retry in 4 s, settle delay long past
+    let before = p.indexer.timerFirings.withLock { $0 }
+    usleep(1_500_000)
+    let fired = p.indexer.timerFirings.withLock { $0 } - before
+    #expect(fired <= 2, "\(fired) timer wake-ups in 1.5 s")
+    #expect(p.until(timeout: 10) { try p.search("kappa9") == ["r.txt"] })
+}

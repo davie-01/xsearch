@@ -105,6 +105,8 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Extractions served from the cache (tests, diagnostics).
     private(set) var cacheHits = 0
     private let lock = NSLock()
+    /// Timer wake-ups so far (tests: idle and back-off waits must not spin).
+    let timerFirings = OSAllocatedUnfairLock(initialState: 0)
     private var lastFullCount = Date.distantPast
 
     /// nil when the file cannot be read to its end, or `cancelled` says stop (no partial digest).
@@ -175,7 +177,10 @@ public final class ContentIndexer: @unchecked Sendable {
             state.withLock { $0.running = true }
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + 0.2)
-            t.setEventHandler { [weak self] in self?.cycleAndReschedule() }
+            t.setEventHandler { [weak self] in
+                self?.timerFirings.withLock { $0 += 1 }
+                self?.cycleAndReschedule()
+            }
             t.resume()
             timer = t
         }
@@ -219,7 +224,11 @@ public final class ContentIndexer: @unchecked Sendable {
     private func scheduleNextCycle() {
         guard let timer, !stopped else { return }
         var delay = Self.fallbackInterval
-        if let last = lastWork { delay = min(delay, max(0.05, settleDelay - Date().timeIntervalSince(last))) }
+        // The settle report waits only for an idle indexer (see reportSettled): with tasks still
+        // waiting for a retry, an elapsed settle delay pinned the timer to 50 ms until the retry.
+        if let last = lastWork, status.pending == 0, rebuildId == nil, !needsRecovery {
+            delay = min(delay, max(0.05, settleDelay - Date().timeIntervalSince(last)))
+        }
         if needsRecovery {
             delay = max(0.05, errorBackoffUntil.timeIntervalSinceNow)
         } else if let catalog,
