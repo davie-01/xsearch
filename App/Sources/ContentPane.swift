@@ -378,7 +378,6 @@ final class PreviewPane: NSView {
         }
         textView.textStorage?.setAttributedString(text)
         ruler.anchors = anchors.filter { NSLocationInRange($0.utf16, range) }.map { ($0.utf16 - range.location, $0.info.gutter) }
-        scroll.tile()
         ruler.needsDisplay = true
         let windowed = range.length < fullText.length
         banner.stringValue = stale ? L("  文件在建立索引后已修改，高亮暂不显示；已排队重新索引。  ")
@@ -420,7 +419,9 @@ final class PreviewPane: NSView {
         lm.ensureLayout(forCharacterRange: r)
         let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc)
         let y = max(0, rect.midY - scroll.contentView.bounds.height / 2)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        // Only y: the gutter is a negative x origin of the clip view (macOS 26 rulers), and
+        // x 0 slid the text under the labels until the user scrolled.
+        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 
@@ -434,17 +435,8 @@ final class PreviewPane: NSView {
         return scroll.contentView.bounds.intersects(rect.offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y))
     }
 
-    /// The scroll view places the text beside the gutter when it tiles. Seen once without it
-    /// (text under the labels until the user scrolled), so every layout tiles it again.
-    override func layout() {
-        super.layout()
-        scroll.tile()
-    }
-
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        needsLayout = true
-    }
+    /// Dev log: the clip view's x origin (minus the gutter width while the text sits beside it).
+    var clipOriginX: CGFloat { scroll.contentView.bounds.origin.x }
 
     @objc private func textViewFrameChanged() {
         let size = viewSize

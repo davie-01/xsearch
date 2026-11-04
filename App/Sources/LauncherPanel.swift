@@ -1168,7 +1168,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
             let focus = panel.firstResponder === table ? "list" : panel.firstResponder is NSTextView ? "input" : "other"
             let ql = QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible
-            let preview = mode == .content ? " selected=\(contentPane.selected?.name ?? "-") preview=\(contentPane.preview.title.stringValue)|\(contentPane.preview.position.stringValue) hitVisible=\(contentPane.preview.currentHitVisible)" : ""
+            let preview = mode == .content ? " selected=\(contentPane.selected?.name ?? "-") preview=\(contentPane.preview.title.stringValue)|\(contentPane.preview.position.stringValue) hitVisible=\(contentPane.preview.currentHitVisible) clipX=\(contentPane.preview.clipOriginX)" : ""
             let line = "\(step)\(preview) body=\(bodyHeight) focus=\(focus) row=\(table.selectedRow) text=\(field.stringValue) scope=\(scopeChip.isHidden ? "-" : scopeChip.title) quicklook=\(ql) active=\(NSApp.isActive) panelKey=\(panel.isKeyWindow) qlKey=\(QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isKeyWindow) filters=\(filters.arrangedSubviews.count) rows=\(rows.count)\n"
             if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { FileManager.default.createFile(atPath: path, contents: Data(line.utf8)) }
         }
