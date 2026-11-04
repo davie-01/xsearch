@@ -118,6 +118,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     // Spotlight shell: one glass bar, plus round glass mode buttons that split out of it.
     private let container = NSGlassEffectContainerView()
     private let mainGlass = NSGlassEffectView()
+    /// The window's content: the full transparent canvas while the shell animates, just the glass at rest.
+    private let shellRoot = FlippedView()
+    private static let canvasSize = NSSize(width: Shell.contentWidth + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset)
     private let header = FlippedView()
     private let body = FlippedView()
     private var driver: FrameDriver?
@@ -184,10 +187,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // The app that took the keyboard: the Dock's full-screen window is always there too.
         guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
               front != ProcessInfo.processInfo.processIdentifier else { return false }
+        // Window bounds count from the top left of the main display, downwards.
+        let mainHeight = NSScreen.screens.first?.frame.height ?? screen.maxY
+        let center = CGPoint(x: screen.midX, y: mainHeight - screen.midY)
         return list.contains { w in
             guard (w[kCGWindowOwnerPID as String] as? Int32) == front, (w[kCGWindowLayer as String] as? Int ?? 0) > 0,
                   let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
-            return (b["Width"] ?? 0) >= screen.width * 0.9 && (b["Height"] ?? 0) >= screen.height * 0.9
+            let r = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+            // Covering the launcher's own display, not just as large as it.
+            return r.width >= screen.width * 0.9 && r.height >= screen.height * 0.9 && r.contains(center)
         }
     }
 
@@ -205,7 +213,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // Fixed transparent window; only the glass frames move inside it (no window jumps).
         // Transparent margin on every side: springs overshoot (bigger drops, wider bounce) and
         // must never be clipped by the window edge.
-        let root = FlippedView(frame: NSRect(x: 0, y: 0, width: Shell.contentWidth + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset))
+        let root = shellRoot
+        root.frame = NSRect(origin: .zero, size: Self.canvasSize)
         container.spacing = Shell.mergeDistance
         container.contentView = root
         panel.contentView = container
@@ -391,10 +400,13 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let targetMain = NSRect(x: originX, y: 0, width: targetW, height: targetH)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         driver?.stop()
+        shellAnimating = false
+        openCanvas()
         guard animated && !reduceMotion && panel.isVisible else {
             setMainFrame(targetMain)
             body.isHidden = bodyHeight == 0
             body.alphaValue = 1
+            fitToGlass()
             return
         }
 
@@ -428,13 +440,48 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             self.setMainFrame(targetMain)
             if self.bodyHeight == 0 { self.body.isHidden = true }
             self.body.alphaValue = 1
+            self.shellAnimating = false
+            self.fitToGlass()
         }
+        shellAnimating = true
         driver?.start()
     }
 
+    /// Where the canvas origin sits in the window: zero on the full canvas; at rest the window is
+    /// just the glass, so the canvas starts that far up and left of it (flipped).
+    private var canvasOffset = NSPoint.zero
+    private var shellAnimating = false
+    private var mainFrame = NSRect.zero
+
+    /// At rest the window is just the glass, as Spotlight's is, so screenshot tools frame the
+    /// panel and not the transparent canvas. The glass keeps its place on screen. The glass view
+    /// itself moves to the window origin (shifting the container's bounds instead left the glass
+    /// behind when the window had just been ordered in: f1a61cf, reverted in fd0ba71).
+    private func fitToGlass() {
+        guard canvasOffset == .zero else { return }
+        let g = mainGlass.frame
+        let f = panel.frame
+        canvasOffset = g.origin
+        panel.setFrame(NSRect(x: f.minX + g.minX, y: f.maxY - g.maxY, width: g.width, height: g.height), display: false)
+        shellRoot.frame = NSRect(origin: .zero, size: g.size)
+        setMainFrame(mainFrame)
+    }
+
+    /// Back to the full canvas, for animating and placing; the glass stays where it is on screen.
+    private func openCanvas() {
+        guard canvasOffset != .zero else { return }
+        let f = panel.frame, o = canvasOffset
+        canvasOffset = .zero
+        panel.setFrame(NSRect(x: f.minX - o.x, y: f.maxY + o.y - Self.canvasSize.height, width: Self.canvasSize.width, height: Self.canvasSize.height), display: false)
+        shellRoot.frame = NSRect(origin: .zero, size: Self.canvasSize)
+        setMainFrame(mainFrame)
+    }
+
     /// The bar's inner header and body track the glass size exactly (no autoresizing drift).
+    /// `frame` is in canvas coordinates.
     private func setMainFrame(_ frame: NSRect) {
-        mainGlass.frame = frame.offsetBy(dx: Shell.inset, dy: Shell.inset)
+        mainFrame = frame
+        mainGlass.frame = frame.offsetBy(dx: Shell.inset - canvasOffset.x, dy: Shell.inset - canvasOffset.y)
         header.frame = NSRect(x: 0, y: 0, width: frame.width, height: Shell.bar)
         body.frame = NSRect(x: 0, y: Shell.bar, width: frame.width, height: max(0, frame.height - Shell.bar))
     }
@@ -505,9 +552,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func position() {
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         guard let frame = screen?.visibleFrame else { return }
+        openCanvas()
         let size = panel.frame.size
         let top = frame.maxY - frame.height / 6
         panel.setFrameTopLeftPoint(NSPoint(x: frame.midX - size.width / 2, y: top + Shell.inset))
+        if !shellAnimating { fitToGlass() }
     }
 
     /// Body height from its content; zero (a plain search bar) when there is nothing to show.
