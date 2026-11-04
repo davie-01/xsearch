@@ -635,11 +635,30 @@ public final class ContentIndexer: @unchecked Sendable {
         return FileVersion(size: Int64(st.st_size), mtimeNs: Int64(st.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(st.st_mtimespec.tv_nsec), ino: Int64(bitPattern: UInt64(st.st_ino)))
     }
 
+    /// The file is not what the catalog recorded for the task's op (changed again, or the
+    /// catalog has not caught up): wait for the next op, 2 s first and doubling to 5 minutes, so
+    /// a file that keeps changing (a log) or a lost event does not rewrite the task every 2 s.
+    /// A newer op_seq starts over; never counted as an attempt (no quarantine for edits).
+    private func staleRetry(_ t: Task) -> Staged {
+        let n = staleLock.withLock { () -> Int in
+            if staleRetries.count > 4096 { staleRetries.removeAll() }
+            let previous = staleRetries[t.fileId].flatMap { $0.opSeq == t.opSeq ? $0.count : nil } ?? 0
+            staleRetries[t.fileId] = (t.opSeq, previous + 1)
+            return previous
+        }
+        return .retry(after: min(Self.staleRetryMax, staleRetryBase * pow(2, Double(n))), error: nil, countAttempt: false)
+    }
+
+    var staleRetryBase: TimeInterval = 2
+    static let staleRetryMax: TimeInterval = 300
+    private let staleLock = NSLock()
+    private var staleRetries: [Int64: (opSeq: Int64, count: Int)] = [:]
+
     private func extract(_ p: Prepared, worker: ExtractionWorker) -> Staged {
         let interrupted = Staged.retry(after: 0, error: nil, countAttempt: false)
         if stopped { return interrupted }
         // Before: the file must still be what the catalog recorded for this op.
-        guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
+        guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }
         let dir = (p.path as NSString).deletingLastPathComponent
         let type = ContentType.of(name: p.info.name)
         // §10 cache key: strong digest + extractor version + config. Same key → reuse the stored
@@ -654,7 +673,7 @@ public final class ContentIndexer: @unchecked Sendable {
         if stopped { return interrupted }
         if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
             // The digest describes what was read: the file must not have changed since.
-            guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
+            guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }
             lock.withLock { cacheHits += 1 }
             return .put(ContentInput(fileId: UInt64(p.task.fileId), opSeq: UInt64(p.task.opSeq), revision: UInt64(bitPattern: p.version.mtimeNs),
                                      extractorVer: type.map(Extractor.version) ?? 0, scopeIds: [1], dir: dir, name: p.info.name,
@@ -665,7 +684,7 @@ public final class ContentIndexer: @unchecked Sendable {
         if outcome == .cancelled { return interrupted }
         afterExtract?(p.path)
         // After: changed during extraction → the result describes neither version.
-        guard diskVersion(p.path) == p.version else { return .retry(after: 2, error: nil, countAttempt: false) }
+        guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }
         switch outcome {
         case .extracted(let r):
             return .put(ContentInput(fileId: UInt64(p.task.fileId), opSeq: UInt64(p.task.opSeq), revision: UInt64(bitPattern: p.version.mtimeNs),
