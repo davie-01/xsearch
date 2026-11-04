@@ -247,6 +247,7 @@ final class PreviewPane: NSView {
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 8, height: 12)
+        NotificationCenter.default.addObserver(self, selector: #selector(userScrolled), name: NSScrollView.willStartLiveScrollNotification, object: scroll)
         for v in [textView, scroll.contentView] as [NSView] {
             v.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(textViewFrameChanged), name: NSView.frameDidChangeNotification, object: v)
@@ -413,17 +414,50 @@ final class PreviewPane: NSView {
 
     /// Centers the current hit; non-contiguous layout lays out only around it.
     private func centerCurrentHit() {
-        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
-              let lm = textView.layoutManager, let tc = textView.textContainer else { return }
+        guard scrollToCurrentHit() else { return }
         centeredFor = viewSize
-        lm.ensureLayout(forCharacterRange: r)
-        let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc)
-        let y = max(0, rect.midY - scroll.contentView.bounds.height / 2)
+        recenterWhileLayoutSettles()
+    }
+
+    /// Scrolls so the current hit is in the middle; false when there is none.
+    @discardableResult
+    private func scrollToCurrentHit() -> Bool {
+        guard let y = currentHitCenterY() else { return false }
+        let target = max(0, y - scroll.contentView.bounds.height / 2)
         // Only y: the gutter is a negative x origin of the clip view (macOS 26 rulers), and
         // x 0 slid the text under the labels until the user scrolled.
-        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: y))
+        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: target))
         scroll.reflectScrolledClipView(scroll.contentView)
+        return true
     }
+
+    /// The current hit's vertical middle in the text view, laid out around it.
+    private func currentHitCenterY() -> CGFloat? {
+        guard currentHit >= 0, currentHit < hits.count, let r = PreviewWindow.visible(hits[currentHit], in: shownRange),
+              let lm = textView.layoutManager, let tc = textView.textContainer else { return nil }
+        lm.ensureLayout(forCharacterRange: r)
+        return lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: r, actualCharacterRange: nil), in: tc).midY + textView.textContainerOrigin.y
+    }
+
+    private var settleGeneration = 0
+
+    /// Non-contiguous layout places text it has not laid out yet by an estimated height. Laying
+    /// out the part around the hit corrects the text above it, and the hit moved out of view
+    /// (most longer documents, also on ⌘G). It is centered again until it stays put; a scroll
+    /// by the user ends this at once.
+    private func recenterWhileLayoutSettles() {
+        settleGeneration += 1
+        let generation = settleGeneration
+        for delay in [0.03, 0.1, 0.25, 0.5, 0.9] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, generation == self.settleGeneration, let y = self.currentHitCenterY() else { return }
+                let middle = self.scroll.contentView.bounds.midY
+                if abs(y - middle) > 4 { self.scrollToCurrentHit() }
+            }
+        }
+    }
+
+    @objc private func userScrolled() { settleGeneration += 1 }
 
     /// A preview can arrive while the launcher is still expanding: the text then rewraps and
     /// the hit moves, so it is centered again for the final size.
