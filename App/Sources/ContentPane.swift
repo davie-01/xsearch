@@ -649,6 +649,14 @@ final class ContentPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// A preview still queued must not fill the pane any more.
     func invalidatePreview() { previewToken += 1 }
 
+    /// Nobody is looking: the shown document (up to the whole text, with its layout) is let go.
+    /// The selection goes too, so the next result list selects again and loads it anew.
+    func releasePreview() {
+        invalidatePreview()
+        table.deselectAll(nil)
+        preview.clear()
+    }
+
     func show(_ out: ContentOutput) {
         expression = out.query.expression
         if !out.append { liveIds = [] }

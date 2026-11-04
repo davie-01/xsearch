@@ -347,3 +347,23 @@ private var systemTypesAvailable: Bool { UTType(filenameExtension: "pdf")?.isDyn
     #expect(offsetsAreConsistent([0, 2, 2, 5], byteCount: 5))
     #expect(!offsetsAreConsistent([0, 3, 2, 5], byteCount: 5) && !offsetsAreConsistent([1, 5], byteCount: 5) && !offsetsAreConsistent([0, 4], byteCount: 5))
 }
+
+/// A badly backtracking pattern is cut off per name and reported, and a cancelled search stops
+/// in the middle of it instead of finishing first.
+@Test func pathologicalRegexIsBoundedAndCancellable() {
+    var o = Oracle()
+    let root = o.add(parent: 0, name: "/", dir: true, root: "/")
+    for i in 0..<40 { _ = o.add(parent: root, name: String(repeating: "a", count: 26 + i % 3) + "!", dir: false) }
+    let plain = o.add(parent: root, name: "aaa", dir: false)
+    let view = NameView(base: NameSnapshot.build(Array(o.records.values), seq: 1, fingerprint: "t"))
+    let q = NameQuery.parse("regex:^(a+)+$", home: "/")
+    var start = Date()
+    let r = view.search(q, limit: 100)
+    #expect(Date().timeIntervalSince(start) < 2)
+    #expect(r.hits.map(\.fileId) == [plain])
+    #expect(r.regexAborted > 0)
+    start = Date()
+    let cancelled = view.search(q, limit: 100, cancelled: { Date().timeIntervalSince(start) > 0.01 })
+    #expect(cancelled.cancelled && cancelled.hits.isEmpty)
+    #expect(Date().timeIntervalSince(start) < 0.2)
+}

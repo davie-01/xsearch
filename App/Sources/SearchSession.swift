@@ -31,6 +31,8 @@ struct SearchOutput {
     var total: Int
     var elapsedMs: Double
     var unresolvedDirs: [String]
+    /// Names a regular expression gave up on (too slow to match), counted as no match.
+    var regexAborted = 0
 }
 
 /// QuerySession (ARCHITECTURE §5): searches run off the main thread; only the latest request's
@@ -72,7 +74,9 @@ final class SearchSession {
         }
     }
 
-    func search(_ text: String, limit: Int = 200, documentTypes: DocumentTypes? = nil, deliver: @escaping @MainActor (SearchOutput) -> Void) {
+    /// Returns the request's id, for `cancel`.
+    @discardableResult
+    func search(_ text: String, limit: Int = 200, documentTypes: DocumentTypes? = nil, deliver: @escaping @MainActor (SearchOutput) -> Void) -> Int {
         latest += 1
         let id = latest
         latestRequest.withLock { $0 = id }
@@ -91,6 +95,7 @@ final class SearchSession {
             var items: [ResultItem] = []
             var total = 0
             var unresolved: [String] = []
+            var aborted = 0
             if q.isEmpty {
                 // Favorites follow their file id when the file moved (§13); missing ones stay
                 // listed so they can be removed.
@@ -116,8 +121,10 @@ final class SearchSession {
                     items.append(ResultItem(group: .apps, name: a.displayName, path: a.path, fileId: nil, kind: .app, ext: "app", meta: L("应用")))
                 }
                 let appPaths = Set(appHits.map(\.path))
-                let result = names.search(q, limit: limit, usage: counts.byId)
+                let result = names.search(q, limit: limit, usage: counts.byId, cancelled: { gate.withLock { $0 } != id })
+                if result.cancelled { return }
                 total = result.total + appHits.count
+                aborted = result.regexAborted
                 unresolved = result.unresolvedDirs
                 for h in result.hits where !appPaths.contains(h.path) {
                     let ext = (h.name as NSString).pathExtension.lowercased()
@@ -131,12 +138,22 @@ final class SearchSession {
                 }
             }
             let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
-            let out = SearchOutput(query: q, text: text, items: items, total: total, elapsedMs: ms, unresolvedDirs: unresolved)
+            let out = SearchOutput(query: q, text: text, items: items, total: total, elapsedMs: ms, unresolvedDirs: unresolved, regexAborted: aborted)
             Task { @MainActor in
                 guard id == self.latest else { return }
                 deliver(out)
             }
         }
+        return id
+    }
+
+    /// Stops request `id` if it is still the latest (the launcher hid): a running match ends
+    /// at its next check, and nothing is delivered.
+    func cancel(_ id: Int) {
+        guard id == latest else { return }
+        latest += 1
+        let next = latest
+        latestRequest.withLock { $0 = next }
     }
 
     /// Text-type files under `dirs` from the name index, for the live scan (§8.7): the name

@@ -530,11 +530,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func hide() {
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
         panel.orderOut(nil)
-        // Nobody is looking: stop the query and any queued preview. `show` searches again.
+        // Nobody is looking: stop the queries and release the preview. `show` searches again.
+        session.cancel(nameRequest)
         session.content.cancel()
-        contentPane.invalidatePreview()
+        contentPane.releasePreview()
         onVisibilityChange?()
     }
+
+    /// The launcher's latest name search, cancelled when it hides.
+    private var nameRequest = 0
 
     private func forgetResults() {
         output = nil
@@ -702,7 +706,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             return
         }
         session.content.cancel()
-        session.search(text + scopeFolderClause, documentTypes: scopeTypes) { [weak self] out in self?.apply(out) }
+        nameRequest = session.search(text + scopeFolderClause, documentTypes: scopeTypes) { [weak self] out in self?.apply(out) }
     }
 
     /// The app list loads asynchronously; refresh visible results when it arrives.
@@ -885,6 +889,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     /// Never a bare "no results": say why and what to do (UI-SPEC §1.4, §7).
     private func setNotice(for out: SearchOutput) {
         clearNotice()
+        if out.regexAborted > 0 {
+            addNotice(L("正则表达式过于复杂，%@ 个名称未能在时限内匹配，已跳过。", "\(out.regexAborted)"), color: Theme.warnText, size: 12.5)
+        }
         guard out.items.isEmpty else { return }
         if out.query.isEmpty { return }  // empty input: just the search bar
         let phase = session.names.status.phase

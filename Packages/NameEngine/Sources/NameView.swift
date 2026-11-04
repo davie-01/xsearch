@@ -229,13 +229,20 @@ public struct NameView: Sendable {
         public var total: Int
         /// `dir:` named a path that is not in the index.
         public var unresolvedDirs: [String]
+        /// Names whose regular expression ran out of its time per name (counted as no match).
+        public var regexAborted = 0
+        /// `cancelled` said stop: the result is incomplete and only fit to be dropped.
+        public var cancelled = false
     }
 
     /// Complete matching set, ranked; only the top `limit` are materialized. `usage` maps file id
     /// to open count (user.sqlite) for ranking.
-    public func search(_ q: NameQuery, limit: Int = 200, usage: [Int64: Int] = [:]) -> Result {
+    /// `cancelled` is asked every few thousand entries and while a regular expression runs: a
+    /// newer query (or a hidden launcher) stops this one instead of waiting behind it.
+    public func search(_ q: NameQuery, limit: Int = 200, usage: [Int64: Int] = [:], cancelled: @escaping () -> Bool = { false }) -> Result {
         guard !q.isEmpty else { return Result(hits: [], total: 0, unresolvedDirs: []) }
-        let matcher = Matcher(q)
+        let matcher = Matcher(q, cancelled: cancelled)
+        let stopped = Result(hits: [], total: 0, unresolvedDirs: [], cancelled: true)
 
         // `dir:` targets. A negative id means "this root and everything in it".
         var targets: Set<Int64>?
@@ -283,7 +290,11 @@ public struct NameView: Sendable {
 
         let scanned = ranges.reduce(0) { $0 + $1.count }
         // Path patterns depend on the entry, not only its name key: no per-key cache then.
-        let levels = !matcher.needsPath && scanned >= base.keys.count / 2 ? matcher.levels(base.keys) : nil
+        var levels: [UInt8]?
+        if !matcher.needsPath && scanned >= base.keys.count / 2 {
+            guard let l = matcher.levels(base.keys) else { return stopped }
+            levels = l
+        }
         var top = TopK(limit: limit)
         var total = 0
         // Shallower first, then by path: the end of the shown order.
@@ -293,9 +304,13 @@ public struct NameView: Sendable {
         }
         let overlayEmpty = overlay.isEmpty
         let isRootFlag: (Int) -> Bool = { self.base.parents[$0] < 0 && self.base.rootPaths[self.base.fileIds[$0]] == "/" }
+        var wasCancelled = false
         base.keys.bytes.withUnsafeBufferPointer { keyBytes in
+            var seen = 0
             for range in ranges {
                 for i in range {
+                    seen += 1
+                    if seen & 4095 == 0 && matcher.cancelled() { wasCancelled = true; return }
                     let k = base.keyId(of: i)
                     let level: UInt8
                     let id = base.fileIds[i]
@@ -319,6 +334,7 @@ public struct NameView: Sendable {
                 }
             }
         }
+        if wasCancelled || matcher.cancelled() { return stopped }
         for (id, node) in overlay {
             guard let r = node.record, !r.flags.contains(.contentOnly) else { continue }
             let level = node.key.withUnsafeBufferPointer { matcher.level($0, 0..<$0.count) { self.path(id).map(NameKey.bytes) } }
@@ -342,7 +358,8 @@ public struct NameView: Sendable {
             if a.1 != b.1 { return a.1 < b.1 }
             return a.0.path < b.0.path
         }
-        return Result(hits: hits.map(\.0), total: total, unresolvedDirs: unresolved)
+        if matcher.cancelled() { return stopped }
+        return Result(hits: hits.map(\.0), total: total, unresolvedDirs: unresolved, regexAborted: matcher.budget.aborted)
     }
 }
 
@@ -381,6 +398,18 @@ struct Matcher {
     let size: ClosedRange<Int64>?
     let modified: ClosedRange<Int64>?
     let documents: DocumentCheck?
+    let cancelled: () -> Bool
+    let budget = RegexBudget()
+
+    /// A pattern that backtracks badly (`^(a+)+$` on a long name) is stopped after this long on
+    /// one name, which then counts as no match and is reported. Once a pattern has shown it does
+    /// that, the other names get much less, so many such names do not add up to minutes.
+    static let regexTimePerName: UInt64 = 50_000_000
+    static let regexTimeAfterAbort: UInt64 = 2_000_000
+
+    final class RegexBudget {
+        var aborted = 0
+    }
 
     /// Per-search cache of "is this extension one of the app's documents" (UTI conformance is
     /// too slow to repeat for every one of a million names; distinct extensions are few).
@@ -396,7 +425,8 @@ struct Matcher {
         }
     }
 
-    init(_ q: NameQuery) {
+    init(_ q: NameQuery, cancelled: @escaping () -> Bool = { false }) {
+        self.cancelled = cancelled
         documents = q.documentTypes.map(DocumentCheck.init)
         extensions = Set(q.extensions.map { Array($0.utf8) })
         kinds = q.kinds
@@ -433,9 +463,15 @@ struct Matcher {
         rankTerm = q.terms.first.map(NameKey.bytes)
     }
 
-    func levels(_ pool: StringPool) -> [UInt8] {
+    /// nil when cancelled.
+    func levels(_ pool: StringPool) -> [UInt8]? {
         pool.bytes.withUnsafeBufferPointer { bytes in
-            (0..<pool.count).map { level(bytes, pool.range($0)) }
+            var out = [UInt8](repeating: 0, count: pool.count)
+            for k in 0..<pool.count {
+                if k & 4095 == 4095 && cancelled() { return nil }
+                out[k] = level(bytes, pool.range(k))
+            }
+            return out
         }
     }
 
@@ -478,11 +514,24 @@ struct Matcher {
         case .regex(let re, let full):
             let subject: String
             if full { guard let p = path() else { return false }; subject = String(decoding: p, as: UTF8.self) } else { subject = String(decoding: key, as: UTF8.self) }
-            return re.firstMatch(in: subject, range: NSRange(subject.startIndex..., in: subject)) != nil
+            return regexMatches(re, subject)
         case .and(let xs): return xs.allSatisfy { eval($0, key, path) }
         case .or(let xs): return xs.contains { eval($0, key, path) }
         case .not(let x): return !eval(x, key, path)
         }
+    }
+
+    /// `firstMatch` cannot be interrupted; progress reports let a long match stop on time or
+    /// when the search is cancelled.
+    func regexMatches(_ re: NSRegularExpression, _ subject: String) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + (budget.aborted == 0 ? Self.regexTimePerName : Self.regexTimeAfterAbort)
+        var found = false, gaveUp = false
+        re.enumerateMatches(in: subject, options: [.reportProgress], range: NSRange(subject.startIndex..., in: subject)) { match, _, stop in
+            if match != nil { found = true; stop.pointee = true; return }
+            if DispatchTime.now().uptimeNanoseconds > deadline || cancelled() { gaveUp = true; stop.pointee = true }
+        }
+        if gaveUp && !found { budget.aborted += 1 }
+        return found
     }
 
     func contains(_ base: UnsafePointer<UInt8>, _ n: Int, _ term: [UInt8]) -> Bool {

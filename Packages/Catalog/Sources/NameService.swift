@@ -84,8 +84,8 @@ public final class NameService: @unchecked Sendable {
     public var view: NameView { state.withLock { $0.view } }
     public var status: Status { state.withLock { $0.status } }
 
-    public func search(_ q: NameQuery, limit: Int = 200, usage: [Int64: Int] = [:]) -> NameView.Result {
-        view.search(q, limit: limit, usage: usage)
+    public func search(_ q: NameQuery, limit: Int = 200, usage: [Int64: Int] = [:], cancelled: @escaping () -> Bool = { false }) -> NameView.Result {
+        view.search(q, limit: limit, usage: usage, cancelled: cancelled)
     }
 
     // MARK: Lifecycle
