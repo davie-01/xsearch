@@ -430,6 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         names = NameService(directory: data)
         names.onStatus = { [weak self] _ in Task { @MainActor in self?.statusChanged() } }
         session = SearchSession(names: names, usage: usage)
+        launcher.dispose()
         launcher = LauncherController(session: session, usage: usage)
         wireLauncher()
         session.onAppsLoaded = { [weak self] in self?.launcher.appsDidLoad() }

@@ -165,17 +165,29 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         panel.onKeyEquivalent = { [weak self] in self?.keyEquivalent($0) ?? false }
         panel.onCancel = { [weak self] in self?.cancel() }
         QuickLookKeyboard.install()
-        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
+        resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
             // Clicking elsewhere dismisses the launcher; Quick Look and drags keep it.
             MainActor.assumeIsolated {
                 guard let self, !(QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible) else { return }
                 // Decided a moment later, once a screenshot tool's overlay is up (see below).
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                     guard self.panel.isVisible, !self.panel.isKeyWindow else { return }
-                    if self.screenOverlayInFront() { self.waitForOverlay() } else { self.hide() }
+                    if self.screenOverlayInFront() { if self.overlayWait == nil { self.waitForOverlay() } } else { self.hide() }
                 }
             }
         }
+    }
+
+    private var resignObserver: NSObjectProtocol?
+
+    /// Replaced by a new launcher (the name index was rebuilt): nothing of this one may keep
+    /// listening or waiting.
+    func dispose() {
+        hide()
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+        if let quickLookMonitor { NSEvent.removeMonitor(quickLookMonitor) }
+        quickLookMonitor = nil
     }
 
     /// A screenshot tool (Snipaste) freezes the screen, then puts a full-screen overlay of its
@@ -199,13 +211,29 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
     }
 
-    /// The launcher stays while the overlay is up and takes the keyboard back after it.
-    private func waitForOverlay() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, self.panel.isVisible, !self.panel.isKeyWindow else { return }
-            if self.screenOverlayInFront() { self.waitForOverlay() } else { self.panel.makeKeyAndOrderFront(nil) }
+    /// The launcher stays while the overlay is up and takes the keyboard back after it. One
+    /// wait at a time, looking less often the longer it stays (0.25 s doubling to 1 s); after a
+    /// minute (another app's full-screen window taken for an overlay) the launcher hides.
+    private func waitForOverlay(after delay: TimeInterval = 0.25, until deadline: Date = Date().addingTimeInterval(60)) {
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.overlayWait = nil
+                guard self.panel.isVisible, !self.panel.isKeyWindow else { return }
+                if !self.screenOverlayInFront() {
+                    self.panel.makeKeyAndOrderFront(nil)
+                } else if Date() >= deadline {
+                    self.hide()
+                } else {
+                    self.waitForOverlay(after: min(delay * 2, 1), until: deadline)
+                }
+            }
         }
+        overlayWait = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
+
+    private var overlayWait: DispatchWorkItem?
 
     // MARK: Layout
 
@@ -528,6 +556,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     func hide() {
+        overlayWait?.cancel()
+        overlayWait = nil
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
         panel.orderOut(nil)
         // Nobody is looking: stop the queries and release the preview. `show` searches again.

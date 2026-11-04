@@ -378,7 +378,8 @@ public final class NameService: @unchecked Sendable {
         restartWatcher(since: start)
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 30, repeating: 30)
+        // A few seconds either way do not matter here: the system may fold it into other wake-ups.
+        timer.schedule(deadline: .now() + 30, repeating: 30, leeway: .seconds(5))
         timer.setEventHandler { [weak self] in
             self?.saveCursor()
             try? self?.persist(force: false)
