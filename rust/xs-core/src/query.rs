@@ -131,6 +131,9 @@ enum Token {
     Left,
     Right,
 }
+/// Deepest nesting of groups and negations a query may have (the name query uses the same).
+pub const MAX_NESTING: usize = 64;
+
 pub fn parse(s: &str) -> Result<Expr> {
     let mut tokens = vec![];
     let mut chars = s.chars().peekable();
@@ -233,8 +236,20 @@ pub fn parse(s: &str) -> Result<Expr> {
     struct Parser {
         tokens: Vec<Token>,
         at: usize,
+        /// Groups and negations open around the current token: each one is a level of recursion
+        /// here and in everything that walks the tree, so pasted input cannot run the stack out.
+        depth: usize,
     }
     impl Parser {
+        fn nested(&mut self, f: impl FnOnce(&mut Self) -> Result<Expr>) -> Result<Expr> {
+            if self.depth >= MAX_NESTING {
+                bail!("查询嵌套过深：括号和排除（-）最多 {MAX_NESTING} 层");
+            }
+            self.depth += 1;
+            let out = f(self);
+            self.depth -= 1;
+            out
+        }
         fn or(&mut self) -> Result<Expr> {
             let mut xs = vec![self.and()?];
             while self.tokens.get(self.at) == Some(&Token::Or) {
@@ -267,11 +282,11 @@ pub fn parse(s: &str) -> Result<Expr> {
             match self.tokens.get(self.at) {
                 Some(Token::Minus) => {
                     self.at += 1;
-                    Ok(Expr::Not(Box::new(self.atom()?)))
+                    Ok(Expr::Not(Box::new(self.nested(|p| p.atom())?)))
                 }
                 Some(Token::Left) => {
                     self.at += 1;
-                    let x = self.or()?;
+                    let x = self.nested(|p| p.or())?;
                     if self.tokens.get(self.at) != Some(&Token::Right) {
                         bail!("unclosed group")
                     }
@@ -297,7 +312,7 @@ pub fn parse(s: &str) -> Result<Expr> {
             }
         }
     }
-    let mut p = Parser { tokens, at: 0 };
+    let mut p = Parser { tokens, at: 0, depth: 0 };
     let out = p.or()?;
     if p.at != p.tokens.len() {
         bail!("unexpected trailing input")

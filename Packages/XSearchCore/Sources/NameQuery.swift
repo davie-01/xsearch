@@ -108,11 +108,24 @@ public struct NameQuery: Sendable, Equatable {
         }
 
         var depth = 0
+        /// Groups and negations around the current piece: each is a level of recursion here and
+        /// when the tree is matched, so pasted input is cut off instead of running the stack out.
+        var nesting = 0
+        static let maxNesting = 64
 
         mutating func atom() -> NameExpr? {
             guard at < pieces.count else { return nil }
             let piece = pieces[at]
             at += 1
+            if piece == .not || piece == .open {
+                guard nesting < Self.maxNesting else {
+                    query.chips.append(Chip(label: L("嵌套过深：括号和排除最多 %@ 层", "\(Self.maxNesting)"), valid: false))
+                    at = pieces.count
+                    return nil
+                }
+                nesting += 1
+            }
+            defer { if piece == .not || piece == .open { nesting -= 1 } }
             switch piece {
             case .not:
                 return atom().map { .not($0) }

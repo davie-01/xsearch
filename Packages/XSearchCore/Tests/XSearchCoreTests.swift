@@ -182,3 +182,13 @@ import Testing
     #expect(exts("合同 ext:txt") == ["txt"])
     #expect(exts("合同 ext:pdf").isEmpty, "not a text type: nothing to read live")
 }
+
+/// Pasted deep nesting is cut off with a visible chip, not parsed until the stack runs out.
+@Test func nameQueryNestingIsBounded() {
+    let ok = NameQuery.parse(String(repeating: "(", count: 64) + "a" + String(repeating: ")", count: 64), home: "/h")
+    #expect(ok.chips.allSatisfy(\.valid) && ok.expr != nil)
+    for input in [String(repeating: "(", count: 100_000) + "a", String(repeating: "-", count: 100_000) + "a"] {
+        let q = NameQuery.parse(input, home: "/h")
+        #expect(q.chips.contains { !$0.valid && $0.label.contains("嵌套过深") }, "\(q.chips.prefix(2))")
+    }
+}

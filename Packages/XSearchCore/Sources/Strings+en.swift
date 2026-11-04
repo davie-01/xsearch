@@ -66,6 +66,8 @@ let englishStrings: [String: String] = [
     "内容搜索结果": "Content search results",
     "内容索引还没有建立完成": "The content index isn’t ready yet",
     "查询无法解析：%@": "Couldn’t parse the query: %@",
+    "嵌套过深：括号和排除最多 %@ 层": "Nested too deeply: at most %@ levels of brackets and exclusions",
+    "查询嵌套过深：括号和排除（-）最多 64 层": "Query nested too deeply: at most 64 levels of brackets and exclusions (-)",
     "搜索中断：%@": "Search stopped: %@",
     "这个查询无法实时扫描": "This query can’t be used for a live scan",
     "名称": "Name",

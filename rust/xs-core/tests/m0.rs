@@ -46,6 +46,12 @@ fn parser_precedence_quoting_and_invalid_input() {
     for q in ["", "|a", "a|", "-", "()", "(a", "a)", "\"", "\"\"", "a\\"] {
         assert!(parse(q).is_err(), "{q}");
     }
+    // Nesting is bounded: deep pasted input is an error, not a stack overflow.
+    let ok = format!("{}a{}", "(".repeat(64), ")".repeat(64));
+    assert!(parse(&ok).is_ok());
+    for q in [format!("{}a{}", "(".repeat(65), ")".repeat(65)), format!("{}a", "-".repeat(65)), "(".repeat(100_000)] {
+        assert!(parse(&q).unwrap_err().to_string().contains("嵌套过深"), "{}", &q[..10]);
+    }
     for (old, new) in [("-a", "-ab"), ("a", "a|b"), ("cafe", "cafe\u{301}")] {
         assert!(!can_narrow(&parse(old).unwrap(), &parse(new).unwrap()));
     }
