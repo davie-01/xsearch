@@ -7,13 +7,18 @@ public struct NameScope: Codable, Sendable, Equatable {
     public var excludes: [String]
     public var includeHidden: Bool
     public var includePackageContents: Bool
+    /// Folders indexed although the scan above does not reach them (an exclusion rule covers
+    /// their location, e.g. WeChat's files under ~/Library). Each becomes a root of its own.
+    public var extraFolders: [String]
 
-    public init(wholeDisk: Bool, folders: [String], excludes: [String], includeHidden: Bool, includePackageContents: Bool) {
+    public init(wholeDisk: Bool, folders: [String], excludes: [String], includeHidden: Bool, includePackageContents: Bool,
+                extraFolders: [String] = []) {
         self.wholeDisk = wholeDisk
         self.folders = folders
         self.excludes = excludes
         self.includeHidden = includeHidden
         self.includePackageContents = includePackageContents
+        self.extraFolders = extraFolders
     }
 
     /// Whole disk minus system directories, ~/Library, node_modules and .git (§6.1 defaults).
@@ -26,11 +31,20 @@ public struct NameScope: Codable, Sendable, Equatable {
     public static let `default` = NameScope(
         wholeDisk: true, folders: [], excludes: defaultExcludes, includeHidden: false, includePackageContents: false)
 
-    /// Effective scan roots, standardized, with nested roots removed.
+    /// Effective scan roots, standardized, with nested roots removed. An extra folder is a root
+    /// of its own when the scan of the others does not reach it, and left out when it does.
     public func roots(home: String) -> [String] {
-        if wholeDisk { return ["/"] }
-        let paths = Set(folders.map { PathUtil.standardize(expand($0, home: home)) }).sorted()
-        return paths.filter { p in !paths.contains { $0 != p && PathUtil.isWithin(p, $0) } }
+        func nonNested(_ list: [String]) -> [String] {
+            let paths = Set(list.map { PathUtil.standardize(expand($0, home: home)) }).sorted()
+            return paths.filter { p in !paths.contains { $0 != p && PathUtil.isWithin(p, $0) } }
+        }
+        var roots = wholeDisk ? ["/"] : nonNested(folders)
+        let rules = ExclusionRules(self, home: home)
+        for extra in nonNested(extraFolders) where !roots.contains(where: { rules.reaches(extra, from: $0) }) {
+            roots.removeAll { PathUtil.isWithin($0, extra) }
+            roots.append(extra)
+        }
+        return roots.sorted()
     }
 
     /// Changes whenever the set of indexed entries could change; stored with the catalog.
@@ -82,13 +96,16 @@ public struct ExclusionRules: Sendable {
     /// `path` is the child's absolute path, `nameKey` its folded name.
     /// `ignoringPrefixes`: for a folder chosen by absolute path, which outranks a rule that
     /// excludes that location as such; name, extension and hidden rules still apply inside.
-    public func excludes(path: String, nameKey: [UInt8], isDirectory: Bool, isHidden: Bool, ignoringPrefixes: Bool = false) -> Bool {
+    /// `root`: the scan root the path is under; a path rule covering the root itself (an extra
+    /// folder inside ~/Library) is outranked there, rules for places inside it still apply.
+    public func excludes(path: String, nameKey: [UInt8], isDirectory: Bool, isHidden: Bool, ignoringPrefixes: Bool = false,
+                         root: String? = nil) -> Bool {
         if isHidden && !includeHidden { return true }
         var segmentKeys: [[UInt8]]?
         for rule in rules {
             switch rule {
             case .prefix(let p):
-                if !ignoringPrefixes && PathUtil.isWithin(path, p) { return true }
+                if !ignoringPrefixes && PathUtil.isWithin(path, p) && !(root.map { PathUtil.isWithin($0, p) } ?? false) { return true }
             case .component(let c):
                 if nameKey == c { return true }
             case .ext(let e):
@@ -99,6 +116,21 @@ public struct ExclusionRules: Sendable {
             }
         }
         return false
+    }
+
+    /// Whether a scan of `root` reaches `path`: inside it, and no directory on the way (the path
+    /// itself included) is excluded. Hidden means a leading dot here, as for event paths.
+    public func reaches(_ path: String, from root: String) -> Bool {
+        guard PathUtil.isWithin(path, root) else { return false }
+        var current = root
+        let rest = root == "/" ? Substring(path.dropFirst()) : path.dropFirst(root.count + 1)
+        for component in rest.split(separator: "/") {
+            current = (current == "/" ? "" : current) + "/" + component
+            if excludes(path: current, nameKey: NameKey.bytes(String(component)), isDirectory: true, isHidden: component.hasPrefix("."), root: root) {
+                return false
+            }
+        }
+        return true
     }
 }
 
@@ -134,7 +166,7 @@ func segmentMatch(_ p: ArraySlice<UInt8>, _ s: ArraySlice<UInt8>) -> Bool {
 
 // Field-by-field with defaults (see QuerySyntax): upgrades keep the user's scope.
 extension NameScope {
-    private enum CodingKeys: String, CodingKey { case wholeDisk, folders, excludes, includeHidden, includePackageContents }
+    private enum CodingKeys: String, CodingKey { case wholeDisk, folders, excludes, includeHidden, includePackageContents, extraFolders }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -143,6 +175,7 @@ extension NameScope {
                   folders: try c.decodeIfPresent([String].self, forKey: .folders) ?? d.folders,
                   excludes: try c.decodeIfPresent([String].self, forKey: .excludes) ?? d.excludes,
                   includeHidden: try c.decodeIfPresent(Bool.self, forKey: .includeHidden) ?? d.includeHidden,
-                  includePackageContents: try c.decodeIfPresent(Bool.self, forKey: .includePackageContents) ?? d.includePackageContents)
+                  includePackageContents: try c.decodeIfPresent(Bool.self, forKey: .includePackageContents) ?? d.includePackageContents,
+                  extraFolders: try c.decodeIfPresent([String].self, forKey: .extraFolders) ?? d.extraFolders)
     }
 }

@@ -104,6 +104,22 @@ final class SettingsModel: ObservableObject {
         commitScope()
     }
 
+    func addExtraFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.showsHiddenFiles = true
+        panel.prompt = "添加"
+        guard panel.runModal() == .OK else { return }
+        let home = NSHomeDirectory()
+        for url in panel.urls {
+            let p = PathUtil.abbreviate(url.path, home: home)
+            if !scope.extraFolders.contains(p) { scope.extraFolders.append(p) }
+        }
+        commitScope()
+    }
+
     func setLaunchAtLogin(_ on: Bool) {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -382,6 +398,30 @@ struct ScopePane: View {
                     }
                     if model.scope.folders.isEmpty { Text("还没有文件夹。").font(.system(size: 12)).foregroundStyle(.secondary) }
                     Button("＋ 添加") { model.addFolders() }.buttonStyle(.borderless)
+                }
+            }
+            // Specified folders already take any folder; the list stays visible while it has entries.
+            if model.scope.wholeDisk || !model.scope.extraFolders.isEmpty {
+                Divider()
+                Text("额外包含的文件夹").font(.system(size: 13, weight: .medium))
+                Text(verbatim: "被排除规则挡住、但仍想按名称搜到的文件夹，例如 ~/Library 里的微信文件。外层的排除规则对它不起作用，它里面的其他排除规则照常生效。")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(model.scope.extraFolders, id: \.self) { folder in
+                        HStack {
+                            Image(systemName: "folder")
+                            Text(folder).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Button("移除") {
+                                model.scope.extraFolders.removeAll { $0 == folder }
+                                model.commitScope()
+                            }
+                            .foregroundStyle(.red)
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    if model.scope.extraFolders.isEmpty { Text("没有。").font(.system(size: 12)).foregroundStyle(.secondary) }
+                    Button("＋ 添加") { model.addExtraFolders() }.buttonStyle(.borderless)
                 }
             }
             Divider()

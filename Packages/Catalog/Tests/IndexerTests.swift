@@ -630,6 +630,50 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     #expect(nameHits(p.names, "new.txt").isEmpty)
 }
 
+@Test func extraFolderOutranksTheRuleThatExcludesItsLocation() throws {
+    let p = try Pipeline("extra-folder")
+    defer { p.stop() }
+    try p.box.write("names/plain.txt", "x")
+    try p.box.write("names/secret/elsewhere.txt", "x")
+    try p.box.write("names/secret/chosen/in-chosen.txt", "x")
+    try p.box.write("names/secret/chosen/sub/in-sub.txt", "x")
+    try p.box.write("names/secret/chosen/node_modules/in-modules.txt", "x")
+    try p.box.write("names/secret/chosen/.hidden/in-hidden.txt", "x")
+    try p.box.write("names/secret/chosen/skip/in-skip.txt", "x")
+    var scope = splitScopes(p.box, excludes: [p.box.p("names/secret"), "node_modules", p.box.p("names/secret/chosen/skip")])
+    scope.extraFolders = [p.box.p("names/secret/chosen")]
+    p.names.start(scope: scope, content: nil)
+    #expect(p.names.waitUntilIdle())
+    #expect(nameHits(p.names, "in-") == ["in-chosen.txt", "in-sub.txt"], "inside: rules for places, names and hidden items still apply")
+    #expect(nameHits(p.names, "elsewhere").isEmpty && nameHits(p.names, "secret").isEmpty, "the excluded location itself stays out")
+    #expect(nameHits(p.names, "plain") == ["plain.txt"])
+    let listed = p.names.search(NameQuery.parse("chosen", home: "/nonexistent-home"), limit: 100).hits.filter { $0.name == "chosen" }
+    #expect(listed.count == 1, "listed once")
+    // Changes there arrive like anywhere else.
+    try p.box.write("names/secret/chosen/sub/in-later.txt", "x")
+    #expect(p.until { nameHits(p.names, "in-later") == ["in-later.txt"] })
+    // Removing it takes its files out again.
+    scope.extraFolders = []
+    p.names.setScope(scope)
+    #expect(p.names.waitUntilIdle())
+    #expect(nameHits(p.names, "in-").isEmpty)
+    #expect(nameHits(p.names, "plain") == ["plain.txt"])
+}
+
+@Test func chosenFolderInsideAnExcludedLocationIsIndexed() throws {
+    let p = try Pipeline("chosen-in-excluded")
+    defer { p.stop() }
+    try p.box.write("names/plain.txt", "x")
+    try p.box.write("other/inner/deep/in-inner.txt", "x")
+    try p.box.write("other/outside.txt", "x")
+    var scope = splitScopes(p.box, excludes: [p.box.p("other")])
+    scope.folders.append(p.box.p("other/inner"))
+    p.names.start(scope: scope, content: nil)
+    #expect(p.names.waitUntilIdle())
+    #expect(nameHits(p.names, "in-inner") == ["in-inner.txt"], "a chosen folder outranks the rule for its location")
+    #expect(nameHits(p.names, "outside").isEmpty)
+}
+
 @Test func movingBetweenScopesFollowsTheNewPlace() throws {
     let p = try Pipeline("r09-move")
     defer { p.stop() }

@@ -60,6 +60,30 @@ import Testing
     #expect(folders.roots(home: "/h") == ["/h/a", "/x"])
 }
 
+@Test func extraFoldersBecomeRootsOnlyWhereTheScanDoesNotReach() {
+    var scope = NameScope(wholeDisk: true, folders: [], excludes: ["~/Library", "node_modules", "/Users/t/Library/W/files/old"],
+                          includeHidden: false, includePackageContents: false,
+                          extraFolders: ["~/Library/W/files", "~/Documents/already", "~/code/node_modules/x"])
+    #expect(scope.roots(home: "/Users/t") == ["/", "/Users/t/Library/W/files", "/Users/t/code/node_modules/x"],
+            "a folder the whole-disk scan reaches is not scanned twice")
+    let rules = ExclusionRules(scope, home: "/Users/t")
+    let root = "/Users/t/Library/W/files"
+    func ex(_ path: String, root: String?) -> Bool {
+        rules.excludes(path: path, nameKey: NameKey.bytes(String(path.split(separator: "/").last!)), isDirectory: true, isHidden: false, root: root)
+    }
+    #expect(!ex(root + "/2025-04", root: root), "~/Library is outranked inside the extra folder")
+    #expect(ex(root + "/old", root: root), "a rule for a place inside it still applies")
+    #expect(ex(root + "/a/node_modules", root: root), "name rules still apply")
+    #expect(ex("/Users/t/Library/Caches", root: "/"), "elsewhere ~/Library stays excluded")
+    #expect(rules.reaches(root + "/2025-04", from: root))
+    #expect(!rules.reaches(root, from: "/"))
+    // Specified folders: an extra folder inside one of them is scanned with it.
+    scope.wholeDisk = false
+    scope.folders = ["~/Library/W"]
+    scope.extraFolders = ["~/Library/W/files/new"]
+    #expect(scope.roots(home: "/Users/t") == ["/Users/t/Library/W"])
+}
+
 @Test func kindsAndExtensions() {
     #expect(FileKind.parse("文件夹") == .folder)
     #expect(FileKind.parse("WORD") == .word)

@@ -204,15 +204,13 @@ final class Reconciler {
     /// Below a name root with no component excluded. Components count as directories, so
     /// extension rules (files only) never drop an event that might concern a directory.
     func isInNameScope(_ path: String) -> Bool {
-        guard let root = ctx.nameRoots.filter({ PathUtil.isWithin(path, $0) }).max(by: { $0.count < $1.count }) else { return false }
-        var current = root
-        let rest = root == "/" ? Substring(path.dropFirst()) : path.dropFirst(root.count + 1)
-        for component in rest.split(separator: "/") {
-            current = (current == "/" ? "" : current) + "/" + component
-            if ctx.rules.excludes(path: current, nameKey: NameKey.bytes(String(component)), isDirectory: true,
-                                  isHidden: component.hasPrefix(".")) { return false }
-        }
-        return true
+        guard let root = nameRoot(of: path) else { return false }
+        return ctx.rules.reaches(path, from: root)
+    }
+
+    /// The innermost name root holding `path` (an extra folder inside "/" outranks it).
+    private func nameRoot(of path: String) -> String? {
+        ctx.nameRoots.filter { PathUtil.isWithin(path, $0) }.max { $0.count < $1.count }
     }
 
     /// The content scope needs this path: on the way to a root, or inside one with no component
@@ -236,6 +234,9 @@ final class Reconciler {
     /// Decides one listed entry: in the name scope, kept for the content scope only, or dropped
     /// (nil). `parent` is the directory it was listed in.
     private func classify(_ e: DiskEntry, path: String, parent: Row) -> DiskEntry? {
+        // A root is its own subtree, never also a child of the root around it ("/" around an
+        // extra folder that a rule otherwise outranked only for itself).
+        if ctx.roots.contains(path) { return nil }
         // Below a content-only directory the name rules were not walked yet.
         let inName = parent.flags.contains(.contentOnly) ? isInNameScope(path) && !excluded(path, e) : !excluded(path, e)
         if inName { return e }
@@ -291,7 +292,8 @@ final class Reconciler {
     private func childPath(_ parent: String, _ name: String) -> String { (parent == "/" ? "" : parent) + "/" + name }
 
     private func excluded(_ path: String, _ e: DiskEntry) -> Bool {
-        ctx.rules.excludes(path: path, nameKey: NameKey.bytes(e.name), isDirectory: e.isDirectory, isHidden: e.hidden)
+        ctx.rules.excludes(path: path, nameKey: NameKey.bytes(e.name), isDirectory: e.isDirectory, isHidden: e.hidden,
+                           root: nameRoot(of: (path as NSString).deletingLastPathComponent))
     }
 
     private func descends(_ e: DiskEntry) -> Bool {
