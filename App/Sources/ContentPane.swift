@@ -146,6 +146,12 @@ final class AnchorRuler: NSRulerView {
     }
     override var isOpaque: Bool { false }
 
+    /// Labels never reach past the gutter (views do not clip their drawing by default).
+    override var clipsToBounds: Bool {
+        get { true }
+        set {}
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let tv = clientView as? NSTextView, let lm = tv.layoutManager, let tc = tv.textContainer, !anchors.isEmpty else { return }
         let visible = tv.visibleRect
@@ -154,7 +160,12 @@ final class AnchorRuler: NSRulerView {
         // First anchor at or after the visible start (binary search).
         var lo = 0, hi = anchors.count
         while lo < hi { let m = (lo + hi) / 2; if anchors[m].utf16 < chars.location { lo = m + 1 } else { hi = m } }
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.tertiaryLabelColor]
+        // Right-aligned; a label wider than the gutter loses its start ("…划!A4" keeps the cell).
+        let style = NSMutableParagraphStyle()
+        style.alignment = .right
+        style.lineBreakMode = .byTruncatingHead
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style]
+        let width = ruleThickness - 12
         var lastY = -CGFloat.infinity
         for a in anchors[lo...] where a.utf16 <= NSMaxRange(chars) {
             let g = lm.glyphIndexForCharacter(at: min(a.utf16, max(0, (tv.string as NSString).length - 1)))
@@ -163,8 +174,7 @@ final class AnchorRuler: NSRulerView {
             let y = convert(NSPoint(x: 0, y: line.minY), from: tv).y
             if y - lastY < 14 { continue }  // don't overlap labels of short paragraphs
             lastY = y
-            let size = a.label.size(withAttributes: attrs)
-            a.label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: y + 6), withAttributes: attrs)
+            a.label.draw(with: NSRect(x: 4, y: y + 6, width: width, height: 15), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
         }
     }
 }
