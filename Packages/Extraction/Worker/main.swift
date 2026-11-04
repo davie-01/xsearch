@@ -1,6 +1,7 @@
 // xs-extract: the extraction worker process. Reads framed requests on stdin, extracts one file
 // at a time, writes framed responses on stdout. Holds no state between requests, so the
 // supervisor can SIGKILL and restart it at any moment.
+import ContentEngine
 import Extraction
 import Foundation
 
@@ -44,7 +45,11 @@ while let data = Framing.read(from: STDIN_FILENO) {
     }
     var response = WorkerResponse(id: request.id, result: nil, error: nil)
     do {
-        response.result = try autoreleasepool { try Extractor.extract(path: request.path, limits: request.limits) }
+        if let m = request.member {
+            response.memberPath = try extractArchiveMember(path: request.path, member: m.member, dest: m.dest, maxMemberBytes: m.maxBytes)
+        } else {
+            response.result = try autoreleasepool { try Extractor.extract(path: request.path, limits: request.limits) }
+        }
     } catch {
         response.error = "\(error)"
     }

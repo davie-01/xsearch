@@ -10,12 +10,22 @@ public struct WorkerRequest: Codable, Sendable {
     /// Fault injection for tests ("hang", "crash", "hog"); honoured only when the worker runs with
     /// XS_EXTRACT_FAULTS=1.
     public var fault: String?
+    /// Set: unpack this archive member into `dest` instead of extracting text (opening a
+    /// member from the results, outside the app's own process).
+    public var member: MemberRequest?
 
-    public init(id: UInt64, path: String, limits: ExtractionLimits, fault: String? = nil) {
+    public struct MemberRequest: Codable, Sendable {
+        public var member: String
+        public var dest: String
+        public var maxBytes: UInt64
+    }
+
+    public init(id: UInt64, path: String, limits: ExtractionLimits, fault: String? = nil, member: MemberRequest? = nil) {
         self.id = id
         self.path = path
         self.limits = limits
         self.fault = fault
+        self.member = member
     }
 }
 
@@ -23,11 +33,14 @@ public struct WorkerResponse: Codable, Sendable {
     public var id: UInt64
     public var result: ExtractionResult?
     public var error: String?
+    /// The unpacked member's path (member requests).
+    public var memberPath: String?
 
-    public init(id: UInt64, result: ExtractionResult? = nil, error: String? = nil) {
+    public init(id: UInt64, result: ExtractionResult? = nil, error: String? = nil, memberPath: String? = nil) {
         self.id = id
         self.result = result
         self.error = error
+        self.memberPath = memberPath
     }
 }
 
@@ -193,19 +206,53 @@ public final class ExtractionWorker: @unchecked Sendable {
 
     /// One file at a time per worker; callers run several workers for parallelism.
     public func extract(path: String, limits: ExtractionLimits, timeout: TimeInterval, fault: String? = nil) -> Outcome {
+        switch perform(WorkerRequest(id: 0, path: path, limits: limits, fault: fault), timeout: timeout) {
+        case .reply(let response):
+            if let r = response.result { return .extracted(r) }
+            return .failed(response.error ?? "未知错误")
+        case .failed(let outcome): return outcome
+        }
+    }
+
+    public enum MemberOutcome: Sendable, Equatable {
+        case unpacked(path: String)
+        /// The worker did not finish it (timed out, too much memory, crashed, cancelled, failed).
+        case notUnpacked(Outcome)
+    }
+
+    /// Unpacks one archive member into `dest` in the worker process, under the same time and
+    /// memory watch as an extraction: a damaged or hostile archive costs that process only.
+    public func extractMember(path: String, member: String, dest: String, maxBytes: UInt64, timeout: TimeInterval) -> MemberOutcome {
+        let request = WorkerRequest(id: 0, path: path, limits: ExtractionLimits(), member: .init(member: member, dest: dest, maxBytes: maxBytes))
+        switch perform(request, timeout: timeout) {
+        case .reply(let response):
+            if let p = response.memberPath { return .unpacked(path: p) }
+            return .notUnpacked(.failed(response.error ?? "未知错误"))
+        case .failed(let outcome): return .notUnpacked(outcome)
+        }
+    }
+
+    private enum Exchange {
+        case reply(WorkerResponse)
+        case failed(Outcome)
+    }
+
+    /// One request and its reply under the timeout and memory watch.
+    private func perform(_ template: WorkerRequest, timeout: TimeInterval) -> Exchange {
         lock.lock()
         defer { lock.unlock() }
-        if cancelLock.withLock({ cancelled }) { return .cancelled }
-        do { try ensureRunning() } catch { return .failed("提取进程无法启动：\(error)") }
-        guard let toWorker, let fromWorker, let p = process else { return .crashed }
-        guard beginRequest(p.processIdentifier) else { return .cancelled }
+        if cancelLock.withLock({ cancelled }) { return .failed(.cancelled) }
+        do { try ensureRunning() } catch { return .failed(.failed("提取进程无法启动：\(error)")) }
+        guard let toWorker, let fromWorker, let p = process else { return .failed(.crashed) }
+        guard beginRequest(p.processIdentifier) else { return .failed(.cancelled) }
         let id = nextId
         nextId += 1
-        let request = WorkerRequest(id: id, path: path, limits: limits, fault: fault)
+        var request = template
+        request.id = id
         guard let data = try? JSONEncoder().encode(request), Framing.write(data, to: toWorker.fileDescriptor) else {
             let wasCancelled = endRequest()
             stop()
-            return wasCancelled ? .cancelled : .crashed
+            return .failed(wasCancelled ? .cancelled : .crashed)
         }
         // Read on another thread so the timeout can fire while the worker is stuck.
         let done = DispatchSemaphore(value: 0)
@@ -229,14 +276,13 @@ public final class ExtractionWorker: @unchecked Sendable {
             Self.awaitExit(p)
             done.wait()  // the read returns once the pipe closes
             stop()
-            return overLimit ? .tooMuchMemory : .timedOut
+            return .failed(overLimit ? .tooMuchMemory : .timedOut)
         }
         let wasCancelled = endRequest()
         guard let reply, let response = try? JSONDecoder().decode(WorkerResponse.self, from: reply), response.id == id else {
             stop()
-            return wasCancelled ? .cancelled : .crashed
+            return .failed(wasCancelled ? .cancelled : .crashed)
         }
-        if let r = response.result { return .extracted(r) }
-        return .failed(response.error ?? "未知错误")
+        return .reply(response)
     }
 }

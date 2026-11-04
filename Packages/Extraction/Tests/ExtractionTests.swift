@@ -248,3 +248,28 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(!FileManager.default.fileExists(atPath: old.path))
     #expect(FileManager.default.fileExists(atPath: fresh.path))
 }
+
+/// Opening an archive member unpacks it in the worker process, not in the caller.
+@Test func workerUnpacksOneArchiveMember() throws {
+    let dir = tmp("member-zip-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(atPath: dir + "/docs", withIntermediateDirectories: true)
+    try "成员 内容".write(toFile: dir + "/docs/note.txt", atomically: true, encoding: .utf8)
+    let zip = Process()
+    zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+    zip.currentDirectoryURL = URL(fileURLWithPath: dir)
+    zip.arguments = ["-qr", "pack.zip", "docs"]
+    try zip.run()
+    zip.waitUntilExit()
+    let worker = ExtractionWorker(executable: workerURL)
+    defer { worker.stop() }
+    let dest = dir + "/out"
+    try FileManager.default.createDirectory(atPath: dest, withIntermediateDirectories: true)
+    guard case .unpacked(let file) = worker.extractMember(path: dir + "/pack.zip", member: "docs/note.txt", dest: dest, maxBytes: 1 << 20, timeout: 10) else {
+        Issue.record("not unpacked"); return
+    }
+    #expect(try String(contentsOfFile: file, encoding: .utf8) == "成员 内容")
+    #expect(file.hasPrefix(dest))
+    guard case .notUnpacked(.failed) = worker.extractMember(path: dir + "/pack.zip", member: "docs/missing.txt", dest: dest, maxBytes: 1 << 20, timeout: 10) else {
+        Issue.record("missing member should fail"); return
+    }
+}

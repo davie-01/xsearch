@@ -1,5 +1,6 @@
 import AppKit
 import ContentEngine
+import Extraction
 import UniformTypeIdentifiers
 import XSearchCore
 
@@ -31,23 +32,47 @@ extension ContentHit {
 enum MemberOpener {
     private static let queue = DispatchQueue(label: "xsearch.member-open", qos: .userInitiated)
 
-    /// Unpacks the member to a private temporary folder (up to 512 MB: off the main thread) and
-    /// opens it with its default app. `done` gets a message when that fails.
+    /// Unpacking runs in the extraction worker, not in the app: a damaged archive (or a solid
+    /// 7z read up to a late member) costs that process, which is killed past its time or memory.
+    /// Started for each open and stopped after it, so nothing stays running in between.
+    nonisolated private static let worker: ExtractionWorker = {
+        let w = ExtractionWorker(executable: Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("xs-extract"))
+        w.memoryLimit = 1 << 30
+        return w
+    }()
+
+    /// Unpacks the member to a private temporary folder (up to 512 MB) and opens it with its
+    /// default app. `done` gets a message when that fails.
     static func open(_ hit: ContentHit, done: @escaping @MainActor @Sendable (String?) -> Void = { _ in }) {
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent("XSearch-open/\(UUID().uuidString)", isDirectory: true)
         let path = hit.path, member = hit.member, name = hit.displayName
         queue.async {
+            let reason: String
             do {
                 try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-                let file = try extractArchiveMember(path: path, member: member, dest: dest.path, maxMemberBytes: 512 << 20)
-                DispatchQueue.main.async {
-                    NSWorkspace.shared.openInBackground(URL(fileURLWithPath: file))
-                    done(nil)
+                // As for indexing: 30 s plus 2 s per MB of archive, at most 5 minutes.
+                let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? UInt64) ?? 0
+                let timeout = min(300, 30 + 2 * Double(size >> 20))
+                let outcome = worker.extractMember(path: path, member: member, dest: dest.path, maxBytes: 512 << 20, timeout: timeout)
+                worker.stop()
+                switch outcome {
+                case .unpacked(let file):
+                    DispatchQueue.main.async {
+                        NSWorkspace.shared.openInBackground(URL(fileURLWithPath: file))
+                        done(nil)
+                    }
+                    return
+                case .notUnpacked(.timedOut): reason = L("解压超时，已停止")
+                case .notUnpacked(.tooMuchMemory): reason = L("解压占用内存过多，已停止")
+                case .notUnpacked(.failed(let message)): reason = message
+                case .notUnpacked: reason = L("解压进程意外结束")
                 }
             } catch {
-                let message = L("无法从压缩包中取出“%@”：%@", "\(name)", "\(error)")
-                DispatchQueue.main.async { done(message) }
+                reason = "\(error)"
             }
+            try? FileManager.default.removeItem(at: dest)
+            let message = L("无法从压缩包中取出“%@”：%@", "\(name)", reason)
+            DispatchQueue.main.async { done(message) }
         }
     }
 
