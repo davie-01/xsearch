@@ -108,18 +108,30 @@ final class IndexServiceClient {
     }
 
     private var startAttempts = 0
+    private var startRetry: DispatchWorkItem?
 
     /// A start can fail transiently (e.g. while the catalog is being rebuilt after a
-    /// downgrade): retried every 3 s, up to 5 times.
+    /// downgrade): retried every 3 s, up to 5 times. Replies and retries belong to their
+    /// connection's generation: once stopping (to delete the index) or replaced, a late one
+    /// must not start the writer again.
     private func startRemote() {
+        guard !stopping else { return }
+        let gen = generation
         proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2, maxFileBytes: maxFileBytes) { [weak self] error in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.stopping, gen == self.generation else { return }
                 if let error {
                     self.onError?(error)
                     self.startAttempts += 1
                     if self.startAttempts < 5 {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.startRemote() }
+                        let retry = DispatchWorkItem { [weak self] in
+                            MainActor.assumeIsolated {
+                                guard let self, !self.stopping, gen == self.generation else { return }
+                                self.startRemote()
+                            }
+                        }
+                        self.startRetry = retry
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: retry)
                     }
                 } else {
                     self.startAttempts = 0
@@ -138,10 +150,12 @@ final class IndexServiceClient {
             onUpdate?()
             return
         }
+        let gen = generation
         proxy?.snapshot { [weak self] data in
             guard let snap = try? JSONDecoder().decode(IndexServiceSnapshot.self, from: data) else { return }
             Task { @MainActor in
-                guard let self else { return }
+                // A reply from before a stop or reconnect must not bring back an old path.
+                guard let self, !self.stopping, gen == self.generation else { return }
                 self.snapshot = snap
                 self.setPath(snap.indexPath)
                 self.onUpdate?()
@@ -176,6 +190,8 @@ final class IndexServiceClient {
     func stopAndConfirm(timeout: TimeInterval = 20, done: @escaping @MainActor @Sendable (Bool) -> Void) {
         stopping = true
         generation += 1
+        startRetry?.cancel()
+        startRetry = nil
         if let local {
             local.stop()
             self.local = nil
@@ -214,6 +230,8 @@ final class IndexServiceClient {
     func stop() {
         stopping = true
         generation += 1
+        startRetry?.cancel()
+        startRetry = nil
         if let local { local.stop(); self.local = nil; return }
         guard let c = connection else { return }
         let done = DispatchSemaphore(value: 0)
