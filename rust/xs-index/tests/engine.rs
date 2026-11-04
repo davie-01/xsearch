@@ -608,3 +608,40 @@ fn size_and_time_filters_apply_to_candidates() {
     assert_eq!(ids(Some((100, 1000)), Some((0, 500))), [2]);
     assert_eq!(reader.recall_of(&parse(r"regex:\d{2}").unwrap()), Recall::Scan);
 }
+
+/// Measurement, not run by default (`-- --ignored --nocapture`): how long creating a session takes on a large index,
+/// and how long one big document holds `next` without a cancel check.
+#[test]
+#[ignore]
+fn session_creation_and_big_document_cost() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "bench").unwrap();
+    let words = ["项目", "合同", "验收", "report", "alpha", "beta", "数据", "系统", "试运行", "gamma"];
+    let n = 200_000u64;
+    for id in 1..=n {
+        let i = id as usize;
+        let text: String = (0..40).map(|k| words[(i * 7 + k * 3) % words.len()]).collect::<Vec<_>>().join(" ");
+        w.put(&doc(id, &text)).unwrap();
+        if id % 50_000 == 0 { w.commit(id).unwrap(); }
+    }
+    let big: String = "项目 验收 数据 ".repeat(4_000_000); // ~ 70 MB of text
+    w.put(&doc(n + 1, &big)).unwrap();
+    w.commit(n + 1).unwrap();
+    drop(w);
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    for q in ["a", "的", "-合同", "项目"] {
+        let t = std::time::Instant::now();
+        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
+        let created = t.elapsed();
+        let cancel = AtomicBool::new(false);
+        let t = std::time::Instant::now();
+        let b = s.next(Duration::from_millis(60), 40, &cancel).unwrap();
+        println!("q={q} candidates={} create_ms={} first_next_ms={} hits={}", s.candidates(), created.as_millis(), t.elapsed().as_millis(), b.hits.len());
+    }
+    // The big document alone: one verification step, no cancel check inside it.
+    let mut s = reader.session(SearchRequest { expr: parse("验收").unwrap(), mode: Mode::Loose, dirs: vec!["/Work/A".into()], exts: vec![], scopes: vec![], size: Some((50_000_000, i64::MAX)), mtime: None }).unwrap();
+    let cancel = AtomicBool::new(false);
+    let t = std::time::Instant::now();
+    let b = s.next(Duration::from_millis(1), 1, &cancel).unwrap();
+    println!("big doc candidates={} one_step_ms={} hits={}", s.candidates(), t.elapsed().as_millis(), b.hits.len());
+}
