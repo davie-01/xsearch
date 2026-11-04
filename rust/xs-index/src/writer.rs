@@ -145,6 +145,35 @@ impl ContentWriter {
         Ok(out)
     }
 
+    /// Files whose committed document is a tombstone.
+    pub fn tombstone_file_ids(&self) -> Result<Vec<u64>> {
+        let searcher = self.reader.searcher();
+        let mut out = vec![];
+        for seg in searcher.segment_readers() {
+            let ids = seg.fast_fields().u64("file_id")?;
+            let live = seg.fast_fields().u64("live")?;
+            for doc in seg.doc_ids_alive() {
+                if live.first(doc) == Some(0) {
+                    out.extend(ids.first(doc));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Stages dropping the tombstones of these files; a file that has a live document is left
+    /// alone. The caller decides which fences are no longer needed, and commits. Returns how
+    /// many were dropped.
+    pub fn drop_tombstones(&mut self, file_ids: &[u64]) -> Result<usize> {
+        let live: std::collections::HashSet<u64> = self.live_file_ids()?.into_iter().collect();
+        let mut dropped = 0;
+        for id in file_ids.iter().filter(|id| !live.contains(id)) {
+            self.writer.delete_term(Term::from_field_u64(self.f.file_id, *id));
+            dropped += 1;
+        }
+        Ok(dropped)
+    }
+
     /// Files with a live document (tombstones excluded): finds documents the catalog forgot.
     pub fn live_file_ids(&self) -> Result<Vec<u64>> {
         let searcher = self.reader.searcher();

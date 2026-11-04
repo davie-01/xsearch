@@ -485,6 +485,17 @@ impl ContentIndexWriter {
         self.with(|w| w.live_file_ids())
     }
 
+    /// Files whose committed document is a tombstone.
+    pub fn tombstone_file_ids(&self) -> Result<Vec<u64>, EngineError> {
+        self.with(|w| w.tombstone_file_ids())
+    }
+
+    /// Stages dropping these files' tombstones (files with a live document are skipped); the
+    /// caller commits. Returns how many were dropped.
+    pub fn drop_tombstones(&self, file_ids: Vec<u64>) -> Result<u64, EngineError> {
+        self.with(|w| Ok(w.drop_tombstones(&file_ids)? as u64))
+    }
+
     /// Committed document with this extraction cache key, for reuse without re-extracting.
     pub fn find_by_extract_key(&self, key: String) -> Result<Option<ContentDocument>, EngineError> {
         self.with(|w| {

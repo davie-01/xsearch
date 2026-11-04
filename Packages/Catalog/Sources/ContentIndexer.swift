@@ -170,6 +170,7 @@ public final class ContentIndexer: @unchecked Sendable {
             try recover()
             removeUnknownInstances()
             try removeOrphanDocuments()
+            try reclaimTombstones()
             try applyLimits()
             try reindexUpgradedExtractors()
             workers.forEach { $0.resume() }
@@ -330,6 +331,35 @@ public final class ContentIndexer: @unchecked Sendable {
             try catalog.setMeta("content_orphans_checked", "1")
         }
     }
+
+    /// Tombstones the index no longer needs (at startup). A tombstone keeps an old result for
+    /// its file from overwriting a newer state (§9.3), which matters only while the file id can
+    /// still get a result: while the catalog has its row. A deleted row stays as a catalog
+    /// tombstone until no task refers to it, and ids are never handed out again
+    /// (FileCatalog.purgeTombstones), so once the row is gone no task, retry or batch can bring
+    /// that id back, and its fence can go. Rebuilding the catalog starts a new content index.
+    private func reclaimTombstones() throws {
+        guard let catalog, let writer, rebuildId == nil,
+              try catalog.meta("content_batch_pending") == nil else { return }
+        let ids = try writer.tombstoneFileIds()
+        guard !ids.isEmpty else { return }
+        let row = try catalog.db.prepare("SELECT 1 FROM files WHERE id = ?")
+        let task = try catalog.db.prepare("SELECT 1 FROM content_tasks WHERE file_id = ? LIMIT 1")
+        var gone: [UInt64] = []
+        for fid in ids {
+            let id = Int64(fid)
+            if try row.bind(id).first({ _ in true }) == nil, try task.bind(id).first({ _ in true }) == nil { gone.append(fid) }
+        }
+        guard !gone.isEmpty else { return }
+        let dropped = try writer.dropTombstones(fileIds: gone)
+        // Same batch id: nothing new for the batch protocol to confirm.
+        try writer.commit(batchId: lastBatch)
+        committedSeq = try writer.appliedSeqs()
+        lock.withLock { tombstonesDropped += Int(dropped) }
+    }
+
+    /// Tombstones dropped since start (tests, diagnostics).
+    private(set) var tombstonesDropped = 0
 
     // MARK: Versions and rebuild
 

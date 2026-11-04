@@ -855,3 +855,37 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     #expect(fired <= 6, "\(fired) wake-ups in 3 s")
     #expect(p.indexer.status.pending == 1 && p.indexer.status.failed == 0)
 }
+
+/// A content tombstone goes only once the catalog has no row for its file id (and so no task
+/// can bring the id back); before that it stays, and the rest of the index is untouched.
+@Test func tombstonesAreReclaimedOnlyWithoutACatalogRow() throws {
+    let p = try Pipeline("reclaim")
+    defer { p.stop() }
+    try p.box.write("docs/keep.txt", "保留 xi7")
+    try p.box.write("docs/gone.txt", "删除 omicron7")
+    try p.box.write("docs/held.txt", "等待 pi7")
+    try p.start()
+    #expect(p.settle())
+    try p.box.rm("docs/gone.txt")
+    try p.box.rm("docs/held.txt")
+    #expect(p.until { try p.search("omicron7").isEmpty && p.search("pi7").isEmpty })
+    let c = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    func id(_ name: String) throws -> Int64 { try c.db.prepare("SELECT id FROM files WHERE name = ?").bind(name).first { $0.int(0) }! }
+    let gone = try id("gone.txt"), held = try id("held.txt")
+
+    // Catalog rows still there: both tombstones stay.
+    try p.restartIndexer()
+    #expect(p.indexer.tombstonesDropped == 0)
+
+    // The catalog purged gone.txt's row; held.txt's row too, but a task still refers to it.
+    try c.db.exec("DELETE FROM files WHERE id = \(gone)")
+    try c.db.exec("DELETE FROM files WHERE id = \(held)")
+    try c.enqueue(held, opSeq: 999_999, kind: .delete, priority: 0)
+    try p.restartIndexer()
+    #expect(p.indexer.tombstonesDropped == 1)
+    #expect(p.settle())
+    #expect(try p.search("xi7") == ["keep.txt"])
+    // A new file is indexed as before.
+    try p.box.write("docs/new.txt", "新增 rho7")
+    #expect(p.until { try p.search("rho7") == ["new.txt"] })
+}

@@ -743,6 +743,12 @@ public protocol ContentIndexWriterProtocol: AnyObject, Sendable {
     func commit(batchId: UInt64) throws 
     
     /**
+     * Stages dropping these files' tombstones (files with a live document are skipped); the
+     * caller commits. Returns how many were dropped.
+     */
+    func dropTombstones(fileIds: [UInt64]) throws  -> UInt64
+    
+    /**
      * Committed document with this extraction cache key, for reuse without re-extracting.
      */
     func findByExtractKey(key: String) throws  -> ContentDocument?
@@ -763,6 +769,11 @@ public protocol ContentIndexWriterProtocol: AnyObject, Sendable {
     func remove(fileId: UInt64, opSeq: UInt64) throws 
     
     func rollback() throws 
+    
+    /**
+     * Files whose committed document is a tombstone.
+     */
+    func tombstoneFileIds() throws  -> [UInt64]
     
 }
 /**
@@ -844,6 +855,18 @@ open func commit(batchId: UInt64)throws   {try rustCallWithError(FfiConverterTyp
 }
     
     /**
+     * Stages dropping these files' tombstones (files with a live document are skipped); the
+     * caller commits. Returns how many were dropped.
+     */
+open func dropTombstones(fileIds: [UInt64])throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_method_contentindexwriter_drop_tombstones(self.uniffiClonePointer(),
+        FfiConverterSequenceUInt64.lower(fileIds),$0
+    )
+})
+}
+    
+    /**
      * Committed document with this extraction cache key, for reuse without re-extracting.
      */
 open func findByExtractKey(key: String)throws  -> ContentDocument?  {
@@ -903,6 +926,16 @@ open func rollback()throws   {try rustCallWithError(FfiConverterTypeEngineError_
     uniffi_xs_ffi_fn_method_contentindexwriter_rollback(self.uniffiClonePointer(),$0
     )
 }
+}
+    
+    /**
+     * Files whose committed document is a tombstone.
+     */
+open func tombstoneFileIds()throws  -> [UInt64]  {
+    return try  FfiConverterSequenceUInt64.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_method_contentindexwriter_tombstone_file_ids(self.uniffiClonePointer(),$0
+    )
+})
 }
     
 
@@ -3498,6 +3531,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_commit() != 60864) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xs_ffi_checksum_method_contentindexwriter_drop_tombstones() != 27440) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_find_by_extract_key() != 11352) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3520,6 +3556,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentindexwriter_rollback() != 22081) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_method_contentindexwriter_tombstone_file_ids() != 65483) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_method_contentsearch_cancel() != 2931) {

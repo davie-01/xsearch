@@ -321,6 +321,11 @@ RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_applied_seqs(void*_Nonnull
 void uniffi_xs_ffi_fn_method_contentindexwriter_commit(void*_Nonnull ptr, uint64_t batch_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_DROP_TOMBSTONES
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_DROP_TOMBSTONES
+uint64_t uniffi_xs_ffi_fn_method_contentindexwriter_drop_tombstones(void*_Nonnull ptr, RustBuffer file_ids, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
 RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_find_by_extract_key(void*_Nonnull ptr, RustBuffer key, RustCallStatus *_Nonnull out_status
@@ -359,6 +364,11 @@ void uniffi_xs_ffi_fn_method_contentindexwriter_remove(void*_Nonnull ptr, uint64
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_ROLLBACK
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_ROLLBACK
 void uniffi_xs_ffi_fn_method_contentindexwriter_rollback(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_TOMBSTONE_FILE_IDS
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_METHOD_CONTENTINDEXWRITER_TOMBSTONE_FILE_IDS
+RustBuffer uniffi_xs_ffi_fn_method_contentindexwriter_tombstone_file_ids(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_CLONE_CONTENTSEARCH
@@ -866,6 +876,12 @@ uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_commit(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_DROP_TOMBSTONES
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_DROP_TOMBSTONES
+uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_drop_tombstones(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_FIND_BY_EXTRACT_KEY
 uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_find_by_extract_key(void
@@ -911,6 +927,12 @@ uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_remove(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_ROLLBACK
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_ROLLBACK
 uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_rollback(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_TOMBSTONE_FILE_IDS
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_METHOD_CONTENTINDEXWRITER_TOMBSTONE_FILE_IDS
+uint16_t uniffi_xs_ffi_checksum_method_contentindexwriter_tombstone_file_ids(void
     
 );
 #endif
