@@ -173,6 +173,7 @@ public final class ContentIndexer: @unchecked Sendable {
             try applyLimits()
             try reindexUpgradedExtractors()
             workers.forEach { $0.resume() }
+            Extractor.removeStaleArchiveScratch()
             stopped = false
             state.withLock { $0.running = true }
             let t = DispatchSource.makeTimerSource(queue: queue)

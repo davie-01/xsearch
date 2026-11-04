@@ -11,9 +11,25 @@ extension Extractor {
     public static var archiveVersion: UInt64 { engineVersions()["extractor.archive"].flatMap(UInt64.init) ?? 1 }
 
     static let memberLimit: UInt32 = 5000
+    static let scratchPrefix = "xs-archive-"
+
+    /// A worker killed in the middle of an archive (timeout, memory, crash) never runs its
+    /// `defer`, so its scratch directory stays behind. Removed once no extraction can still be
+    /// using it: older than any extraction's time limit.
+    public static func removeStaleArchiveScratch(olderThan age: TimeInterval = 3600) {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+        let cutoff = Date().addingTimeInterval(-age)
+        for name in (try? fm.contentsOfDirectory(atPath: tmp.path)) ?? [] where name.hasPrefix(scratchPrefix) {
+            let url = tmp.appendingPathComponent(name)
+            if let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, m < cutoff {
+                try? fm.removeItem(at: url)
+            }
+        }
+    }
 
     static func archive(_ path: String, limits: ExtractionLimits) throws -> ExtractionResult {
-        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("xs-archive-\(UUID().uuidString)", isDirectory: true)
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(scratchPrefix + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: scratch) }
         let extensions = ContentType.allCases.filter { $0 != .archive }.flatMap(\.extensions)

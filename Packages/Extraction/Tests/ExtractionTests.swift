@@ -234,3 +234,17 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     let whole = try Extractor.extract(path: pdf, limits: ExtractionLimits())
     #expect(whole.text.utf8.count > 10 && !whole.warnings.contains { $0.contains("超过上限") })
 }
+
+/// Scratch left by a killed worker goes once it is older than any extraction; a fresh one
+/// (an extraction running now) stays.
+@Test func staleArchiveScratchIsRemoved() throws {
+    let tmp = FileManager.default.temporaryDirectory
+    let old = tmp.appendingPathComponent(Extractor.scratchPrefix + "test-old-\(UUID().uuidString)")
+    let fresh = tmp.appendingPathComponent(Extractor.scratchPrefix + "test-new-\(UUID().uuidString)")
+    for d in [old, fresh] { try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+    defer { for d in [old, fresh] { try? FileManager.default.removeItem(at: d) } }
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-7200)], ofItemAtPath: old.path)
+    Extractor.removeStaleArchiveScratch()
+    #expect(!FileManager.default.fileExists(atPath: old.path))
+    #expect(FileManager.default.fileExists(atPath: fresh.path))
+}
