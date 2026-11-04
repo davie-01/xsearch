@@ -117,6 +117,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private let field = LauncherField()
     // Spotlight shell: one glass bar, plus round glass mode buttons that split out of it.
     private let container = NSGlassEffectContainerView()
+    /// Holds the glass in the full transparent window's coordinates (flipped).
+    private let shellRoot = FlippedView()
+    private static let fullSize = NSSize(width: Shell.contentWidth + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset)
     private let mainGlass = NSGlassEffectView()
     private let header = FlippedView()
     private let body = FlippedView()
@@ -166,8 +169,36 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             // Clicking elsewhere dismisses the launcher; Quick Look and drags keep it.
             MainActor.assumeIsolated {
                 guard let self, !(QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible) else { return }
-                self.hide()
+                // Decided a moment later, once a screenshot tool's overlay is up (see below).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    guard self.panel.isVisible, !self.panel.isKeyWindow else { return }
+                    if self.screenOverlayInFront() { self.waitForOverlay() } else { self.hide() }
+                }
             }
+        }
+    }
+
+    /// A screenshot tool (Snipaste) freezes the screen, then puts a full-screen overlay of its
+    /// own in front and takes the keyboard. Hiding then took the launcher out of the window list
+    /// the tool frames windows from, though it was in the frozen picture (Spotlight stays).
+    private func screenOverlayInFront() -> Bool {
+        guard let screen = panel.screen?.frame,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], CGWindowID(panel.windowNumber)) as? [[String: Any]] else { return false }
+        // The app that took the keyboard: the Dock's full-screen window is always there too.
+        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              front != ProcessInfo.processInfo.processIdentifier else { return false }
+        return list.contains { w in
+            guard (w[kCGWindowOwnerPID as String] as? Int32) == front, (w[kCGWindowLayer as String] as? Int ?? 0) > 0,
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
+            return (b["Width"] ?? 0) >= screen.width * 0.9 && (b["Height"] ?? 0) >= screen.height * 0.9
+        }
+    }
+
+    /// The launcher stays while the overlay is up and takes the keyboard back after it.
+    private func waitForOverlay() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.panel.isVisible, !self.panel.isKeyWindow else { return }
+            if self.screenOverlayInFront() { self.waitForOverlay() } else { self.panel.makeKeyAndOrderFront(nil) }
         }
     }
 
@@ -177,7 +208,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         // Fixed transparent window; only the glass frames move inside it (no window jumps).
         // Transparent margin on every side: springs overshoot (bigger drops, wider bounce) and
         // must never be clipped by the window edge.
-        let root = FlippedView(frame: NSRect(x: 0, y: 0, width: Shell.contentWidth + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset))
+        let root = shellRoot
+        root.frame = NSRect(origin: .zero, size: Self.fullSize)
         container.spacing = Shell.mergeDistance
         container.contentView = root
         panel.contentView = container
@@ -363,10 +395,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         let targetMain = NSRect(x: originX, y: 0, width: targetW, height: targetH)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         driver?.stop()
+        unfitWindow()
         guard animated && !reduceMotion && panel.isVisible else {
             setMainFrame(targetMain)
             body.isHidden = bodyHeight == 0
             body.alphaValue = 1
+            fitWindowToShell()
             return
         }
 
@@ -400,8 +434,44 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             self.setMainFrame(targetMain)
             if self.bodyHeight == 0 { self.body.isHidden = true }
             self.body.alphaValue = 1
+            self.fitWindowToShell()
         }
         driver?.start()
+    }
+
+    /// Origin of the glass-sized window inside the full one (container coordinates, unflipped);
+    /// nil while the window is full size.
+    private var fittedOrigin: NSPoint?
+
+    /// At rest the window is just the glass, so screenshot tools frame the panel and not the
+    /// transparent margin that springs need while animating. The glass keeps its place on
+    /// screen: the window shrinks around it and the content is shifted by the same amount.
+    private func fitWindowToShell() {
+        guard fittedOrigin == nil else { return }
+        let g = mainGlass.frame
+        let origin = NSPoint(x: g.minX, y: Self.fullSize.height - g.maxY)
+        var f = panel.frame
+        f.origin.x += origin.x
+        f.origin.y += origin.y
+        f.size = g.size
+        panel.setFrame(f, display: false)
+        shellRoot.frame = NSRect(origin: .zero, size: Self.fullSize)
+        container.setBoundsOrigin(origin)
+        fittedOrigin = origin
+        container.needsDisplay = true
+    }
+
+    /// Back to the full transparent window (before animating or placing the panel).
+    private func unfitWindow() {
+        guard let origin = fittedOrigin else { return }
+        var f = panel.frame
+        f.origin.x -= origin.x
+        f.origin.y -= origin.y
+        f.size = Self.fullSize
+        panel.setFrame(f, display: false)
+        container.setBoundsOrigin(.zero)
+        shellRoot.frame = NSRect(origin: .zero, size: Self.fullSize)
+        fittedOrigin = nil
     }
 
     /// The bar's inner header and body track the glass size exactly (no autoresizing drift).
@@ -477,9 +547,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func position() {
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         guard let frame = screen?.visibleFrame else { return }
+        unfitWindow()
         let size = panel.frame.size
         let top = frame.maxY - frame.height / 6
         panel.setFrameTopLeftPoint(NSPoint(x: frame.midX - size.width / 2, y: top + Shell.inset))
+        fitWindowToShell()
     }
 
     /// Body height from its content; zero (a plain search bar) when there is nothing to show.
