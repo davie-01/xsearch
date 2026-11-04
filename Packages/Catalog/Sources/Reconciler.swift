@@ -18,6 +18,8 @@ final class Reconciler {
         var home: String
         /// nil: content indexing off.
         var content: ContentRules?
+        /// Never indexed, whatever a root or a content folder covers (our own data directory).
+        var hardExcludes: [String] = []
     }
 
     struct Task {
@@ -198,7 +200,13 @@ final class Reconciler {
 
     /// Whether an event path can concern the index at all (inside a root, no excluded ancestor).
     func isIndexable(_ path: String) -> Bool {
-        isInNameScope(path) || contentCovers(path)
+        !isHardExcluded(path) && (isInNameScope(path) || contentCovers(path))
+    }
+
+    /// Content rules skip path exclusions (a chosen folder outranks them), so this is checked
+    /// on its own wherever an entry or event is let in.
+    private func isHardExcluded(_ path: String) -> Bool {
+        ctx.hardExcludes.contains { PathUtil.isWithin(path, $0) }
     }
 
     /// Below a name root with no component excluded. Components count as directories, so
@@ -236,7 +244,7 @@ final class Reconciler {
     private func classify(_ e: DiskEntry, path: String, parent: Row) -> DiskEntry? {
         // A root is its own subtree, never also a child of the root around it ("/" around an
         // extra folder that a rule otherwise outranked only for itself).
-        if ctx.roots.contains(path) { return nil }
+        if ctx.roots.contains(path) || isHardExcluded(path) { return nil }
         // Below a content-only directory the name rules were not walked yet.
         let inName = parent.flags.contains(.contentOnly) ? isInNameScope(path) && !excluded(path, e) : !excluded(path, e)
         if inName { return e }

@@ -436,3 +436,23 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     let reopened = try UsageStore(directory: dir)
     #expect(reopened.favorites() == [UsageStore.Favorite(path: "/b/x.pdf", fileId: 7)])
 }
+
+/// The data directory is never indexed, not even when a content folder covers it: content
+/// rules skip path exclusions, and writing the index would feed events back to it.
+@Test func ownDataDirectoryStaysOutUnderAContentRoot() throws {
+    let box = try Sandbox("owndata")
+    try box.write("docs/a.txt", "x")
+    try box.write("xsdata/note.txt", "x")
+    let data = URL(fileURLWithPath: box.p("xsdata"))
+    let s = NameService(directory: data, home: "/nonexistent-home")
+    s.start(scope: box.scope, content: ContentScope(folders: [box.rootReal]))
+    defer { s.shutdown() }
+    #expect(s.waitUntilIdle())
+    try box.write("xsdata/later.txt", "y")
+    try box.write("docs/b.txt", "y")
+    #expect(eventually(s) { pendingByName(s)["docs/b.txt"] != nil }, "\(pendingByName(s))")
+    let tasks = s.contentTasks().compactMap(\.1).filter { PathUtil.isWithin($0, box.p("xsdata")) }
+    #expect(tasks.isEmpty, "\(tasks)")
+    let rows = indexedPaths(s, box).filter { PathUtil.isWithin($0, box.p("xsdata")) }
+    #expect(rows.isEmpty, "\(rows)")
+}

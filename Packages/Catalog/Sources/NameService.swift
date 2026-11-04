@@ -288,17 +288,22 @@ public final class NameService: @unchecked Sendable {
 
     private func makeContext(_ scope: NameScope) -> Reconciler.Context {
         var s = scope
-        // Never index our own data directory: writing it would feed events back to us.
-        s.excludes.append(directory.path)
+        // Never index our own data directory: writing it would feed events back to us. The
+        // name rules exclude it, and so does the hard exclusion that content folders (which skip
+        // path rules) and roots chosen inside it cannot outrank.
+        // Resolved as events report it (/private/var/…), not as resolvingSymlinksInPath (/var/…).
+        let own = realpath(directory.path, nil).map { defer { free($0) }; return String(cString: $0) } ?? directory.path
+        s.excludes.append(own)
         // One catalog covers the union of both scopes (§6.2): content folders outside the name
         // scope are scanned too.
-        var roots = scope.roots(home: home)
-        for r in contentScope?.roots(home: home) ?? [] where !roots.contains(where: { PathUtil.isWithin(r, $0) }) {
+        let nameRoots = scope.roots(home: home).filter { !PathUtil.isWithin($0, own) }
+        var roots = nameRoots
+        for r in contentScope?.roots(home: home) ?? [] where !PathUtil.isWithin(r, own) && !roots.contains(where: { PathUtil.isWithin(r, $0) }) {
             roots.removeAll { PathUtil.isWithin($0, r) }
             roots.append(r)
         }
-        return .init(roots: roots.sorted(), nameRoots: scope.roots(home: home), rules: ExclusionRules(s, home: home), home: home,
-                     content: contentScope.map { ContentRules($0, home: home) })
+        return .init(roots: roots.sorted(), nameRoots: nameRoots, rules: ExclusionRules(s, home: home), home: home,
+                     content: contentScope.map { ContentRules($0, home: home) }, hardExcludes: Array(Set([own, directory.path])))
     }
 
     private func fingerprint() -> String {
