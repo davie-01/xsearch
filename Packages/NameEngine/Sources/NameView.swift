@@ -409,6 +409,8 @@ struct Matcher {
 
     final class RegexBudget {
         var aborted = 0
+        /// The name being matched had a regular expression run out of time.
+        var nameAborted = false
     }
 
     /// Per-search cache of "is this extension one of the app's documents" (UTI conformance is
@@ -487,7 +489,10 @@ struct Matcher {
                 if cached == nil { cached = .some(path?()) }
                 return cached!
             }
-            guard eval(tree, key, lazyPath) else { return 0 }
+            // A timed-out regular expression is unknown, not false: under NOT it would turn into a
+            // match. The name is left out whatever surrounds it, as "skipped" says.
+            budget.nameAborted = false
+            guard eval(tree, key, lazyPath), !budget.nameAborted else { return 0 }
             if let rankTerm { best = max(1, rank(base, n, rankTerm)) }
         } else {
             for (t, term) in terms.enumerated() {
@@ -530,7 +535,10 @@ struct Matcher {
             if match != nil { found = true; stop.pointee = true; return }
             if DispatchTime.now().uptimeNanoseconds > deadline || cancelled() { gaveUp = true; stop.pointee = true }
         }
-        if gaveUp && !found { budget.aborted += 1 }
+        if gaveUp && !found {
+            budget.aborted += 1
+            budget.nameAborted = true
+        }
         return found
     }
 

@@ -367,3 +367,26 @@ private var systemTypesAvailable: Bool { UTType(filenameExtension: "pdf")?.isDyn
     #expect(cancelled.cancelled && cancelled.hits.isEmpty)
     #expect(Date().timeIntervalSince(start) < 0.2)
 }
+
+/// A name whose regular expression ran out of time is neither a match nor a non-match: it is
+/// left out whatever surrounds it (NOT, double NOT, AND, OR, path patterns), as "skipped" says.
+@Test func regexTimeoutIsUnknownUnderEveryOperator() {
+    var o = Oracle()
+    let root = o.add(parent: 0, name: "/", dir: true, root: "/")
+    let slow = o.add(parent: root, name: String(repeating: "a", count: 30) + "!", dir: false)
+    let quick = o.add(parent: root, name: "aaa", dir: false)
+    let other = o.add(parent: root, name: "xyz", dir: false)
+    let view = NameView(base: NameSnapshot.build(Array(o.records.values), seq: 1, fingerprint: "t"))
+    func ids(_ q: String) -> (Set<Int64>, Int) {
+        let r = view.search(NameQuery.parse(q, home: "/"), limit: 100)
+        return (Set(r.hits.map(\.fileId)), r.regexAborted)
+    }
+    let positive = ids("regex:^(a+)+$|!$")
+    #expect(positive.0 == [quick] && positive.1 > 0, "\(positive)")
+    #expect(ids("-regex:^(a+)+$|!$").0 == [other])
+    #expect(ids("--regex:^(a+)+$|!$").0 == [quick])
+    #expect(ids("-regex:^(a+)+$|!$ -xyz").0.isEmpty)
+    #expect(ids("regex:^(a+)+$|!$ | xyz").0 == [quick, other])
+    #expect(ids("-regex:^/(a+)+$").0 == [other])
+    #expect(!ids("-regex:^(a+)+$|!$").0.contains(slow))
+}
