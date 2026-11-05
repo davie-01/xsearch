@@ -370,6 +370,21 @@ public final class NameService: @unchecked Sendable {
         if try catalog.meta("fingerprint") != fingerprint && !ops.contains(where: { $0.0 == .scope }) {
             ops.append((.scope, "", 0))
         }
+        // A catalog from before the data directory became a hard exclusion may hold it (a content
+        // folder covered it). Its parent is listed again: that drops the subtree and queues the
+        // content deletions. A root chosen inside it needs the full pass that removes roots.
+        if !ops.contains(where: { $0.0 == .scope }), let hard = context?.hardExcludes {
+            let roots = try catalog.rootRows()
+            if roots.contains(where: { r in hard.contains { PathUtil.isWithin(r.name, $0) } }) {
+                ops.append((.scope, "", 0))
+            } else {
+                for h in hard {
+                    guard let root = roots.filter({ PathUtil.isWithin(h, $0.name) }).max(by: { $0.name.count < $1.name.count }),
+                          let (_, found) = try? catalog.nearest(h, root: root), found == h else { continue }
+                    ops.append((.fsevent, (h as NSString).deletingLastPathComponent, 0))
+                }
+            }
+        }
         // Start watching before scanning: the scan op precedes every event journaled after it.
         let start = since ?? FSEventsWatcher.currentEventId
         try catalog.append(ops, lastEventId: since == nil ? start : nil)

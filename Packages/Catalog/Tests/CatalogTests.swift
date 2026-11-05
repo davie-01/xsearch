@@ -527,3 +527,35 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     #expect(again.waitUntilIdle())
     #expect(indexedPaths(again, box).contains(box.p("slow/b.txt")))
 }
+
+/// Upgrade: a catalog built before the hard exclusion, holding the data directory (a content
+/// folder covered it), drops it at the next start, and its files get content deletions.
+@Test func heldDataDirectoryIsDroppedAtStart() throws {
+    let box = try Sandbox("heldowndata")
+    try box.write("docs/a.txt", "x")
+    try box.write("xsdata/note.txt", "x")
+    let content = ContentScope(folders: [box.rootReal])
+    // Built elsewhere: xsdata is an ordinary folder there, catalogued with a content task.
+    let first = NameService(directory: box.data, home: "/nonexistent-home")
+    first.start(scope: box.scope, content: content)
+    #expect(first.waitUntilIdle())
+    first.shutdown()
+    // The same catalog now lives in xsdata, as an older version's data directory.
+    let data = URL(fileURLWithPath: box.p("xsdata"))
+    for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "names"] {
+        let from = box.data.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: from.path) { try FileManager.default.copyItem(at: from, to: data.appendingPathComponent(name)) }
+    }
+    let c = try FileCatalog(url: data.appendingPathComponent("catalog.sqlite"))
+    let noteId = try c.db.prepare("SELECT id FROM files WHERE name = 'note.txt' AND deleted = 0").first { $0.int(0) }
+    #expect(noteId != nil)
+    // Same scopes: no full pass is due, so only the targeted relisting can drop it.
+    #expect(try c.meta("fingerprint") != nil)
+    let s = NameService(directory: data, home: "/nonexistent-home")
+    s.start(scope: box.scope, content: content)
+    defer { s.shutdown() }
+    #expect(s.waitUntilIdle())
+    let rows = indexedPaths(s, box).filter { PathUtil.isWithin($0, box.p("xsdata")) }
+    #expect(rows.isEmpty, "\(rows.sorted().prefix(3))")
+    #expect(s.contentTasks().contains { $0.task.fileId == noteId && $0.task.kind == 2 }, "content deletion for note.txt")
+}
