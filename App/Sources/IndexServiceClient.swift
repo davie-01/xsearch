@@ -187,6 +187,10 @@ final class IndexServiceClient {
     /// For deleting the index: reports whether the service answered that its writer is closed
     /// (or the connection died with it), without blocking the main thread. false after `timeout`:
     /// the writer may still be working, so nothing may be deleted; `resume` reconnects.
+    /// An error on this connection counts as closed because it only comes once the service
+    /// process is gone, and the writer with it. Checked with a stop slowed in the service: killed
+    /// during the stop, the error came with no IndexService left and no one holding the index;
+    /// suspended (SIGSTOP) or hung, no error came and the timeout said false (2026-11-05).
     func stopAndConfirm(timeout: TimeInterval = 20, done: @escaping @MainActor @Sendable (Bool) -> Void) {
         stopping = true
         generation += 1
