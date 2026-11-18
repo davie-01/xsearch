@@ -13,7 +13,11 @@ Every location XSearch writes to while in use. Unless noted otherwise, everythin
 | `content/<instance id>/` | Content index (Tantivy): extracted text, trigram index, anchors. While the content index is rebuilt, two instances briefly coexist; the old one is deleted about a minute after the switch (or at the next launch if you quit first) | Yes (re-extracted) | 6 MB; about 1–2× the indexed text |
 | `user.sqlite` (plus `-wal`, `-shm`) | **Personal data**: recently opened items (with open counts, used for ranking) and favorites | **No**; rebuilding indexes never touches it | < 1 MB |
 
-- **Rebuild File Name Index** under Settings › Privacy & Data deletes `catalog.sqlite*`, `names/` and `content/`, then rescans; **Rebuild Content Index** rebuilds only `content/`. `user.sqlite` is always kept.
+- **Storage** under Settings › Privacy & Data shows the sizes of the name index (`catalog.sqlite*` + `names/`), the content index (`content/`), personal data (`user.sqlite*`) and temporary and leftover files.
+- **Clean Up** removes leftovers: `retired-*/`, and in the temporary directory `XSearch-open/` folders and `xs-archive-*/` older than an hour (younger ones may still be in use).
+- **Clear Content Index** deletes the index in `content/` at once and pauses content indexing; resuming extracts every content file again. **Rebuild Content Index** builds a new instance in the background and keeps using the old one until it is done.
+- **Rebuild File Name Index** deletes `catalog.sqlite*`, `names/` and `content/`, then rescans; **Clear All Indexes** deletes the same files and also pauses content indexing: the name index is scanned again at once, content is extracted after resuming.
+- `user.sqlite` and the settings are always kept.
 - When the file name index is rebuilt, the old files are first moved to `retired-<uuid>/` in the same folder and deleted in the background; if you quit midway, they are cleaned up at the next launch.
 - During development the environment variable `XS_DATA_DIR` selects a different data folder.
 

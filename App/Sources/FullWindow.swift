@@ -995,6 +995,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
                 }
             } else {
                 parts.append(L("内容索引 %@ 个文件", "\(Theme.count(stats.indexed))"))
+                if stats.paused { parts.append(L("已暂停")) }
                 if stats.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(stats.pending))")) }
             }
         } else if let out = lastNames, !out.query.isEmpty {

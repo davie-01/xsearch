@@ -38,6 +38,10 @@ final class SettingsModel: ObservableObject {
     @Published var newRule = ""
     @Published var content: ContentScope
     @Published var contentStatus: ContentIndexer.Status?
+    @Published var contentPaused = false
+    /// Settings › 隐私与数据; nil until measured.
+    @Published var storage: IndexStorage?
+    @Published var storageBusy = false
     @Published var diagnosePath = ""
     @Published var diagnosis: [NameService.DiagnosisItem] = []
     @Published var language = UILanguage.chosen { didSet { UILanguage.chosen = language } }
@@ -57,11 +61,46 @@ final class SettingsModel: ObservableObject {
         syntax = Preferences.shared.querySyntax
         content = delegate.currentContentScope
         contentStatus = delegate.contentStatus
+        contentPaused = delegate.contentIndexingPaused
     }
 
     func refresh() {
         status = names.status
         contentStatus = delegate?.contentStatus
+        contentPaused = delegate?.contentIndexingPaused ?? false
+    }
+
+    func setContentPaused(_ paused: Bool) {
+        delegate?.setContentIndexingPaused(paused)
+        contentPaused = paused
+    }
+
+    func measureStorage() {
+        delegate?.measureStorage { [weak self] s in self?.storage = s }
+    }
+
+    func clearContentIndex() {
+        storageBusy = true
+        delegate?.clearContentIndex { [weak self] in
+            self?.storageBusy = false
+            self?.refresh()
+            self?.measureStorage()
+        }
+    }
+
+    func clearAllIndexes() {
+        delegate?.clearAllIndexes()
+        refresh()
+        // The old files are moved aside and removed in the background.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.measureStorage() }
+    }
+
+    func removeLeftovers() {
+        storageBusy = true
+        delegate?.removeLeftovers { [weak self] in
+            self?.storageBusy = false
+            self?.measureStorage()
+        }
     }
 
     func commitContent() { delegate?.applyContentScope(content) }
@@ -505,6 +544,23 @@ struct ScopePane: View {
 struct PrivacyPane: View {
     @ObservedObject var model: SettingsModel
     @State private var confirmRebuild = false
+    @State private var confirmClearContent = false
+    @State private var confirmClearAll = false
+
+    private func size(_ bytes: Int64?) -> String {
+        bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "…"
+    }
+
+    private func row(_ title: String, _ detail: String, _ bytes: Int64?) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13))
+                Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(size(bytes)).font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
 
     var body: some View {
         Text(L("隐私与数据")).font(.system(size: 20, weight: .semibold))
@@ -513,17 +569,58 @@ struct PrivacyPane: View {
                 .font(.system(size: 12.5))
             Button(L("在访达中显示")) { NSWorkspace.shared.activateFileViewerSelecting([Preferences.dataDirectory]) }
         }
-        Card(title: L("重建内容索引"), subtitle: L("在后台重新提取全部内容文件；完成前继续使用旧索引，完成后删除旧索引并回收空间。")) {
-            Button(L("重建内容索引…")) { model.delegate?.rebuildContentIndex() }
-        }
-        Card(title: L("重建文件名索引"), subtitle: L("删除文件名索引并重新扫描。最近打开记录和设置单独保存，不受影响。")) {
-            Button(L("重建文件名索引…")) { confirmRebuild = true }
-                .foregroundStyle(.red)
-                .confirmationDialog(L("重建文件名索引？"), isPresented: $confirmRebuild) {
-                    Button(L("重建"), role: .destructive) { model.delegate?.rebuildNameIndex() }
-                } message: {
-                    Text(L("重新扫描期间，已处理的部分可以立即搜索。"))
+        Card(title: L("存储占用")) {
+            VStack(alignment: .leading, spacing: 8) {
+                row(L("文件名索引"), L("文件目录数据库和文件名快照"), model.storage?.names)
+                row(L("内容索引"), L("提取出的正文和检索数据"), model.storage?.content)
+                row(L("个人数据"), L("最近打开和收藏；清除索引时保留"), model.storage?.personal)
+                HStack(alignment: .firstTextBaseline) {
+                    row(L("临时与残留文件"), L("重建留下的旧文件、打开压缩包成员和解包的临时文件"), model.storage?.leftovers)
+                    Button(L("清理")) { model.removeLeftovers() }
+                        .disabled(model.storageBusy || (model.storage?.leftovers ?? 0) == 0)
                 }
+                Divider()
+                HStack {
+                    Text(L("合计")).font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Text(size(model.storage?.total)).font(.system(size: 13, weight: .medium).monospacedDigit())
+                }
+            }
+        }
+        .onAppear { model.measureStorage() }
+        Card(title: L("清除与重建"), subtitle: L("最近打开、收藏和设置始终保留。")) {
+            VStack(alignment: .leading, spacing: 12) {
+                action(L("清除内容索引…"), L("立即删除内容索引并暂停内容索引；恢复后重新提取全部内容文件。"), destructive: true) { confirmClearContent = true }
+                    .confirmationDialog(L("清除内容索引？"), isPresented: $confirmClearContent) {
+                        Button(L("清除"), role: .destructive) { model.clearContentIndex() }
+                    } message: {
+                        Text(L("将删除 %@ 的内容索引并暂停内容索引。恢复内容索引后会重新提取全部内容文件。", size(model.storage?.content)))
+                    }
+                action(L("重建内容索引…"), L("在后台重新提取全部内容文件；完成前继续使用旧索引，完成后删除旧索引并回收空间。"), destructive: false) {
+                    model.delegate?.rebuildContentIndex()
+                }
+                action(L("重建文件名索引…"), L("删除文件名索引并重新扫描，内容会一并重新提取。"), destructive: true) { confirmRebuild = true }
+                    .confirmationDialog(L("重建文件名索引？"), isPresented: $confirmRebuild) {
+                        Button(L("重建"), role: .destructive) { model.delegate?.rebuildNameIndex() }
+                    } message: {
+                        Text(L("重新扫描期间，已处理的部分可以立即搜索。"))
+                    }
+                action(L("清除全部索引…"), L("删除文件名索引和内容索引并暂停内容索引；文件名索引会立即重新扫描，内容在恢复后重新提取。"), destructive: true) { confirmClearAll = true }
+                    .confirmationDialog(L("清除全部索引？"), isPresented: $confirmClearAll) {
+                        Button(L("清除"), role: .destructive) { model.clearAllIndexes() }
+                    } message: {
+                        Text(L("将删除 %@ 的索引文件。名称搜索需要文件名索引，它会立即重新扫描；内容索引保持暂停，恢复后重新提取。", size(model.storage.map { $0.names + $0.content })))
+                    }
+            }
+            .disabled(model.storageBusy)
+        }
+    }
+
+    private func action(_ title: String, _ detail: String, destructive: Bool, _ run: @escaping () -> Void) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 16)
+            Button(title, action: run).foregroundStyle(destructive ? .red : .primary)
         }
     }
 }
@@ -534,6 +631,7 @@ struct ContentCard: View {
     var statusLine: String {
         guard let st = model.contentStatus else { return L("内容索引未启动") }
         var parts = [L("%@ 个文件", "\(Theme.count(st.indexed))")]
+        if model.contentPaused { parts.insert(L("已暂停"), at: 0) }
         if st.lastError != nil { parts.append(L("写入暂时出错，正在自动重试")) }
         if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
         if st.failed > 0 { parts.append(L("%@ 个提取失败", "\(st.failed)")) }
@@ -558,6 +656,16 @@ struct ContentCard: View {
                 }
                 if model.content.folders.isEmpty { Text(L("还没有文件夹，内容搜索暂不可用。")).font(.system(size: 12)).foregroundStyle(.secondary) }
                 Button(L("＋ 添加文件夹")) { model.addContentFolders() }.buttonStyle(.borderless)
+            }
+            Divider()
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.contentPaused ? L("内容索引已暂停") : L("内容索引运行中")).font(.system(size: 13, weight: .medium))
+                    Text(model.contentPaused ? L("文件变化会先记下，恢复后再提取；已有内容照常可以搜索。") : L("暂停后不再提取文件内容，已有内容照常可以搜索；文件名索引不受影响。"))
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(model.contentPaused ? L("恢复内容索引") : L("暂停内容索引")) { model.setContentPaused(!model.contentPaused) }
             }
             Divider()
             Text(L("提取的文件类型")).font(.system(size: 13, weight: .medium))

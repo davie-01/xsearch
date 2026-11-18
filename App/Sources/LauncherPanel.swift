@@ -987,6 +987,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         addNotice(L("已索引的内容中没有找到“%@”。", "\(out.query.expression)"))
         let stats = session.contentStats?() ?? ContentStats()
         var parts = [L("内容索引 %@ 个文件", "\(Theme.count(stats.indexed))")]
+        if stats.paused { parts.append(L("已暂停")) }
         if stats.pending > 0 { parts.append(L("%@ 个文件等待处理", "\(stats.pending)")) }
         if stats.failed > 0 { parts.append(L("%@ 个文件提取失败", "\(stats.failed)")) }
         addNotice(parts.joined(separator: " · "), color: .tertiaryLabelColor, size: 12.5)
@@ -1091,6 +1092,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         if mode == .content {
             let stats = session.contentStats?() ?? ContentStats()
             parts = [L("内容索引 %@ 个文件", "\(Theme.count(stats.indexed))")]
+            if stats.paused { parts.append(L("已暂停")) }
             if stats.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(stats.pending))")) }
             if let out = contentOutput, !out.query.isEmpty, out.error == nil {
                 if out.live {

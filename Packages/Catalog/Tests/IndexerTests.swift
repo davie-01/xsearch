@@ -171,6 +171,51 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(try p.search("支付条件", names: [["合同"], ["验收"]]).isEmpty)
 }
 
+@Test func pausedIndexerQueuesAndResumes() throws {
+    let p = try Pipeline("pause") { $0.setPaused(true) }
+    defer { p.stop() }
+    try p.box.write("docs/a.txt", "暂停期间 sigma")
+    try p.start()
+    // Paused: the task waits, nothing is extracted, and the index stays readable.
+    #expect(!p.indexer.waitUntilIdle(timeout: 1.5))
+    #expect(p.indexer.status.paused && p.indexer.status.pending == 1)
+    #expect(try p.search("sigma").isEmpty)
+    // Resumed: what queued meanwhile is extracted.
+    p.indexer.setPaused(false)
+    #expect(p.settle())
+    #expect(!p.indexer.status.paused)
+    #expect(try p.search("sigma") == ["a.txt"])
+    // Pausing again holds a new change back until the next resume.
+    p.indexer.setPaused(true)
+    try p.box.write("docs/b.txt", "第二个 tau")
+    #expect(p.until { p.indexer.status.pending == 1 })
+    #expect(try p.search("tau").isEmpty)
+    p.indexer.setPaused(false)
+    #expect(p.until { try p.search("tau") == ["b.txt"] })
+}
+
+@Test func clearedContentIndexWaitsWhilePaused() throws {
+    let p = try Pipeline("clear")
+    defer { p.stop() }
+    try p.box.write("docs/a.txt", String(repeating: "清除之前 upsilon ", count: 2000))
+    try p.box.write("docs/b.txt", "另一个 upsilon")
+    try p.start()
+    #expect(p.settle())
+    #expect(try p.search("upsilon") == ["a.txt", "b.txt"])
+    let before = IndexStorage.measure(in: p.box.data).content
+    // Paused, then cleared: the old files are gone at once, everything waits in the queue.
+    p.indexer.setPaused(true)
+    try p.indexer.clearContentIndex()
+    let content = p.box.data.appendingPathComponent("content")
+    #expect(try FileManager.default.contentsOfDirectory(atPath: content.path) == [p.indexer.status.instanceId])
+    #expect(IndexStorage.measure(in: p.box.data).content < before)
+    #expect(p.indexer.status.pending == 2 && p.indexer.status.indexed == 0)
+    #expect(try p.search("upsilon").isEmpty)
+    p.indexer.setPaused(false)
+    #expect(p.settle())
+    #expect(try p.search("upsilon") == ["a.txt", "b.txt"])
+}
+
 @Test func hungParserIsQuarantined() throws {
     let p = try Pipeline("hang") { ix in
         ix.baseTimeout = 0.4

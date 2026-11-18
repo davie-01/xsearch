@@ -13,6 +13,8 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Improved
 
+- Settings → Privacy & Data shows index storage by kind (name index, content index, personal data, temporary and leftover files) and cleans up leftovers. New Clear Content Index and Clear All Indexes delete the files and pause content indexing until you resume; recents, favorites and settings are always kept.
+- Content indexing can be paused and resumed (menu bar or Settings → Index Scope), and stays so across restarts. While paused, no file content is extracted and the extraction processes exit; what is indexed stays searchable, and file changes are noted and extracted after resuming. The name index keeps updating in real time.
 - The Full Window is redesigned: no sidebar; below the search field a row of fixed-width condition buttons (location, type, date, size, plus file name and match mode in Content search) shows each set value, with Clear All and the equivalent query text to view and copy. The count, Show All and shortcut hints move to a status bar. An empty Name search lists favorites and recents under headings; an empty Content search shows the scope and examples; no results lists the likely reasons and what to try. The result table gets the launcher's context menu.
 - Full Window name results over 5,000 get a Show All button next to the count; sorting by a column fetches every match first (up to 100,000) instead of sorting only the first 5,000.
 - The launcher's `⌘/` syntax summary is now a grouped list with examples and explanations in two columns, clearer wording, and switched-off syntax clearly marked. Fixes the summary showing as an empty narrow strip over the launcher.

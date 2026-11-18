@@ -6,7 +6,10 @@ import Foundation
 /// catalog SQLite (WAL, busy timeout) exactly as two connections in one process did before.
 @objc public protocol IndexServiceProtocol {
     /// Starts (or keeps running) the indexer on `dataDirectory`; replies an error message or nil.
-    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, reply: @escaping (String?) -> Void)
+    /// `paused` is the user's setting, so a restarted service stays paused.
+    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, paused: Bool, reply: @escaping (String?) -> Void)
+    /// Pause / resume extraction (ContentIndexer.setPaused); searching is not affected.
+    func setPaused(_ paused: Bool)
     /// The single-file limit changed in settings: only the files it affects are extracted again.
     func setMaxFileBytes(_ bytes: UInt64)
     /// JSON `IndexServiceSnapshot`.
@@ -14,6 +17,8 @@ import Foundation
     /// The catalog queued new tasks.
     func wake()
     func rebuildContentIndex(reply: @escaping (String?) -> Void)
+    /// Deletes the content index now and queues every content file again (ContentIndexer).
+    func clearContentIndex(reply: @escaping (String?) -> Void)
     /// Stops the indexer (writer closed, workers stopped); the app calls this before quitting.
     func stop(reply: @escaping () -> Void)
 }

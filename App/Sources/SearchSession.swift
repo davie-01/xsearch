@@ -22,6 +22,7 @@ struct ContentStats {
     var indexed = 0
     var pending = 0
     var failed = 0
+    var paused = false
 }
 
 struct SearchOutput {

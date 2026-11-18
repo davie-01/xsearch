@@ -559,3 +559,34 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     #expect(rows.isEmpty, "\(rows.sorted().prefix(3))")
     #expect(s.contentTasks().contains { $0.task.fileId == noteId && $0.task.kind == 2 }, "content deletion for note.txt")
 }
+
+@Test func storageCountsKindsAndRemovesOnlyLeftovers() throws {
+    let box = try Sandbox("storage")
+    let fm = FileManager.default
+    let tmp = box.data.appendingPathComponent("tmp")
+    func file(_ url: URL, _ bytes: Int) throws {
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(count: bytes).write(to: url)
+    }
+    try file(box.data.appendingPathComponent("catalog.sqlite"), 40_000)
+    try file(box.data.appendingPathComponent("names/local.idx"), 20_000)
+    try file(box.data.appendingPathComponent("content/abc/seg"), 30_000)
+    try file(box.data.appendingPathComponent("user.sqlite"), 10_000)
+    try file(box.data.appendingPathComponent("retired-x/catalog.sqlite"), 50_000)
+    let oldOpen = tmp.appendingPathComponent("XSearch-open/old/a.pdf"), newOpen = tmp.appendingPathComponent("XSearch-open/new/b.pdf")
+    let oldScratch = tmp.appendingPathComponent("xs-archive-1/x.txt")
+    for u in [oldOpen, newOpen, oldScratch] { try file(u, 8_000) }
+    let hourAgo = Date().addingTimeInterval(-2 * 3600)
+    for u in [oldOpen.deletingLastPathComponent(), oldScratch.deletingLastPathComponent()] {
+        try fm.setAttributes([.modificationDate: hourAgo], ofItemAtPath: u.path)
+    }
+    let s = IndexStorage.measure(in: box.data, temporary: tmp)
+    #expect(s.names >= 60_000 && s.content >= 30_000 && s.personal >= 10_000)
+    // retired-* and the two old temporary folders; the member opened just now may be in use.
+    #expect(s.leftovers >= 66_000 && s.leftovers < 66_000 + 30_000)
+    IndexStorage.removeLeftovers(in: box.data, temporary: tmp)
+    #expect(!fm.fileExists(atPath: box.data.appendingPathComponent("retired-x").path))
+    #expect(!fm.fileExists(atPath: oldOpen.path) && !fm.fileExists(atPath: oldScratch.path) && fm.fileExists(atPath: newOpen.path))
+    #expect(fm.fileExists(atPath: box.data.appendingPathComponent("user.sqlite").path) && fm.fileExists(atPath: box.data.appendingPathComponent("content/abc/seg").path))
+    #expect(IndexStorage.measure(in: box.data, temporary: tmp).leftovers < 30_000)
+}

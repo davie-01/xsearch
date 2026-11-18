@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuOpen = false
     private var rebuildingNames = false
     private let contentStatusItem = NSMenuItem(title: L("内容索引：正在打开"), action: nil, keyEquivalent: "")
+    private let pauseItem = NSMenuItem(title: L("暂停内容索引"), action: nil, keyEquivalent: "")
     private var usage: UsageStore?
     private var session: SearchSession!
     private var launcher: LauncherController!
@@ -146,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ix.onError = { [weak self] message in self?.contentStatusItem.title = L("内容索引出错：%@", "\(message.prefix(60))") }
         ix.onUpdate = { [weak self] in self?.showContentStatus() }
         ix.maxFileBytes = contentScope.maxFileBytes
+        ix.setPaused(Preferences.shared.contentIndexingPaused)
         names.onContentTasks = { [weak ix] in
             Task { @MainActor in ix?.wake() }
         }
@@ -155,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         session.content.indexPath = { [ix] in ix.indexPath }
         session.contentStats = { [weak ix] in
             guard let st = ix?.status else { return ContentStats() }
-            return ContentStats(indexed: st.indexed, pending: st.pending, failed: st.failed)
+            return ContentStats(indexed: st.indexed, pending: st.pending, failed: st.failed, paused: st.paused)
         }
     }
 
@@ -294,6 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(indexStatusItem)
         contentStatusItem.isEnabled = false
         menu.addItem(contentStatusItem)
+        pauseItem.target = self
+        pauseItem.action = #selector(togglePause)
+        menu.addItem(pauseItem)
+        updatePauseItem()
         menu.addItem(.separator())
         hotKeyItem.target = self
         menu.addItem(hotKeyItem)
@@ -356,8 +362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func showContentStatus() {
+        updatePauseItem()
         guard let st = indexer?.status else { return }
         var parts = [L("内容索引：%@ 个文件", "\(Theme.count(st.indexed))")]
+        if st.paused { parts[0] = L("内容索引已暂停：%@ 个文件", "\(Theme.count(st.indexed))") }
         if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
         if st.failed > 0 { parts.append(L("%@ 个失败", "\(st.failed)")) }
         contentStatusItem.title = parts.joined(separator: " · ")
@@ -397,6 +405,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusChanged()
     }
     var contentStatus: ContentIndexer.Status? { indexer?.status }
+
+    /// Menu bar and Settings › 索引范围: pause or resume content extraction (ARCHITECTURE §9.2).
+    /// The setting persists; file changes keep queueing while paused and are extracted on resume.
+    /// The name index keeps updating: it is cheap and name search depends on it.
+    var contentIndexingPaused: Bool { Preferences.shared.contentIndexingPaused }
+
+    func setContentIndexingPaused(_ paused: Bool) {
+        Preferences.shared.contentIndexingPaused = paused
+        indexer?.setPaused(paused)
+        updatePauseItem()
+        statusChanged()
+    }
+
+    @objc private func togglePause() { setContentIndexingPaused(!contentIndexingPaused) }
+
+    /// Settings › 隐私与数据: sizes by kind, measured off the main thread.
+    func measureStorage(_ done: @escaping @MainActor @Sendable (IndexStorage) -> Void) {
+        let data = dataDirectory
+        DispatchQueue.global(qos: .utility).async {
+            let s = IndexStorage.measure(in: data)
+            DispatchQueue.main.async { done(s) }
+        }
+    }
+
+    /// 清除内容索引: paused first, so the emptied index is not filled again until resumed.
+    func clearContentIndex(done: @escaping @MainActor () -> Void) {
+        setContentIndexingPaused(true)
+        guard let indexer else { done(); return }
+        indexer.clearContentIndex { [weak self] in
+            self?.statusChanged()
+            done()
+        }
+    }
+
+    /// 清除全部索引: content as above; the name index is scanned again at once (name search
+    /// needs it, and its scan is quick). Personal data and settings stay.
+    func clearAllIndexes() {
+        setContentIndexingPaused(true)
+        rebuildNameIndex()
+    }
+
+    func removeLeftovers(done: @escaping @MainActor @Sendable () -> Void) {
+        let data = dataDirectory
+        DispatchQueue.global(qos: .utility).async {
+            IndexStorage.removeLeftovers(in: data)
+            DispatchQueue.main.async { done() }
+        }
+    }
+
+    private func updatePauseItem() {
+        pauseItem.title = contentIndexingPaused ? L("恢复内容索引") : L("暂停内容索引")
+    }
     var nameService: NameService { names }
 
     /// Deletes the rebuildable name index (catalog + snapshot) and scans again. user.sqlite stays.

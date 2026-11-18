@@ -9,17 +9,19 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
     private var indexer: ContentIndexer?
     private var directory: String?
 
-    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, reply: @escaping (String?) -> Void) {
+    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, paused: Bool, reply: @escaping (String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
         if let indexer, directory == dataDirectory {
             indexer.setMaxFileBytes(maxFileBytes)
+            indexer.setPaused(paused)
             reply(nil)
             return
         }
         indexer?.stop()
         let ix = ContentIndexer(directory: URL(fileURLWithPath: dataDirectory), workerExecutable: URL(fileURLWithPath: workerPath), workers: workers)
         ix.setMaxFileBytes(maxFileBytes)
+        ix.setPaused(paused)
         ix.onSettled = { [weak self] in self?.recycleIfLarge() }
         do {
             try ix.start()
@@ -48,11 +50,25 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         do { try ix?.rebuildContentIndex(); reply(nil) } catch { reply(String(describing: error)) }
     }
 
+    func clearContentIndex(reply: @escaping (String?) -> Void) {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        do { try ix?.clearContentIndex(); reply(nil) } catch { reply(String(describing: error)) }
+    }
+
     func setMaxFileBytes(_ bytes: UInt64) {
         lock.lock()
         let ix = indexer
         lock.unlock()
         ix?.setMaxFileBytes(bytes)
+    }
+
+    func setPaused(_ paused: Bool) {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        ix?.setPaused(paused)
     }
 
     func wake() {

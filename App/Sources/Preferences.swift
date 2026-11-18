@@ -73,6 +73,12 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: "summonMode") }
     }
 
+    /// Content indexing paused from the menu bar or Settings; survives restarts.
+    var contentIndexingPaused: Bool {
+        get { defaults.bool(forKey: "contentIndexingPaused") }
+        set { defaults.set(newValue, forKey: "contentIndexingPaused") }
+    }
+
     /// Settings › 通用 › 历史记录: keep the last query in the box when summoned.
     var keepLastQuery: Bool {
         get { defaults.object(forKey: "keepLastQuery") as? Bool ?? true }

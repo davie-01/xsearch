@@ -27,6 +27,8 @@ public final class ContentIndexer: @unchecked Sendable {
         public var indexed: Int
         public var committedBatches: UInt64
         public var running: Bool
+        /// Paused by the user: tasks keep queueing, nothing is extracted until resumed.
+        public var paused = false
         /// The last cycle failed; it is retried automatically.
         public var lastError: String?
         /// Active instance, published together with the figures.
@@ -66,6 +68,11 @@ public final class ContentIndexer: @unchecked Sendable {
         get { stopFlag.withLock { $0 } }
         set { stopFlag.withLock { $0 = newValue } }
     }
+    /// Paused by the user (read by extraction threads): queued tasks wait, searching goes on.
+    private let pauseFlag = OSAllocatedUnfairLock(initialState: false)
+    private var paused: Bool { pauseFlag.withLock { $0 } }
+    /// Either way, running extractions give their tasks back without counting an attempt.
+    private var interrupting: Bool { stopped || paused }
     private var cycling = false
     private var needsRecovery = false
     private var errorBackoffUntil = Date.distantPast
@@ -176,7 +183,7 @@ public final class ContentIndexer: @unchecked Sendable {
             try reclaimTombstones()
             try applyLimits()
             try reindexUpgradedExtractors()
-            workers.forEach { $0.resume() }
+            if !paused { workers.forEach { $0.resume() } }
             Extractor.removeStaleArchiveScratch()
             stopped = false
             state.withLock { $0.running = true }
@@ -202,6 +209,29 @@ public final class ContentIndexer: @unchecked Sendable {
             catalog = nil
             workers.forEach { $0.stop() }
             state.withLock { $0.running = false }
+        }
+    }
+
+    /// Pause (ARCHITECTURE §9.2): running extractions are killed and their tasks go back to the
+    /// queue without counting an attempt; the writer stays open so readers keep the index, and
+    /// new tasks keep queueing. The worker processes are ended to give their memory back.
+    /// Resume extracts what queued meanwhile.
+    public func setPaused(_ p: Bool) {
+        let changed = pauseFlag.withLock { old in
+            defer { old = p }
+            return old != p
+        }
+        state.withLock { $0.paused = p }
+        guard changed else { return }
+        if p {
+            workers.forEach { $0.cancel() }
+            queue.async { [weak self] in self?.workers.forEach { $0.stop() } }
+        } else {
+            queue.async { [weak self] in
+                guard let self, !self.stopped else { return }
+                self.workers.forEach { $0.resume() }
+                self.cycleAndReschedule()
+            }
         }
     }
 
@@ -281,6 +311,9 @@ public final class ContentIndexer: @unchecked Sendable {
             try catalog.setMeta("content_instance", id)
             try catalog.setMeta("content_rebuild_instance", nil)
             try clearBatchRecords()
+            // The new instance holds nothing yet: no file counts as indexed (or failed) until
+            // it is extracted into it.
+            try catalog.db.exec("UPDATE files SET content_state = 0, content_error = NULL WHERE content_state != 0")
             _ = try requeue { _, _ in true }
         }
         instanceId = id
@@ -472,6 +505,21 @@ public final class ContentIndexer: @unchecked Sendable {
         }
     }
 
+    /// Settings › 隐私与数据 › 清除内容索引: the index files go now (space comes back at once) and
+    /// a new, empty instance takes their place with every content file queued again — extracted
+    /// when indexing runs. The app pauses indexing first, so nothing is rebuilt until resumed.
+    /// Readers holding the old files keep them until they reopen the new instance.
+    public func clearContentIndex() throws {
+        try queue.sync {
+            guard catalog != nil else { return }
+            try recoverIfNeeded()
+            try resetIndexInstance()
+            removeUnknownInstances()
+            try refreshCounts(full: true)
+            scheduleNextCycle()
+        }
+    }
+
     /// When no task is left, a running rebuild becomes the active instance.
     private func finishRebuildIfCaughtUp() throws {
         guard let catalog, let id = rebuildId, try readyCount() == 0, status.pending == 0 else { return }
@@ -556,7 +604,7 @@ public final class ContentIndexer: @unchecked Sendable {
             try recoverIfNeeded()
             // Idle must stay idle: a read decides, so no write lock is taken without work.
             var worked = false
-            while !stopped, try readyCount() > 0 {
+            while !interrupting, try readyCount() > 0 {
                 let tasks = try claim(limit: batchSize)
                 if tasks.isEmpty { break }
                 try process(tasks)
@@ -690,7 +738,7 @@ public final class ContentIndexer: @unchecked Sendable {
 
     private func extract(_ p: Prepared, worker: ExtractionWorker) -> Staged {
         let interrupted = Staged.retry(after: 0, error: nil, countAttempt: false)
-        if stopped { return interrupted }
+        if interrupting { return interrupted }
         // Before: the file must still be what the catalog recorded for this op.
         guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }
         let dir = (p.path as NSString).deletingLastPathComponent
@@ -702,9 +750,9 @@ public final class ContentIndexer: @unchecked Sendable {
         let timeout = baseTimeout + Double(p.version.size) / Double(1 << 20) * 2
         let hashable = type == .archive || UInt64(max(0, p.version.size)) <= limits.maxFileBytes
         let hashDeadline = Date().addingTimeInterval(timeout)
-        let digest = hashable ? Self.digest(p.path, cancelled: { self.stopped || Date() > hashDeadline }) : nil
+        let digest = hashable ? Self.digest(p.path, cancelled: { self.interrupting || Date() > hashDeadline }) : nil
         let key = digest.map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes):\(limits.maxUnpackedBytes)" } ?? ""
-        if stopped { return interrupted }
+        if interrupting { return interrupted }
         if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
             // The digest describes what was read: the file must not have changed since.
             guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }

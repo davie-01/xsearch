@@ -27,6 +27,8 @@ final class IndexServiceClient {
     var onUpdate: (() -> Void)?
     /// Single-file limit from the settings; set before `start`.
     var maxFileBytes: UInt64 = 100 << 20
+    /// Content indexing paused by the user; set before `start`, then through `setPaused`.
+    private(set) var paused = false
 
     var status: ContentIndexer.Status? { snapshot.status.running ? snapshot.status : nil }
 
@@ -56,6 +58,7 @@ final class IndexServiceClient {
         guard Self.serviceBundled && ProcessInfo.processInfo.environment["XS_INPROCESS_INDEX"] != "1" else {
             let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: 2)
             ix.setMaxFileBytes(maxFileBytes)
+            ix.setPaused(paused)
             do { try ix.start(); local = ix } catch { onError?(String(describing: error)) }
             refresh()
             return
@@ -117,7 +120,7 @@ final class IndexServiceClient {
     private func startRemote() {
         guard !stopping else { return }
         let gen = generation
-        proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2, maxFileBytes: maxFileBytes) { [weak self] error in
+        proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2, maxFileBytes: maxFileBytes, paused: paused) { [weak self] error in
             Task { @MainActor in
                 guard let self, !self.stopping, gen == self.generation else { return }
                 if let error {
@@ -172,6 +175,29 @@ final class IndexServiceClient {
         guard bytes != maxFileBytes else { return }
         maxFileBytes = bytes
         if let local { local.setMaxFileBytes(bytes) } else { proxy?.setMaxFileBytes(bytes) }
+    }
+
+    /// Also the value every later (re)start passes on.
+    func setPaused(_ p: Bool) {
+        paused = p
+        if let local { local.setPaused(p) } else { proxy?.setPaused(p) }
+        refresh()
+    }
+
+    func clearContentIndex(done: @escaping @MainActor () -> Void) {
+        if let local {
+            do { try local.clearContentIndex() } catch { onError?(String(describing: error)) }
+            refresh()
+            done()
+            return
+        }
+        proxy?.clearContentIndex { [weak self] error in
+            Task { @MainActor in
+                if let error { self?.onError?(error) }
+                self?.refresh()
+                done()
+            }
+        }
     }
 
     func rebuildContentIndex() {
