@@ -266,3 +266,17 @@ import Testing
     #expect(SearchConditions().clauses(content: true).isEmpty)
     #expect(SearchConditions.query(input: "a | b", conditions: SearchConditions(), steps: [], content: false, syntax: .default) == "a | b")
 }
+
+@Test func extractionFailuresReadAsReasons() {
+    let zip = ExtractionFailure(#"Index(message: "invalid Zip archive: Invalid local file header")"#)
+    #expect(zip.summary == "文件已损坏或格式不正确" && zip.detail == "invalid Zip archive: Invalid local file header")
+    #expect(ExtractionFailure(#"Index(message: "Password for encrypted archive not specified")"#).summary == "文件已加密，需要密码才能读取")
+    #expect(ExtractionFailure("PDF 已加密，无法提取").summary == "文件已加密，需要密码才能读取")
+    #expect(ExtractionFailure(#"Index(message: "unsupported Zip archive: Compression method not supported")"#).summary == "使用了不支持的压缩或编码方式")
+    let timeout = ExtractionFailure("解析超时，已隔离")
+    #expect(timeout.summary == "解析超时，已跳过" && timeout.detail == nil && timeout.report == "解析超时，已跳过")
+    #expect(ExtractionFailure("解析器崩溃，已隔离").summary == "解析时出错退出，已跳过")
+    #expect(ExtractionFailure("").summary == "未记录原因")
+    let other = ExtractionFailure("something odd")
+    #expect(other.summary == "无法读取这个文件" && other.report == "无法读取这个文件（something odd）")
+}

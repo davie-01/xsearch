@@ -93,6 +93,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     private var lastContent: ContentOutput?
 
     var onRead: ((ContentHit, String, Int) -> Void)?
+    /// Extract these catalog files again; replies how many were queued.
+    var reindex: (([Int64], @escaping @MainActor @Sendable (Int) -> Void) -> Void)?
     /// Opens Settings at the index scope (the content placeholder links there).
     var onOpenScopeSettings: (() -> Void)?
     /// Dev hook (XS_READER): open the first content result in the reader once.
@@ -1322,8 +1324,14 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             },
             toast: { [weak self] in self?.flash($0) },
             willLeave: { [weak self] in self?.usage?.recordOpen(path: r.path, fileId: r.fileId) })
+        var withReindex = actions
+        if let hit = r.hit, !hit.isMember, let reindex {
+            withReindex.reindex = { [weak self] in
+                reindex([Int64(hit.fileId)]) { n in self?.flash(n > 0 ? L("已加入重新索引队列") : L("这个文件不在内容索引范围内")) }
+            }
+        }
         let menu = NSMenu()
-        ResultMenu.build(menu, for: target, actions: actions)
+        ResultMenu.build(menu, for: target, actions: withReindex)
         return menu.items.isEmpty ? nil : menu
     }
 

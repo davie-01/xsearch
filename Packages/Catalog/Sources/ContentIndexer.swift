@@ -73,6 +73,10 @@ public final class ContentIndexer: @unchecked Sendable {
     private var paused: Bool { pauseFlag.withLock { $0 } }
     /// Either way, running extractions give their tasks back without counting an attempt.
     private var interrupting: Bool { stopped || paused }
+    /// Files asked to be extracted again (重新索引此文件): their next extraction skips the
+    /// digest cache, which would otherwise hand back the stored text of the unchanged file.
+    /// In memory only: after a service restart the task still runs, possibly from the cache.
+    private let freshExtraction = OSAllocatedUnfairLock(initialState: Set<Int64>())
     private var cycling = false
     private var needsRecovery = false
     private var errorBackoffUntil = Date.distantPast
@@ -520,6 +524,56 @@ public final class ContentIndexer: @unchecked Sendable {
         }
     }
 
+    /// 结果右键 › 重新索引此文件: extracted again even if unchanged (a new op_seq, attempts from
+    /// zero). Returns how many were queued; files outside the content scope are skipped.
+    @discardableResult
+    public func reindex(fileIds: [Int64]) throws -> Int {
+        freshExtraction.withLock { $0.formUnion(fileIds) }
+        return try requeueNow(fileIds)
+    }
+
+    /// Settings › 提取失败的文件 › 重试: every quarantined file gets a fresh task.
+    @discardableResult
+    public func retryFailed() throws -> Int {
+        let ids: [Int64] = try queue.sync {
+            guard let catalog else { return [] }
+            let s = try catalog.db.prepare("SELECT id FROM files WHERE deleted = 0 AND in_content = 1 AND content_state = 4")
+            var ids: [Int64] = []
+            while try s.step() { ids.append(s.int(0)) }
+            return ids
+        }
+        return try requeueNow(ids)
+    }
+
+    private func requeueNow(_ ids: [Int64]) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        let wanted = Set(ids)
+        let n: Int = try queue.sync {
+            guard let catalog else { return 0 }
+            let n = try requeue(ids: wanted, catalog: catalog)
+            try refreshCounts(full: true)
+            return n
+        }
+        wake()
+        return n
+    }
+
+    private func requeue(ids: Set<Int64>, catalog: FileCatalog) throws -> Int {
+        try catalog.db.transactionIfNeeded {
+            let s = try catalog.db.prepare("SELECT id, mtime_ns FROM files WHERE deleted = 0 AND in_content = 1")
+            var rows: [(Int64, Int64)] = []
+            while try s.step() { if ids.contains(s.int(0)) { rows.append((s.int(0), s.int(1))) } }
+            var counter = try catalog.opSeqCounter()
+            for (id, mtime) in rows {
+                counter += 1
+                try catalog.setContent(id, inContent: true, opSeq: counter)
+                try catalog.enqueue(id, opSeq: counter, kind: .index, priority: mtime / 1_000_000_000)
+            }
+            try catalog.setOpSeqCounter(counter)
+            return rows.count
+        }
+    }
+
     /// When no task is left, a running rebuild becomes the active instance.
     private func finishRebuildIfCaughtUp() throws {
         guard let catalog, let id = rebuildId, try readyCount() == 0, status.pending == 0 else { return }
@@ -753,7 +807,8 @@ public final class ContentIndexer: @unchecked Sendable {
         let digest = hashable ? Self.digest(p.path, cancelled: { self.interrupting || Date() > hashDeadline }) : nil
         let key = digest.map { "\($0):\(type?.rawValue ?? "?"):v\(type.map(Extractor.version) ?? 0):\(limits.maxFileBytes):\(limits.maxUnpackedBytes)" } ?? ""
         if interrupting { return interrupted }
-        if !key.isEmpty, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
+        let fresh = freshExtraction.withLock { $0.remove(p.task.fileId) != nil }
+        if !key.isEmpty, !fresh, let cached = (try? writer?.findByExtractKey(key: key)) ?? nil {
             // The digest describes what was read: the file must not have changed since.
             guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }
             lock.withLock { cacheHits += 1 }
@@ -763,7 +818,10 @@ public final class ContentIndexer: @unchecked Sendable {
                                      anchorsJson: cached.anchorsJson, pagesJson: cached.pagesJson, state: cached.state, extractKey: key))
         }
         let outcome = worker.extract(path: p.path, limits: limits, timeout: timeout, fault: workerFault?(p.path))
-        if outcome == .cancelled { return interrupted }
+        if outcome == .cancelled {
+            if fresh { freshExtraction.withLock { _ = $0.insert(p.task.fileId) } }
+            return interrupted
+        }
         afterExtract?(p.path)
         // After: changed during extraction → the result describes neither version.
         guard diskVersion(p.path) == p.version else { return staleRetry(p.task) }

@@ -75,6 +75,68 @@ final class SettingsModel: ObservableObject {
         contentPaused = paused
     }
 
+    /// 重新扫描 a folder of the settings (`~` paths), or everything (立即更新).
+    func rescan(_ folder: String?) {
+        let home = NSHomeDirectory()
+        delegate?.rescan(folder.map { $0 == "~" ? home : $0.hasPrefix("~/") ? home + $0.dropFirst() : $0 })
+        refresh()
+    }
+
+    /// 查看失败的文件: the list, and what the last 重新提取 did.
+    @Published var failed: [NameService.FailedExtraction] = []
+    @Published var failedNote: String?
+
+    func loadFailed() { failed = names.failedExtractions() }
+
+    /// Files being extracted again from the list; their rows say so until the indexer is done.
+    @Published var retrying = Set<Int64>()
+    private var retryTimer: Timer?
+
+    /// Extract again (nil: every failed file). Their rows show progress; once no task of theirs
+    /// is left, the list reloads and says how it went: most failures (encrypted, damaged) fail
+    /// again, and without that answer the list just looked unchanged.
+    func retryFailed(_ ids: [Int64]?) {
+        let targets = Set(ids ?? failed.map(\.id))
+        guard !targets.isEmpty, retrying.isEmpty else { return }
+        retrying = targets
+        failedNote = contentPaused ? L("内容索引已暂停，恢复后才会重新提取。") : L("正在重新提取 %@ 个文件…", "\(targets.count)")
+        let done: @MainActor @Sendable (Int) -> Void = { [weak self] _ in
+            self?.refresh()
+            self?.watchRetry()
+        }
+        if let ids { delegate?.reindex(ids, done: done) } else { delegate?.retryFailedExtractions(done: done) }
+    }
+
+    private func watchRetry() {
+        retryTimer?.invalidate()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkRetry() }
+        }
+    }
+
+    private func checkRetry() {
+        guard !retrying.isEmpty, !contentPaused else { return }
+        guard names.pendingContent(retrying).isEmpty else { return }
+        retryTimer?.invalidate()
+        retryTimer = nil
+        let targets = retrying
+        retrying = []
+        loadFailed()
+        refresh()
+        let still = targets.intersection(failed.map(\.id)).count
+        let fixed = targets.count - still
+        failedNote = fixed == 0 ? L("%@ 个文件重新提取后仍然失败，原因没有变化。", "\(still)")
+            : still == 0 ? L("%@ 个文件已重新提取成功，正文可以搜索了。", "\(fixed)")
+            : L("%@ 个已成功，%@ 个仍然失败。", "\(fixed)", "\(still)")
+    }
+
+    /// The sheet closed: stop watching (the indexer carries on by itself).
+    func stopWatchingRetry() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        retrying = []
+    }
+
     func measureStorage() {
         delegate?.measureStorage { [weak self] s in self?.storage = s }
     }
@@ -449,6 +511,12 @@ struct ScopePane: View {
         Text(L("索引范围")).font(.system(size: 20, weight: .semibold))
         Text(L("文件名和内容分别设置。同一个文件只扫描、提取一次。")).font(.system(size: 12.5)).foregroundStyle(.secondary)
         Card(title: L("文件名索引"), subtitle: statusLine) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(L("文件变化会实时更新。如果怀疑漏掉了变化（例如在其他电脑上改过外置盘），可以立即重新核对全部范围。"))
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 16)
+                Button(L("立即更新")) { model.rescan(nil) }
+            }
             Picker("", selection: Binding(get: { model.scope.wholeDisk }, set: { model.scope.wholeDisk = $0; model.commitScope() })) {
                 Text(L("整盘")).tag(true)
                 Text(L("指定文件夹")).tag(false)
@@ -462,6 +530,7 @@ struct ScopePane: View {
                             Image(systemName: "folder")
                             Text(folder).font(.system(size: 13))
                             Spacer()
+                            Button(L("重新扫描")) { model.rescan(folder) }.buttonStyle(.borderless)
                             Button(L("移除")) {
                                 model.scope.folders.removeAll { $0 == folder }
                                 model.commitScope()
@@ -486,6 +555,7 @@ struct ScopePane: View {
                             Image(systemName: "folder")
                             Text(folder).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                             Spacer()
+                            Button(L("重新扫描")) { model.rescan(folder) }.buttonStyle(.borderless)
                             Button(L("移除")) {
                                 model.scope.extraFolders.removeAll { $0 == folder }
                                 model.commitScope()
@@ -627,6 +697,7 @@ struct PrivacyPane: View {
 
 struct ContentCard: View {
     @ObservedObject var model: SettingsModel
+    @State private var showFailed = false
 
     var statusLine: String {
         guard let st = model.contentStatus else { return L("内容索引未启动") }
@@ -646,6 +717,7 @@ struct ContentCard: View {
                         Image(systemName: "folder")
                         Text(folder).font(.system(size: 13))
                         Spacer()
+                        Button(L("重新扫描")) { model.rescan(folder) }.buttonStyle(.borderless)
                         Button(L("移除")) {
                             model.content.folders.removeAll { $0 == folder }
                             model.commitContent()
@@ -666,6 +738,23 @@ struct ContentCard: View {
                 }
                 Spacer()
                 Button(model.contentPaused ? L("恢复内容索引") : L("暂停内容索引")) { model.setContentPaused(!model.contentPaused) }
+            }
+            if let failed = model.contentStatus?.failed, failed > 0 {
+                HStack(alignment: .firstTextBaseline) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("%@ 个文件提取失败", "\(failed)")).font(.system(size: 13, weight: .medium))
+                        Text(L("这些文件的正文搜不到。可以查看每个文件失败的原因。"))
+                            .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(L("查看失败的文件…")) {
+                        model.failedNote = nil
+                        model.loadFailed()
+                        showFailed = true
+                    }
+                }
+                .sheet(isPresented: $showFailed) { FailedExtractionsView(model: model) }
             }
             Divider()
             Text(L("提取的文件类型")).font(.system(size: 13, weight: .medium))
@@ -730,5 +819,94 @@ struct DiagnosticsPane: View {
                 }
             }
         }
+    }
+}
+
+/// Settings › 内容索引 › 查看失败的文件: which content files could not be extracted and why, with
+/// the usual next steps. Re-extraction lives here, not on the card: rescanning a folder does not
+/// retry a failed file that has not changed.
+struct FailedExtractionsView: View {
+    @ObservedObject var model: SettingsModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection = Set<Int64>()
+
+    private static let dateFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Loc.locale
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
+
+    private var selected: [NameService.FailedExtraction] { model.failed.filter { selection.contains($0.id) } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("提取失败的文件（%@）", "\(model.failed.count)")).font(.system(size: 17, weight: .semibold))
+            Text(L("解析超时、解析器崩溃、占用内存过多或格式无法识别的文件会被跳过，它们的正文搜不到。文件修改后会自动重新提取；修好文件或更新 XSearch 后，也可以在这里重新提取。"))
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Table(model.failed, selection: $selection) {
+                TableColumn(L("文件")) { f in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text((f.path as NSString).lastPathComponent).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
+                        Text(PathUtil.abbreviate((f.path as NSString).deletingLastPathComponent, home: NSHomeDirectory()))
+                            .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                    }
+                    .help(f.path)
+                }
+                .width(min: 180, ideal: 270)
+                TableColumn(L("原因")) { f in
+                    if model.retrying.contains(f.id) {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text(model.contentPaused ? L("等待恢复内容索引") : L("正在重新提取…")).font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        let reason = ExtractionFailure(f.reason)
+                        Text(reason.summary).font(.system(size: 12)).lineLimit(2).help(reason.detail ?? reason.summary)
+                    }
+                }
+                .width(min: 160, ideal: 220)
+                TableColumn(L("大小")) { f in
+                    Text(ByteCountFormatter.string(fromByteCount: f.size, countStyle: .file)).font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
+                }
+                .width(min: 64, ideal: 72, max: 90)
+                TableColumn(L("修改时间")) { f in
+                    Text(Self.dateFormat.string(from: Date(timeIntervalSince1970: TimeInterval(f.mtime)))).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .width(min: 112, ideal: 118, max: 140)
+            }
+            .contextMenu(forSelectionType: Int64.self) { ids in
+                Button(L("在访达中显示")) { reveal(ids) }
+                Button(L("重新提取")) { model.retryFailed(Array(ids)) }.disabled(!model.retrying.isEmpty)
+                Button(L("复制路径")) { copy(model.failed.filter { ids.contains($0.id) }) }
+            } primaryAction: { ids in reveal(ids) }
+            .frame(minHeight: 260)
+            if let note = model.failedNote {
+                Text(note).font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(L("在访达中显示")) { reveal(selection) }.disabled(selection.isEmpty)
+                Button(L("重新提取所选")) { model.retryFailed(Array(selection)) }.disabled(selection.isEmpty || !model.retrying.isEmpty)
+                Button(L("复制列表")) { copy(selected.isEmpty ? model.failed : selected) }.disabled(model.failed.isEmpty)
+                    .help(L("复制文件路径和原因，便于反馈问题"))
+                Spacer()
+                Button(L("全部重新提取")) { model.retryFailed(nil) }.disabled(model.failed.isEmpty || !model.retrying.isEmpty)
+                Button(L("完成")) { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 820, height: 480)
+        .onDisappear { model.stopWatchingRetry() }
+    }
+
+    private func reveal(_ ids: Set<Int64>) {
+        let urls = model.failed.filter { ids.contains($0.id) }.map { URL(fileURLWithPath: $0.path) }
+        if !urls.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(urls) }
+    }
+
+    private func copy(_ items: [NameService.FailedExtraction]) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(items.map { $0.path + "\t" + ExtractionFailure($0.reason).report }.joined(separator: "\n"), forType: .string)
     }
 }

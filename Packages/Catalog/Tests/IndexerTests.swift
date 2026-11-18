@@ -216,6 +216,66 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(try p.search("upsilon") == ["a.txt", "b.txt"])
 }
 
+@Test func reindexAndRetryFailedQueueFreshTasks() throws {
+    let failing = OSAllocatedUnfairLock(initialState: true)
+    let extracted = OSAllocatedUnfairLock(initialState: [String]())
+    let p = try Pipeline("retry") { ix in
+        // A crash, not a hang: no time limit that a busy machine could also trip for good.txt.
+        ix.backoffBase = 0.05
+        ix.maxAttempts = 2
+        ix.workerFault = { path in path.hasSuffix("bad.txt") && failing.withLock { $0 } ? "crash" : nil }
+        ix.afterExtract = { path in extracted.withLock { $0.append((path as NSString).lastPathComponent) } }
+    }
+    defer { p.stop() }
+    try p.box.write("docs/bad.txt", "坏文件 phi")
+    try p.box.write("docs/good.txt", "好文件 chi")
+    try p.start()
+    #expect(p.settle(timeout: 30))
+    #expect(p.indexer.status.failed == 1)
+    #expect(try p.search("phi").isEmpty)
+    // Settings lists it, with its path and the reason.
+    let failed = p.names.failedExtractions()
+    #expect(failed.map { ($0.path as NSString).lastPathComponent } == ["bad.txt"])
+    #expect(failed.first?.reason.contains("崩溃") == true && failed.first?.path == p.box.p("docs/bad.txt"))
+    // Retry: the quarantined file gets a fresh task and, the fault gone, is indexed.
+    failing.withLock { $0 = false }
+    let badId = try #require(failed.first?.id)
+    p.indexer.setPaused(true)  // keeps the task queued long enough to see it
+    #expect(try p.indexer.retryFailed() == 1)
+    #expect(p.names.pendingContent([badId, 999_999]) == [badId])
+    p.indexer.setPaused(false)
+    #expect(p.settle())
+    #expect(p.names.pendingContent([badId]).isEmpty)
+    #expect(p.indexer.status.failed == 0)
+    #expect(try p.search("phi") == ["bad.txt"])
+    #expect(p.names.failedExtractions().isEmpty)
+    // Reindex: an unchanged file is extracted again; ids outside the content scope are skipped.
+    let before = extracted.withLock { $0.filter { $0 == "good.txt" }.count }
+    let id = try #require(contentFileId(p, "good.txt"))
+    #expect(try p.indexer.reindex(fileIds: [id, 999_999]) == 1)
+    #expect(p.settle())
+    #expect(extracted.withLock { $0.filter { $0 == "good.txt" }.count } == before + 1)
+    #expect(try p.search("chi") == ["good.txt"])
+}
+
+private func contentFileId(_ p: Pipeline, _ name: String) -> Int64? {
+    p.names.search(NameQuery.parse(name, home: "/nonexistent-home"), limit: 10).hits.first { $0.name == name }?.fileId
+}
+
+@Test func rescanListsTheFolderAgain() throws {
+    let p = try Pipeline("rescan")
+    defer { p.stop() }
+    try p.box.write("docs/one.txt", "x")
+    try p.start()
+    #expect(p.settle())
+    let before = p.names.rescanOps
+    p.names.rescan(p.box.p("docs"))
+    p.names.rescan()
+    #expect(p.names.waitUntilIdle())
+    #expect(p.names.rescanOps == before + 2)
+    #expect(p.names.status.phase == .ready)
+}
+
 @Test func hungParserIsQuarantined() throws {
     let p = try Pipeline("hang") { ix in
         ix.baseTimeout = 0.4

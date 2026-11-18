@@ -1111,6 +1111,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     // MARK: Favorites, trash, full window
 
+    /// Extract these catalog files again; replies how many were queued (set by the app delegate).
+    var reindex: (([Int64], @escaping @MainActor @Sendable (Int) -> Void) -> Void)?
+
     /// Opens the full window with this query (set by the app delegate).
     var onExpand: ((String, Preferences.Mode) -> Void)?
     private var pendingTrash: String?
@@ -1465,6 +1468,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 usage?.recordOpen(path: target.path, fileId: currentTarget()?.fileId)
                 hide()
             })
+        if content, let reindex, let h = contentPane.selected, !h.isMember {
+            actions.reindex = { [weak self] in
+                reindex([Int64(h.fileId)]) { n in self?.toast(n > 0 ? L("已加入重新索引队列") : L("这个文件不在内容索引范围内")) }
+            }
+        }
         if content {
             // The occurrence shown in the preview, when the preview is already of this row.
             actions.read = { [weak self] in

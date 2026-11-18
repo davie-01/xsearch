@@ -110,6 +110,19 @@ public final class NameService: @unchecked Sendable {
         queue.async { [self] in setScopes(scope, content: content) }
     }
 
+    /// 立即更新 (nil: every root) or 重新扫描 one folder: the folder is listed again and compared
+    /// with the catalog, which catches changes FSEvents missed. Content-scope files that changed
+    /// get index tasks as usual.
+    public func rescan(_ path: String? = nil) {
+        queue.async { [self] in
+            guard let catalog else { return }
+            do {
+                try catalog.append([path.map { (.rescan, $0, 0) } ?? (.scope, "", 0)], lastEventId: nil)
+                process()
+            } catch { fail(error) }
+        }
+    }
+
     /// On `queue`: the other half of the settings is read there, so two quick changes in a row
     /// both take effect.
     private func setScopes(_ scope: NameScope, content: ContentScope?) {
@@ -253,6 +266,44 @@ public final class NameService: @unchecked Sendable {
                 out.append((TaskRow(fileId: s.int(0), opSeq: s.int(1), kind: s.int(2), state: s.int(3)), nil))
             }
             return out.map { ($0.0, try? catalog.path(of: $0.0.fileId)) }
+        }
+    }
+
+    /// A content file the indexer gave up on (timeout, parser crash, memory, unreadable format).
+    public struct FailedExtraction: Sendable, Equatable, Identifiable {
+        public var id: Int64
+        public var path: String
+        public var reason: String
+        public var size: Int64
+        /// Seconds since 1970.
+        public var mtime: Int64
+    }
+
+    /// Settings › 内容索引 › 查看失败的文件: newest first.
+    public func failedExtractions() -> [FailedExtraction] {
+        queue.sync {
+            guard let catalog, let s = try? catalog.db.prepare("""
+                SELECT id, content_error, size, mtime_ns FROM files
+                WHERE deleted = 0 AND in_content = 1 AND content_state = 4 ORDER BY mtime_ns DESC
+                """) else { return [] }
+            var rows: [(Int64, String, Int64, Int64)] = []
+            while (try? s.step()) == true { rows.append((s.int(0), s.isNull(1) ? "" : s.text(1), s.int(2), s.int(3) / 1_000_000_000)) }
+            catalog.db.resetStatements()
+            return rows.compactMap { id, reason, size, mtime in
+                guard let path = try? catalog.path(of: id) else { return nil }
+                return FailedExtraction(id: id, path: path, reason: reason, size: size, mtime: mtime)
+            }
+        }
+    }
+
+    /// Of these files, the ones whose content task is still queued or running.
+    public func pendingContent(_ ids: Set<Int64>) -> Set<Int64> {
+        queue.sync {
+            guard let catalog, !ids.isEmpty, let s = try? catalog.db.prepare("SELECT DISTINCT file_id FROM content_tasks WHERE state IN (0, 1)") else { return [] }
+            var out = Set<Int64>()
+            while (try? s.step()) == true { if ids.contains(s.int(0)) { out.insert(s.int(0)) } }
+            catalog.db.resetStatements()
+            return out
         }
     }
 

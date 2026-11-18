@@ -33,6 +33,8 @@ enum ResultMenu {
         var toast: (String) -> Void
         /// Before handing the file to another app.
         var willLeave: () -> Void
+        /// Content hits: extract the file again (重新索引此文件).
+        var reindex: (() -> Void)? = nil
     }
 
     static func build(_ menu: NSMenu, for t: Target, actions a: Actions) {
@@ -92,6 +94,10 @@ enum ResultMenu {
             a.toast(L("已复制"))
         }
         add(L("复制路径")) { copy(string: t.copyPathText); a.toast(L("已复制路径")) }
+        if let reindex = a.reindex {
+            separator()
+            add(L("重新索引此文件"), reindex)
+        }
         separator()
         add(t.isFavorite ? L("取消收藏") : L("收藏"), key: "d", modifiers: .command, a.toggleFavorite)
         if t.isRecent { add(L("从最近打开中移除"), a.removeRecent) }

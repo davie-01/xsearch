@@ -17,6 +17,11 @@ import Foundation
     /// The catalog queued new tasks.
     func wake()
     func rebuildContentIndex(reply: @escaping (String?) -> Void)
+    /// Extracts these files again (JSON `[Int64]` of catalog file ids: plain data crosses XPC
+    /// without class allow-lists). Replies how many were queued.
+    func reindexFiles(_ fileIds: Data, reply: @escaping (Int) -> Void)
+    /// Queues every file whose extraction failed again; replies how many.
+    func retryFailed(reply: @escaping (Int) -> Void)
     /// Deletes the content index now and queues every content file again (ContentIndexer).
     func clearContentIndex(reply: @escaping (String?) -> Void)
     /// Stops the indexer (writer closed, workers stopped); the app calls this before quitting.

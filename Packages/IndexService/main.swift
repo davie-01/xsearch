@@ -50,6 +50,21 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         do { try ix?.rebuildContentIndex(); reply(nil) } catch { reply(String(describing: error)) }
     }
 
+    func reindexFiles(_ fileIds: Data, reply: @escaping (Int) -> Void) {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        let ids = (try? JSONDecoder().decode([Int64].self, from: fileIds)) ?? []
+        reply((try? ix?.reindex(fileIds: ids)) ?? 0)
+    }
+
+    func retryFailed(reply: @escaping (Int) -> Void) {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        reply((try? ix?.retryFailed()) ?? 0)
+    }
+
     func clearContentIndex(reply: @escaping (String?) -> Void) {
         lock.lock()
         let ix = indexer

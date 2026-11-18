@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var rebuildingNames = false
     private let contentStatusItem = NSMenuItem(title: L("内容索引：正在打开"), action: nil, keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: L("暂停内容索引"), action: nil, keyEquivalent: "")
+    private let updateNowItem = NSMenuItem(title: L("立即更新索引"), action: nil, keyEquivalent: "")
     private var usage: UsageStore?
     private var session: SearchSession!
     private var launcher: LauncherController!
@@ -34,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         f.nameScope = { Preferences.shared.nameScope }
         f.contentScope = { [weak self] in self?.currentContentScope ?? .default }
         f.onOpenScopeSettings = { [weak self] in self?.openSettings(tab: .scope) }
+        f.reindex = { [weak self] ids, done in self?.reindex(ids, done: done) ?? done(0) }
         fullWindow = f
         return f
     }
@@ -108,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
         launcher.onRead = { [weak self] hit, expression, n, live in self?.reader.show(hit, expression: expression, live: live, startAt: n) }
         launcher.onExpand = { [weak self] text, mode in self?.full.show(text: text, mode: mode) }
+        launcher.reindex = { [weak self] ids, done in self?.reindex(ids, done: done) ?? done(0) }
         readerWindow?.close()
         readerWindow = nil
         fullWindow?.close()
@@ -299,6 +302,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pauseItem.target = self
         pauseItem.action = #selector(togglePause)
         menu.addItem(pauseItem)
+        updateNowItem.target = self
+        updateNowItem.action = #selector(updateNow)
+        menu.addItem(updateNowItem)
         updatePauseItem()
         menu.addItem(.separator())
         hotKeyItem.target = self
@@ -419,6 +425,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func togglePause() { setContentIndexingPaused(!contentIndexingPaused) }
+
+    /// 立即更新索引 (menu bar, Settings): every folder in scope is listed again and compared with
+    /// the catalog, catching changes FSEvents missed; changed content files are extracted (unless
+    /// paused). nil-path variant of `rescan(_:)`.
+    @objc func updateNow() { rescan(nil) }
+
+    /// Settings › 索引范围 › 重新扫描 one folder; nil: everything.
+    func rescan(_ path: String?) {
+        names.rescan(path)
+        statusChanged()
+    }
+
+    /// 结果右键 › 重新索引此文件: extracted again even if unchanged.
+    func reindex(_ fileIds: [Int64], done: @escaping @MainActor @Sendable (Int) -> Void) {
+        guard let indexer else { done(0); return }
+        indexer.reindex(fileIds: fileIds, done: done)
+    }
+
+    /// Settings › 内容索引 › 重试失败的文件.
+    func retryFailedExtractions(done: @escaping @MainActor @Sendable (Int) -> Void) {
+        guard let indexer else { done(0); return }
+        indexer.retryFailed { [weak self] n in
+            self?.statusChanged()
+            done(n)
+        }
+    }
 
     /// Settings › 隐私与数据: sizes by kind, measured off the main thread.
     func measureStorage(_ done: @escaping @MainActor @Sendable (IndexStorage) -> Void) {

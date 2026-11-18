@@ -184,6 +184,39 @@ final class IndexServiceClient {
         refresh()
     }
 
+    /// Replies how many files were queued (0: not in the content scope, or no service).
+    func reindex(fileIds: [Int64], done: @escaping @MainActor @Sendable (Int) -> Void) {
+        if let local {
+            let n = (try? local.reindex(fileIds: fileIds)) ?? 0
+            refresh()
+            done(n)
+            return
+        }
+        guard let proxy, let data = try? JSONEncoder().encode(fileIds) else { done(0); return }
+        proxy.reindexFiles(data) { [weak self] n in
+            Task { @MainActor in
+                self?.refresh()
+                done(n)
+            }
+        }
+    }
+
+    func retryFailed(done: @escaping @MainActor @Sendable (Int) -> Void) {
+        if let local {
+            let n = (try? local.retryFailed()) ?? 0
+            refresh()
+            done(n)
+            return
+        }
+        guard let proxy else { done(0); return }
+        proxy.retryFailed { [weak self] n in
+            Task { @MainActor in
+                self?.refresh()
+                done(n)
+            }
+        }
+    }
+
     func clearContentIndex(done: @escaping @MainActor () -> Void) {
         if let local {
             do { try local.clearContentIndex() } catch { onError?(String(describing: error)) }
