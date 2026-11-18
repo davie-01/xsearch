@@ -892,8 +892,12 @@ struct FailedExtractionsView: View {
                     .help(L("复制文件路径和原因，便于反馈问题"))
                 Spacer()
                 Button(L("全部重新提取")) { model.retryFailed(nil) }.disabled(model.failed.isEmpty || !model.retrying.isEmpty)
-                Button(L("完成")) { dismiss() }.keyboardShortcut(.defaultAction)
+                // Nothing here to cancel or confirm: one 关闭, for Return and Esc alike.
+                Button(L("关闭")) { dismiss() }.keyboardShortcut(.defaultAction)
+                    .background(Button("") { dismiss() }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false))
             }
+            // ⌘W closes the sheet as it would a window (a sheet has no close button of its own).
+            .background(Button("") { dismiss() }.keyboardShortcut("w", modifiers: .command).opacity(0).allowsHitTesting(false))
         }
         .padding(20)
         .frame(width: 820, height: 480)

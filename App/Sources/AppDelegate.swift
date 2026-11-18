@@ -56,7 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             holder.submenu = menu
             main.addItem(holder)
         }
-        submenu("XSearch", [(L("退出 XSearch"), #selector(NSApplication.terminate(_:)), "q", .command)])
+        submenu("XSearch", [(L("退出 XSearch"), #selector(AppDelegate.quit), "q", .command)])
+        // Straight to the delegate: through the responder chain a sheet would take it.
+        main.items.last?.submenu?.items.first?.target = self
         submenu(L("编辑"), [
             (L("撤销"), Selector(("undo:")), "z", .command), (L("重做"), Selector(("redo:")), "z", [.command, .shift]),
             (L("剪切"), #selector(NSText.cut(_:)), "x", .command), (L("拷贝"), #selector(NSText.copy(_:)), "c", .command),
@@ -239,6 +241,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// 退出 XSearch (menu bar, ⌘Q). A sheet on a window (Settings › 查看失败的文件) took the
+    /// plain `terminate:` and nothing happened: sheets are closed first, then the app quits.
+    @objc func quit() {
+        for window in NSApp.windows {
+            while let sheet = window.attachedSheet { window.endSheet(sheet) }
+        }
+        NSApp.terminate(nil)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         indexer?.stop()
         names.shutdown()
@@ -319,7 +330,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         prefs.target = self
         menu.addItem(prefs)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: L("退出 XSearch"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let quit = NSMenuItem(title: L("退出 XSearch"), action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
         statusItem.menu = menu
         statusChanged()
     }
