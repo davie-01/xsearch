@@ -1,7 +1,7 @@
 import AppKit
 import XSearchCore
 
-/// Context menu of a launcher result (docs/m5/右键菜单.md): Finder's file menu, trimmed per
+/// Context menu of a launcher result (docs/design/CONTEXT-MENU.md): Finder's file menu, trimmed per
 /// kind of result. Built fresh on each right click from what the row is.
 @MainActor
 enum ResultMenu {

@@ -1,9 +1,9 @@
 # XSearch 架构设计
 
 > 版本：v0.12（2026-10-31）
-> 状态：M0 完成（[M0 报告](m0/RESULTS.md)）；M1 完成（[M1 进度](m1/STATUS.md)）；**M2 内容最小闭环完成**（[M2 进度](m2/STATUS.md)）。
+> 状态：产品方案与决策记录（M0–M5 已实施）。本文正文记录的是方案阶段的设想与取舍，没有随实现逐条更新；里程碑、阶段目标和“待定事项”一类内容按当时状态保留。与实现不一致之处以代码和 [DESIGN.md](DESIGN.md) 为准，代码注释中的 `ARCHITECTURE §N` 指本文章节。各阶段计划与验收记录已移出仓库。
 > 平台：macOS 26 及以上，Apple Silicon（arm64）
-> 相关文档：`design/UI-SPEC.md`（界面与交互规范，v1.1）、`design/design-tokens.json`（设计变量）、`design/prototype/`（原型源文件）；`XSearch-architecture-review-v0.3.md`（评审意见）
+> 相关文档：`design/UI-SPEC.md`（界面与交互规范，v1.1）、`design/design-tokens.json`（设计变量）、`design/prototype/`（原型源文件）
 
 ---
 
@@ -467,7 +467,7 @@ Match（file_id + revision + query_id + 匹配模式 + 区间 + 区间所属文�
 - **快捷键**：
   - `Tab` 保留给焦点导航；
   - 空格只在结果列表获得焦点时触发 Quick Look；
-  - 有选中文本时 `⌘C` 复制文本；复制路径不设快捷键（`⇧⌘C` 与常用的系统快捷键冲突，已移除），放在结果的右键菜单中（见 `docs/m5/右键菜单.md`）；
+  - 有选中文本时 `⌘C` 复制文本；复制路径不设快捷键（`⇧⌘C` 与常用的系统快捷键冲突，已移除），放在结果的右键菜单中（见 `docs/design/CONTEXT-MENU.md`）；
   - `Esc` 先关闭子弹层，再关闭面板；完整窗口点击外部时不会消失。
 - **收藏**：`⌘D`，绑定 file_id（同时保存路径用于重新定位）。输入框为空时显示收藏和最近打开的文件。删除或重建索引不影响收藏。
 - **结果列表**：先显示片段，选中文件后再计算总命中数（“第 n/N 处”）。

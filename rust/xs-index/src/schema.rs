@@ -123,7 +123,7 @@ pub fn open_or_create(path: &Path, new_instance_id: &str) -> Result<(Index, Inde
         return Ok((index, meta));
     }
     let settings = IndexSettings {
-        // M0-B 5.3: Zstd, 16 KB blocks (+ a doc store block cache on readers).
+        // ARCHITECTURE §21 (M0-B): Zstd, 16 KB blocks (+ a doc store block cache on readers).
         docstore_compression: Compressor::Zstd(ZstdCompressor::default()),
         docstore_blocksize: 16_384,
         ..Default::default()

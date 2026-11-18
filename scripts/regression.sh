@@ -1,5 +1,5 @@
 #!/bin/bash
-# Release regression gate (M5): correctness, then performance against docs/m5/perf-baseline.json.
+# Release regression gate (M5): correctness, then performance against scripts/perf-baseline.json.
 #   bash scripts/regression.sh                  # check
 #   bash scripts/regression.sh --update-baseline  # record the current machine's numbers
 # Correctness: Rust tests (incl. brute-force comparisons in every match mode), clippy with
@@ -64,4 +64,4 @@ with open(sys.argv[1], 'w', encoding='utf-8') as f:
 rm -f "$out/large.txt"
 
 step "Compare with baseline"
-python3 -I scripts/perf_compare.py "$out" docs/m5/perf-baseline.json "$@"
+python3 -I scripts/perf_compare.py "$out" scripts/perf-baseline.json "$@"

@@ -22,7 +22,7 @@ xpc_public={k:v for k,v in xpc.items() if k not in ('client_pid','connections')}
 xpc_public['connections']=[{k:v for k,v in c.items() if k!='service_pid'} for c in xpc.get('connections',[])]
 xpc_public['service_process_reused']=len({c['service_pid'] for c in xpc.get('connections',[])})==1
 result={'created_at':datetime.datetime.now().astimezone().isoformat(),'status':'M0-B experiments completed with documented limits' if all(checks.values()) else 'M0-B incomplete','checks':checks,'architecture_baseline':'v0.7.3; no pinyin','name_full_result_comparisons':sum(x['correctness_queries'] for x in names)+sum(x['correctness_queries'] for x in names if x['state']=='one_percent_delta'),'bloom_oracle_comparisons':sum(x['repeats'] for x in storage['bloom_reads']),'instrumentation':read('instrumentation.json'),'names':names,'storage':storage,'xpc':xpc_public,'vision':vision,'source_sha256':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
-(root/'docs/m0/M0B-EVIDENCE.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+(root/'docs/archive/milestones/m0/M0B-EVIDENCE.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
 for base,dirs,files in os.walk(work):
  os.chmod(base,0o700)
  for f in files:

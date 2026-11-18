@@ -2,7 +2,7 @@ import CScan
 import Foundation
 import XSearchCore
 
-/// Immutable base layer (ARCHITECTURE §7, M0-B 5.4): entries in directory-block depth-first
+/// Immutable base layer (ARCHITECTURE §7, §21): entries in directory-block depth-first
 /// order so every directory's subtree is one contiguous range, with interned display names and
 /// a lexicographically sorted, de-duplicated key pool so each distinct key is matched once.
 public final class NameSnapshot: @unchecked Sendable {
