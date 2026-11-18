@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         f.onRead = { [weak self, weak f] hit, expression, n in self?.reader.show(hit, expression: expression, mode: f?.matchMode, startAt: n) }
         f.nameScope = { Preferences.shared.nameScope }
         f.contentScope = { [weak self] in self?.currentContentScope ?? .default }
+        f.onOpenScopeSettings = { [weak self] in self?.openSettings(tab: .scope) }
         fullWindow = f
         return f
     }

@@ -256,7 +256,7 @@ Rules:
 - Like other filters it applies to the whole query, not to one OR branch; `-name:` is not an exclusion.
 - `in name:invoice` alone has no text condition and lists nothing; to find files by name only, use Name search.
 
-In the Full Window, the Content sidebar has a “File name contains” field that does the same as `name:`; separate several values with semicolons there too.
+In the Full Window, Content search has a “File name” condition in the condition bar that does the same as `name:`; separate several values with semicolons as well.
 
 Name search doesn't need `name:`: the keywords you type already search file names.
 
@@ -532,17 +532,41 @@ Mostly in the launcher; shortcuts use macOS symbols: `⌘` Command, `⌥` Option
 | `⌘E` in the launcher | Go to the Full Window |
 | `⌘,` in the launcher | Open Settings |
 
-Tab on a folder works like `dir:`. Tab on an app depends on the document types the app declares and is not a `kind:` category. The Full Window may add sidebar folder, type and date conditions on top, plus the refine steps below; check those as well when results look wrong.
+Tab on a folder works like `dir:`. Tab on an app depends on the document types the app declares and is not a `kind:` category. The Full Window may add location, type, date and other conditions from its condition bar, plus “Within” steps; check those as well when results look wrong.
 
-### 15.1 Full Window: search within / exclude from results
+Name search in the Full Window shows the 5,000 most relevant matches by default; the count in the status bar gives the full number. Beyond that, “Show All” next to the count lists every match. Sorting by a column (name, location, size or date) first fetches every match when there are no more than 100,000, so the top rows are the top of all matches; above that the count says sorting covers only the rows shown, and Show All fetches the rest. Content search has its own result limit and no Show All.
 
-Below the Full Window's search field, the “Search within or exclude” field narrows the current results step by step, in both Name and Content search:
+### 15.1 Full Window: condition bar
 
-- Type words and press `Return` or click “Search Within”: only results with all of these words stay.
-- Press `⌥Return` or click “Exclude”: results with any of these words go. Excluding needs the operators on in **Settings → Search Syntax**; with them off, the Exclude button is disabled.
-- Each step shows as a “with …” or “without …” tag; click a tag to remove that step, or “Undo Last Step” to remove the newest one. Opening the Full Window again from the launcher clears the steps.
+Below the Full Window's search field is a row of condition buttons, one set for each mode:
 
-Each step adds a quoted word to the query (with a leading `-` to exclude), so `*`, `|`, `dir:` and the like inside it are plain text. A query with `|` is wrapped in parentheses first, so its OR keeps its meaning. The engine searches again with the steps, before the result limit, rather than filtering only the rows already shown.
+| Condition | What it does | Written as |
+| --- | --- | --- |
+| Location | Folders of the index scope, or “Choose Another Folder…” | `dir:` |
+| Type | Categories in Name search (folder, PDF, document…), extractable document types in Content search; more extensions can be typed | `kind:`, `ext:` |
+| Date | Today, last 7 days, last 30 days, this month, this year, or custom dates | `dm:` |
+| Size | Under 1 MB, 1 – 100 MB, over 100 MB, or custom (upper bound excluded) | `size:` |
+| File name (Content only) | Words in the file name, separated by semicolons | `name:` |
+| Match (Content only) | Loose, case-sensitive, strict | the match mode setting |
+| Within | Narrows the current results step by step; see 15.2 | added to the query |
+
+- Unset conditions read “All” or “Any”; once set, the button turns the accent colour and shows its value, and its ✕ removes it. The buttons have a fixed width, so the row never moves as conditions change.
+- “Clear All” removes every condition and step of the current mode.
+- `</>` at the right of the bar shows the equivalent query text, with a Copy button.
+- Opening the Full Window from the launcher with `⌘E` starts with no conditions or steps.
+- Before you type in Content search, the result area shows the content index scope and examples to click; with no results it lists the likely reasons and what to try.
+
+### 15.2 Full Window: search within / exclude from results
+
+Click “Within” in the condition bar (or press `⇧⌘F`), type words and choose:
+
+- “With” (`Return`): all of the words must appear;
+- “Any of”: one is enough;
+- “Exclude” (`⌥Return`): a result with any of them goes.
+
+With “Exact match” checked, the whole field is one unit that must appear exactly as typed (spaces included). “Any of” and “Exclude” need the operators on in **Settings → Search Syntax**.
+
+The steps are listed in the popover: click a step's ✕ to remove it, or “Undo Last Step” to remove the newest. The button in the bar shows a summary (the step itself, or the number of steps; hover for all). Each step adds words to the query (a leading `-` to exclude, `(a | b)` for any of); words the parser would read as syntax are quoted. A query with `|` is wrapped in parentheses first, so its OR keeps its meaning. The engine searches again with the steps, before the result limit, rather than filtering only the rows already shown.
 
 ## 16. When nothing is found
 
@@ -564,7 +588,7 @@ There is no `path:`, `type:`, `created:`, `before:`, `after:` or `case:` syntax,
 This guide follows these implementations:
 
 - `App/Sources/LauncherPanel.swift`: the `in ` prefix, mode switching, syntax summary, scope tokens and shortcuts.
-- `App/Sources/FullWindow.swift`: Full Window modes, sidebar filters and shortcuts; no automatic `in ` switch.
+- `App/Sources/FullWindow.swift`: Full Window modes, condition bar and shortcuts; no automatic `in ` switch.
 - `App/Sources/Settings.swift`, `Preferences.swift`: syntax switches and content match modes.
 - `Packages/XSearchCore/Sources/NameQuery.swift`, `ContentQuery.swift`: filters and token parsing in both modes, including `name:` in Content search.
 - `Packages/XSearchCore/Sources/QuerySyntax.swift`: wildcards, size and date bounds, syntax defaults.

@@ -8,11 +8,13 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Added
 
-- Content search accepts `name:` file name conditions together with the text, e.g. `in payment name:invoice`. Semicolon-separated values in one `name:` are alternatives, several `name:` terms must all match, and `*` / `?` match the whole name; the condition applies before the result limit. The Full Window's Content sidebar has a new “File name contains” field.
-- The Full Window can search within or exclude from the current results: each step adds words that must appear or must not, shows as a removable tag, and can be undone; it works in Name and Content search and applies before the result limit.
+- Content search accepts `name:` file name conditions together with the text, e.g. `in payment name:invoice`. Semicolon-separated values in one `name:` are alternatives, several `name:` terms must all match, and `*` / `?` match the whole name; the condition applies before the result limit. In the Full Window, Content search can set “File name” in the condition bar.
+- The Full Window can narrow the current results with “Within” steps (`⇧⌘F`): words that must all appear, any of which may appear, or none of which may appear (optionally an exact match). Steps can be removed one by one or undone; it works in Name and Content search and applies before the result limit.
 
 ### Improved
 
+- The Full Window is redesigned: no sidebar; below the search field a row of fixed-width condition buttons (location, type, date, size, plus file name and match mode in Content search) shows each set value, with Clear All and the equivalent query text to view and copy. The count, Show All and shortcut hints move to a status bar. An empty Name search lists favorites and recents under headings; an empty Content search shows the scope and examples; no results lists the likely reasons and what to try. The result table gets the launcher's context menu.
+- Full Window name results over 5,000 get a Show All button next to the count; sorting by a column fetches every match first (up to 100,000) instead of sorting only the first 5,000.
 - The launcher's `⌘/` syntax summary is now a grouped list with examples and explanations in two columns, clearer wording, and switched-off syntax clearly marked. Fixes the summary showing as an empty narrow strip over the launcher.
 - `Esc` in the launcher now steps back one layer at a time: it closes the syntax summary or Quick Look first, then clears the input, and only then hides the panel; quick repeated presses are no longer lost.
 

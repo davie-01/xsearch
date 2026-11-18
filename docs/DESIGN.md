@@ -71,7 +71,8 @@ XSearch/
 │   │   ├── SearchSession.swift             # 一次名称搜索的会话与结果行
 │   │   ├── ContentSearcher.swift           # 内容检索：后台执行、可取消、分批投递
 │   │   ├── ContentPane.swift、ResultViews.swift  # 结果列表、命中高亮与预览面板
-│   │   ├── FullWindow.swift                # 完整搜索窗口（⌘E）、在结果中搜索 / 排除
+│   │   ├── FullWindow.swift                # 完整搜索窗口（⌘E）：条件栏、结果表格、预览、状态栏
+│   │   ├── ConditionBar.swift              # 完整窗口的条件按钮、条件弹层组件与空状态视图
 │   │   ├── ReaderWindow.swift              # 阅读窗口（⌘↵）：逐处跳转命中
 │   │   ├── ArchiveMembers.swift            # 压缩包成员作为独立结果
 │   │   ├── ResultMenu.swift                # 结果右键菜单（规范见 docs/design/CONTEXT-MENU.md）
