@@ -38,6 +38,8 @@ public final class NameService: @unchecked Sendable {
     /// Set from any thread, before `shutdown` waits for the queue.
     private let stopRequested = OSAllocatedUnfairLock(initialState: false)
     var watcherDelay: TimeInterval = 5
+    /// Period of the cursor save and snapshot persist timer; tests lengthen it to keep it out of the way.
+    var housekeepingInterval: TimeInterval = 30
     /// Test hook: this many watcher starts fail.
     var failWatcherStarts = 0
     private var scope = NameScope.default
@@ -397,7 +399,7 @@ public final class NameService: @unchecked Sendable {
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         // A few seconds either way do not matter here: the system may fold it into other wake-ups.
-        timer.schedule(deadline: .now() + 30, repeating: 30, leeway: .seconds(5))
+        timer.schedule(deadline: .now() + housekeepingInterval, repeating: housekeepingInterval, leeway: .seconds(5))
         timer.setEventHandler { [weak self] in
             self?.saveCursor()
             try? self?.persist(force: false)

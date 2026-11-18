@@ -99,6 +99,9 @@ import XSearchCore
     // are filtered out.
     let data = URL(fileURLWithPath: box.p("appdata"))
     let names = NameService(directory: data, home: "/nonexistent-home")
+    // The periodic save would write the cursor on its own when a loaded machine stretches the
+    // test past 30 s; only shutdown may write it here.
+    names.housekeepingInterval = 3600
     names.start(scope: box.scope)
     #expect(names.waitUntilIdle())
     sleep(1)
