@@ -309,6 +309,6 @@ Sparkle 许可原文还随下载的框架资源提供。文档内的架构调研
 
 ## 发布时随附的材料
 
-- 项目 `LICENSE`、[`LICENSES/XSearch-UnRAR-linking-exception.md`](LICENSES/XSearch-UnRAR-linking-exception.md)、[UnRAR 许可原文](LICENSES/UnRAR-license.txt)、本清单及适用于实际交付文件的其他第三方许可与版权原文。当前构建脚本需要补入这些发行材料。
-- 按同一发行版本提供 GPLv3 第 6 节和链接例外要求的对应源码，包括实际使用的 UnRAR 源码、必要的构建和安装脚本、接口定义及适用的组合依赖源码。Rust 锁文件有助于复现依赖版本。
+- 项目 `LICENSE`、[`LICENSES/XSearch-UnRAR-linking-exception.md`](LICENSES/XSearch-UnRAR-linking-exception.md)、[UnRAR 许可原文](LICENSES/UnRAR-license.txt)、本清单，以及链接进应用的全部 Rust crate 许可原文（`Rust-crates.txt`，由 `scripts/collect-licenses.py` 生成）。构建脚本把它们放在应用包的 `Contents/Resources/Licenses/` 和 DMG 的“许可与源码”文件夹中。Sparkle 的许可随框架资源一并分发。
+- 按同一发行版本提供 GPLv3 第 6 节和链接例外要求的对应源码：每个 GitHub Release 附带 `XSearch-<版本>-source.tar.gz`（`scripts/source-archive.sh` 生成），含 tag 对应的仓库源码、构建脚本，以及 `cargo vendor` 收录的全部 Rust 依赖源码（含 UnRAR 源码）。DMG 中的 `对应源码.txt` 给出下载地址。
 - 更新锁文件、Sparkle 版本、原生库或测试素材时，同步核对本清单和发行附件。替换归档实现后重新核对 UnRAR 相关条目。

@@ -2,6 +2,8 @@
 # Builds XSearch.app: Rust engine → SwiftPM release → bundle (app, xs-extract worker,
 # IndexService.xpc) → sign inside-out.
 # XS_SIGN_IDENTITY: Apple Development identity; ad-hoc ("-") when unset.
+# XS_NOTARY_PROFILE (see build-dmg.sh): signatures then carry a secure timestamp, which
+# notarization requires.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
@@ -18,6 +20,11 @@ cp App/Resources/XSearchTemplate-18.png App/Resources/XSearchTemplate-18@2x.png 
 # Localizations (permission prompts; the UI strings live in code). Their presence also lets
 # the system and Sparkle pick English when the language setting asks for it.
 cp -R App/Resources/en.lproj App/Resources/zh-Hans.lproj "$app/Contents/Resources/"
+# Licenses travel with the binary (GPLv3 §4–6): GPLv3, the UnRAR linking exception, UnRAR's
+# license, the third-party notices and the license texts of every linked Rust crate.
+mkdir -p "$app/Contents/Resources/Licenses"
+cp LICENSE THIRD_PARTY_NOTICES.md LICENSES/* "$app/Contents/Resources/Licenses/"
+python3 -I scripts/collect-licenses.py "$app/Contents/Resources/Licenses/Rust-crates.txt"
 # An Icon Composer document: the only source format that keeps the dark variant on macOS.
 xcrun actool App/Resources/AppIcon.icon --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 26.0 \
     --app-icon AppIcon --output-partial-info-plist "$(mktemp)" > /dev/null
@@ -38,13 +45,15 @@ cp App/IndexService/Info.plist "$xpc/Contents/Info.plist"
 cp "$bin/IndexService" "$xpc/Contents/MacOS/IndexService"
 # Inside-out signing: Sparkle's helpers and framework, the worker and the XPC service, then the app.
 sparkle_fw="$app/Contents/Frameworks/Sparkle.framework"
+ts="--timestamp=none"
+if [ -n "${XS_NOTARY_PROFILE:-}" ]; then ts="--timestamp"; fi
 for helper in "$sparkle_fw/Versions/B/XPCServices/Installer.xpc" "$sparkle_fw/Versions/B/XPCServices/Downloader.xpc" \
               "$sparkle_fw/Versions/B/Autoupdate" "$sparkle_fw/Versions/B/Updater.app"; do
-    [ -e "$helper" ] && codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none "$helper"
+    [ -e "$helper" ] && codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$helper"
 done
-codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none "$sparkle_fw"
-codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none "$app/Contents/MacOS/xs-extract"
-codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none "$xpc"
-codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime --timestamp=none --entitlements App/Resources/XSearch.entitlements "$app"
+codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$sparkle_fw"
+codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$app/Contents/MacOS/xs-extract"
+codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$xpc"
+codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts --entitlements App/Resources/XSearch.entitlements "$app"
 codesign --verify --strict "$app"
 echo "Built $app"

@@ -1,0 +1,70 @@
+# Tests and an unsigned (ad-hoc) app build on every push to main and every pull request.
+# Performance (scripts/regression.sh) needs a fixed machine and stays a local release step;
+# hotkeys, TCC prompts, the XPC service in a desktop session and Sparkle updates are checked
+# by hand before a release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # scripts/env.sh keeps Rust inside .tools/ (CARGO_HOME, RUSTUP_HOME); install it there.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .tools/rustup
+            .tools/cargo
+            .tools/sparkle-*
+          key: tools-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'scripts/fetch-sparkle.sh') }}
+          restore-keys: tools-${{ runner.os }}-
+
+      - name: Rust toolchain
+        run: |
+          source scripts/env.sh
+          if ! command -v cargo >/dev/null || ! cargo --version >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable -c clippy
+          fi
+          rustc --version
+          cargo --version
+
+      - name: Rust tests
+        run: |
+          source scripts/env.sh
+          cargo test --workspace --locked
+
+      - name: Clippy
+        run: |
+          source scripts/env.sh
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Swift tests
+        run: |
+          bash scripts/fetch-sparkle.sh
+          bash scripts/swift-test.sh
+
+      - name: Build app (ad-hoc signature)
+        run: bash scripts/build-app.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XSearch-app-${{ github.sha }}
+          path: target/XSearch.app
+          retention-days: 7

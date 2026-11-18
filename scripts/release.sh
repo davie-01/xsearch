@@ -6,7 +6,9 @@
 #    https://github.com/<repo>/releases/latest/download/appcast.xml;
 # 3. signs it with the EdDSA key in the login Keychain (account "xsearch") and writes
 #    appcast.xml covering every release kept in work/releases/.
-# Upload work/releases/XSearch-<version>.dmg and work/releases/appcast.xml to a GitHub release
+# Then commit the version change, tag it v<version>, and run scripts/source-archive.sh <version>
+# for the corresponding source. Upload work/releases/XSearch-<version>.dmg,
+# work/releases/appcast.xml and work/source/XSearch-<version>-source.tar.gz to a GitHub release
 # tagged v<version> (mark it "latest"). XS_FEED_URL / XS_DOWNLOAD_PREFIX override the GitHub
 # addresses (local testing).
 set -euo pipefail
@@ -20,9 +22,10 @@ for plist in App/Resources/Info.plist App/IndexService/Info.plist; do
     build=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$plist")
     /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $version" -c "Set CFBundleVersion $((build + 1))" "$plist"
 done
-XS_FEED_URL="$feed" bash scripts/build-dmg.sh
+XS_FEED_URL="$feed" XS_SOURCE_URL="${XS_SOURCE_URL:-${prefix}XSearch-$version-source.tar.gz}" bash scripts/build-dmg.sh
 out="${XS_RELEASE_DIR:-work/releases}"
 mkdir -p "$out"
 cp "target/XSearch-$version.dmg" "$out/"
 .tools/sparkle-2.10.0/bin/generate_appcast --account xsearch --download-url-prefix "$prefix" -o "$out/appcast.xml" "$out"
 echo "Release files in $out: XSearch-$version.dmg, appcast.xml (feed: $feed)"
+echo "Next: commit, tag v$version, bash scripts/source-archive.sh $version"

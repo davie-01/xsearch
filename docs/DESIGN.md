@@ -147,6 +147,12 @@ XSearch/
 ```text
 XSearch/
 ├── README.md                         # 仓库首页：功能、安装、第一次搜索、源码构建、许可
+├── CHANGELOG.md                      # 面向用户的版本变化，Release 说明取自这里
+├── CONTRIBUTING.md                   # 开发环境、测试、提交约定与发布步骤
+├── .github/
+│   ├── workflows/ci.yml              # 推送 main 与 PR 时：Rust/Swift 测试、clippy、ad-hoc 构建
+│   ├── ISSUE_TEMPLATE/               # 问题反馈、功能建议表单
+│   └── pull_request_template.md      # 验证与文档同步清单
 ├── LICENSE                           # GPLv3 原文
 ├── LICENSES/
 │   ├── XSearch-UnRAR-linking-exception.md   # XSearch 的 UnRAR 链接例外
@@ -177,14 +183,7 @@ XSearch/
 
 归档目录只保存在本机。仓库历史中仍保留这些文件此前的版本，如需追溯可按提交检出。
 
-本地检出尚未配置 Git 远程地址，仓库中也没有 `.github/`。以下为建议在发布仓库时补充的内容：
-
-| 路径或入口 | 用途 |
-| --- | --- |
-| `.github/workflows/ci.yml` | 在 Apple Silicon、合适的 macOS SDK 上校验锁文件、运行 Rust 和 Swift 测试并构建应用包。性能基线按固定环境运行。真实 TCC、热键、XPC、首次下载与更新链路仍需在正常桌面会话复核。 |
-| `.github/ISSUE_TEMPLATE/`、`.github/pull_request_template.md` | 收集系统版本、应用版本、搜索模式、最小复现和验证记录。 |
-| `CONTRIBUTING.md`、`CHANGELOG.md` | 项目协作扩大后再加入，分别记录贡献流程与面向用户的变更。 |
-| GitHub Releases | 按 `v<版本>` 保存 DMG、更新源 `appcast.xml`（启用 Sparkle 时）、发行说明、校验摘要，以及同版本对应源码的下载入口。`scripts/release.sh` 已支持生成。 |
+仓库地址为 `github.com/davie-01/xsearch`。CI 运行在 GitHub 的 `macos-26` 托管机上，不跑性能基线（需要固定机器），热键、TCC、XPC 与更新链路仍需在正常桌面会话中手动验证。每个 GitHub Release 按 `v<版本>` 保存 DMG、`appcast.xml`、对应源码包和取自 CHANGELOG 的发行说明。
 
 ## 6. 构建、回归与发布
 
@@ -196,14 +195,23 @@ XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
 
 发布前用 `bash scripts/regression.sh` 核对 Rust、Swift、查询正确性和性能，基线在 `scripts/perf-baseline.json`（`--update-baseline` 以当前机器重新记录）。另在目标 macOS 版本的正常桌面会话验证下载、首次运行、目录授权、实时变更、退出再启动、重建和升级。建议同时核对应用签名、DMG SHA-256 和第三方声明附件。
 
-**发行许可。** XSearch 以 GPLv3 加 UnRAR 链接例外发布。当前构建把 UnRAR 编入 Rust 静态库。XSearch 原创源码的许可声明应标明 GPL 第 3 版及链接例外文件，第三方源码与生成物按其适用许可处理。打包脚本目前尚未把 GPLv3、链接例外、UnRAR 原文和其他第三方声明复制进应用包，需要补入。
+**发行许可。** XSearch 以 GPLv3 加 UnRAR 链接例外发布，当前构建把 UnRAR 编入 Rust 静态库。发行材料由脚本自动带上：
 
-发布 GitHub Release 时，在 DMG 的下载位置提供同版对应源码的明确入口。对应源码应包含实际构建使用的 UnRAR 源码、GPL 覆盖部分、所需的构建和安装脚本及其他适用的组合依赖源码。涉及 DMG 内部文件的调整应在签名前纳入打包，上传前核对发布标签、DMG 与源码版本一致。[GPLv3 原文](../LICENSE) · [UnRAR 链接例外](../LICENSES/XSearch-UnRAR-linking-exception.md) · [第三方许可](../THIRD_PARTY_NOTICES.md#unrar-与-gplv3-发行)
+- `build-app.sh` 把 `LICENSE`、`LICENSES/*`、`THIRD_PARTY_NOTICES.md` 复制到 `XSearch.app/Contents/Resources/Licenses/`，并用 `scripts/collect-licenses.py` 汇总链接进 `libxs_ffi.a` 的全部 Rust crate 许可原文为 `Rust-crates.txt`。
+- `build-dmg.sh` 在 DMG 中放入“许可与源码”文件夹：上述许可文件，以及写明对应源码下载地址的 `对应源码.txt`（`release.sh` 通过 `XS_SOURCE_URL` 指向同版本 Release 中的源码包）。
+- `scripts/source-archive.sh <版本>` 从 `v<版本>` tag 导出源码，并用 `cargo vendor` 收录 `Cargo.lock` 锁定的全部 Rust 依赖（含 `unrar_sys` 自带的 UnRAR 源码），生成可离线构建的 `work/source/XSearch-<版本>-source.tar.gz`。它不放进 `work/releases/`，以免 `generate_appcast` 把它当成更新包。
+
+上传前核对发布标签、DMG 与源码包版本一致。[GPLv3 原文](../LICENSE) · [UnRAR 链接例外](../LICENSES/XSearch-UnRAR-linking-exception.md) · [第三方许可](../THIRD_PARTY_NOTICES.md#unrar-与-gplv3-发行)
 
 **GitHub 与 Sparkle。** 发行仓库确定后，在项目根目录运行发布脚本。它会修改主应用与 IndexService 的版本及构建号，将产物输出到 `work/releases/`（可用 `XS_RELEASE_DIR` 改变）。构建动作与 GitHub 上传是两个步骤。
 
 ```sh
-XS_GITHUB_REPO='OWNER/REPO' bash scripts/release.sh 0.2.0
+XS_SIGN_IDENTITY='Apple Development: …' XS_GITHUB_REPO='davie-01/xsearch' bash scripts/release.sh 0.2.0
+git commit -am "Release 0.2.0" && git tag -a v0.2.0 -m "XSearch 0.2.0"
+git push origin main v0.2.0
+bash scripts/source-archive.sh 0.2.0
 ```
 
-该脚本从登录钥匙串的 `xsearch` 账户读取 EdDSA 私钥，生成带更新签名的 appcast。应用内的公钥（`App/Resources/sparkle-public-key.txt`）必须与发布密钥配对，私钥仅供维护者保管。更新源默认指向 Latest Release 中的 `appcast.xml`。发布前核对 XML 中每个归档和增量附件的 URL、版本和签名，再用上一版实测更新。建议每次使用一个干净的 `XS_RELEASE_DIR`，避免旧包被套用当前标签的下载前缀。当前 DMG 流程为签名后打包，Apple 公证需要单独接入。[Sparkle 发布文档](https://sparkle-project.org/documentation/publishing/)
+随后在 GitHub 新建 `v0.2.0` Release 并标为 Latest，上传 `work/releases/` 中的 DMG 与 `appcast.xml`，以及 `work/source/` 中的源码包。
+
+该脚本从登录钥匙串的 `xsearch` 账户读取 EdDSA 私钥，生成带更新签名的 appcast。应用内的公钥（`App/Resources/sparkle-public-key.txt`）必须与发布密钥配对，私钥仅供维护者保管。更新源默认指向 Latest Release 中的 `appcast.xml`。发布前核对 XML 中每个归档和增量附件的 URL、版本和签名，再用上一版实测更新。建议每次使用一个干净的 `XS_RELEASE_DIR`，避免旧包被套用当前标签的下载前缀。公证需要 Developer ID Application 证书：用 `xcrun notarytool store-credentials <名称>` 保存凭据后，设置 `XS_NOTARY_PROFILE=<名称>` 与对应的 `XS_SIGN_IDENTITY`，脚本会以安全时间戳签名，并在打包后提交公证、装订票据。未设置时跳过公证。[Sparkle 发布文档](https://sparkle-project.org/documentation/publishing/)

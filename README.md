@@ -78,7 +78,7 @@ open "/Applications/XSearch.app"
 
 准备 Apple 芯片 Mac、带 macOS 26 SDK 和 Swift 6.2 或更新版本的完整 Xcode，以及适用于 Apple Silicon 的 Rust stable（含 Cargo）。先在 Xcode 中完成组件安装，并确保 `xcode-select -p` 指向完整 Xcode。构建脚本会下载锁定版本的 Rust 依赖和 Sparkle，首次构建需要联网。
 
-从项目仓库克隆源码或下载对应版本的源码包，然后在源码根目录运行：
+从项目仓库克隆源码，或下载 Release 中对应版本的 `XSearch-<版本>-source.tar.gz`（附带全部 Rust 依赖源码，可离线获取依赖），然后在源码根目录运行：
 
 ```sh
 xcodebuild -version
@@ -112,6 +112,6 @@ bash scripts/swift-test.sh
 
 ## 许可证
 
-XSearch 的原创代码采用 **GNU 通用公共许可证第 3 版，附 UnRAR 链接例外**。你可以依许可使用、修改和再分发软件，包括商业用途。链接例外允许分发与指定 UnRAR 实现链接的 XSearch，UnRAR 继续适用其自身许可。再分发时须保留适用声明，并按要求提供对应源码。软件依 GPLv3 条款提供，无担保。
+XSearch 的原创代码采用 **GNU 通用公共许可证第 3 版，附 UnRAR 链接例外**。你可以依许可使用、修改和再分发软件，包括商业用途。链接例外允许分发与指定 UnRAR 实现链接的 XSearch，UnRAR 继续适用其自身许可。再分发时须保留适用声明，并按要求提供对应源码。每个 Release 附带同版本的完整源码包，DMG 与应用包内也附有许可原文和第三方声明。软件依 GPLv3 条款提供，无担保。
 
-[GPLv3 原文](LICENSE) · [UnRAR 链接例外](LICENSES/XSearch-UnRAR-linking-exception.md) · [第三方许可与发行说明](THIRD_PARTY_NOTICES.md) · [搜索语法](docs/SEARCH-GUIDE.md) · [设计文档](docs/DESIGN.md)
+[GPLv3 原文](LICENSE) · [UnRAR 链接例外](LICENSES/XSearch-UnRAR-linking-exception.md) · [第三方许可与发行说明](THIRD_PARTY_NOTICES.md) · [搜索语法](docs/SEARCH-GUIDE.md) · [设计文档](docs/DESIGN.md) · [更新日志](CHANGELOG.md) · [参与开发](CONTRIBUTING.md)
