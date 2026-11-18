@@ -62,6 +62,13 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     private var mode: Preferences.Mode = .name
     private var expression = ""
     private var previewToken = 0
+    /// "Search within / exclude from these results": steps ANDed onto the query, newest last.
+    private var refinements: [Refinement] = []
+    private let refineField = NSTextField()
+    private let refineWithin = NSButton()
+    private let refineExclude = NSButton()
+    private let refineSteps = NSStackView()
+    private let refineUndo = NSButton()
 
     var onRead: ((ContentHit, String, Int) -> Void)?
     /// Dev hook (XS_READER): open the first content result in the reader once.
@@ -122,9 +129,28 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         countLabel.textColor = .secondaryLabelColor
         let top = NSStackView(views: [field, modeControl, countLabel])
         top.spacing = 12
-        top.edgeInsets = NSEdgeInsets(top: 36, left: 252, bottom: 12, right: 20)
+        top.edgeInsets = NSEdgeInsets(top: 36, left: 252, bottom: 8, right: 20)
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        refineField.placeholderString = L("在结果中搜索或排除")
+        refineField.font = .systemFont(ofSize: 13)
+        refineField.delegate = self
+        refineField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        for (b, title, action) in [(refineWithin, L("在结果中搜索"), #selector(refineWithinClicked)), (refineExclude, L("排除"), #selector(refineExcludeClicked)),
+                                   (refineUndo, L("撤回上一步"), #selector(refineUndoClicked))] {
+            b.title = title
+            b.bezelStyle = .push
+            b.controlSize = .small
+            b.font = .systemFont(ofSize: 12)
+            b.target = self
+            b.action = action
+        }
+        refineSteps.spacing = 6
+        let refineBar = NSStackView(views: [refineField, refineWithin, refineExclude, refineSteps, refineUndo])
+        refineBar.spacing = 8
+        refineBar.edgeInsets = NSEdgeInsets(top: 0, left: 252, bottom: 10, right: 20)
+        refineSteps.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         sidebar.orientation = .vertical
         sidebar.alignment = .leading
@@ -183,13 +209,13 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             ])
         }
 
-        for v in [sidebarBox, sidebarScroll, top, tableScroll, preview] as [NSView] {
+        for v in [sidebarBox, sidebarScroll, top, refineBar, tableScroll, preview] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
         }
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarBox)
         sidebarBox.addSubview(sidebarScroll)
-        for v in [top, tableScroll, preview] as [NSView] { root.addSubview(v) }
+        for v in [top, refineBar, tableScroll, preview] as [NSView] { root.addSubview(v) }
         previewArea = preview
         let divider = previewDivider
         divider.boxType = .separator
@@ -213,14 +239,17 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             top.topAnchor.constraint(equalTo: root.topAnchor),
             top.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             top.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            tableScroll.topAnchor.constraint(equalTo: top.bottomAnchor),
+            refineBar.topAnchor.constraint(equalTo: top.bottomAnchor),
+            refineBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            refineBar.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
+            tableScroll.topAnchor.constraint(equalTo: refineBar.bottomAnchor),
             tableScroll.leadingAnchor.constraint(equalTo: sidebarBox.trailingAnchor),
             tableScroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            divider.topAnchor.constraint(equalTo: top.bottomAnchor),
+            divider.topAnchor.constraint(equalTo: refineBar.bottomAnchor),
             divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: tableScroll.trailingAnchor),
             previewDividerWidth,
-            preview.topAnchor.constraint(equalTo: top.bottomAnchor),
+            preview.topAnchor.constraint(equalTo: refineBar.bottomAnchor),
             preview.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             preview.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             preview.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -235,6 +264,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         matchPopup.target = self
         matchPopup.action = #selector(filtersChanged)
         rebuildSidebar()
+        updateRefineBar()
     }
 
     private func sectionTitle(_ s: String) -> NSTextField {
@@ -321,6 +351,10 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         content.indexSource = session.content
         matchPopup.selectItem(at: ["loose", "caseSensitive", "strict"].firstIndex(of: Preferences.shared.matchMode) ?? 0)
         field.stringValue = text
+        // A new query from the launcher starts from all of its results.
+        refinements = []
+        refineField.stringValue = ""
+        updateRefineBar()
         if mode != self.mode {
             self.mode = mode
             modeControl.selectedSegment = mode == .content ? 1 : 0
@@ -333,10 +367,20 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         runSearch()
     }
 
-    func controlTextDidChange(_ obj: Notification) { runSearch() }
+    func controlTextDidChange(_ obj: Notification) {
+        if obj.object as AnyObject? === refineField { return }
+        runSearch()
+    }
 
-    /// ↓ takes the list: space previews there, ↑ on the first row comes back.
+    /// ↓ takes the list: space previews there, ↑ on the first row comes back. In the refine
+    /// field ↵ searches within the results and ⌥↵ excludes.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if control === refineField {
+            guard selector == #selector(NSResponder.insertNewline(_:)) || selector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
+                  !textView.hasMarkedText() else { return false }
+            addRefinement(exclude: NSEvent.modifierFlags.contains(.option))
+            return true
+        }
         guard selector == #selector(NSResponder.moveDown(_:)), !textView.hasMarkedText(), !rows.isEmpty else { return false }
         let next = min(table.selectedRow + 1, rows.count - 1)
         table.selectRowIndexes([next], byExtendingSelection: false)
@@ -392,8 +436,56 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    // MARK: Refine
+
+    @objc private func refineWithinClicked() { addRefinement(exclude: false) }
+    @objc private func refineExcludeClicked() { addRefinement(exclude: true) }
+
+    @objc private func refineUndoClicked() {
+        guard !refinements.isEmpty else { return }
+        refinements.removeLast()
+        updateRefineBar()
+        runSearch()
+    }
+
+    @objc private func refineStepClicked(_ sender: NSButton) {
+        guard refinements.indices.contains(sender.tag) else { return }
+        refinements.remove(at: sender.tag)
+        updateRefineBar()
+        runSearch()
+    }
+
+    private func addRefinement(exclude: Bool) {
+        let step = Refinement(term: refineField.stringValue.trimmingCharacters(in: .whitespaces), exclude: exclude)
+        guard step.isUsable(Preferences.shared.querySyntax) else { NSSound.beep(); return }
+        refinements.append(step)
+        refineField.stringValue = ""
+        updateRefineBar()
+        runSearch()
+    }
+
+    /// One removable chip per step; exclusion needs the operators (Settings → Search Syntax).
+    private func updateRefineBar() {
+        refineSteps.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (i, step) in refinements.enumerated() {
+            let title = (step.exclude ? L("不含 %@", "\(step.term)") : L("含 %@", "\(step.term)")) + "  ×"
+            let chip = NSButton(title: title, target: self, action: #selector(refineStepClicked(_:)))
+            chip.bezelStyle = .inline
+            chip.controlSize = .small
+            chip.tag = i
+            chip.lineBreakMode = .byTruncatingMiddle
+            chip.toolTip = L("移除这一步")
+            chip.setAccessibilityLabel(L("移除 %@", "\(title)"))
+            refineSteps.addArrangedSubview(chip)
+        }
+        refineUndo.isHidden = refinements.isEmpty
+        let operators = Preferences.shared.querySyntax.operators
+        refineExclude.isEnabled = operators
+        refineExclude.toolTip = operators ? L("排除含这些词的结果（⌥↵）") : L("排除需要开启 设置 → 搜索语法 中的运算符")
+    }
+
     private func runSearch() {
-        let text = effectiveText
+        let text = Refinement.apply(refinements, to: effectiveText, syntax: Preferences.shared.querySyntax)
         if mode == .content {
             content.mode = [MatchMode.loose, .caseSensitive, .strict][max(0, matchPopup.indexOfSelectedItem)]
             content.search(text, home: NSHomeDirectory(), syntax: Preferences.shared.querySyntax) { [weak self] out in self?.applyContent(out) }

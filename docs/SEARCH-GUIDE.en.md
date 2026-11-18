@@ -532,7 +532,17 @@ Mostly in the launcher; shortcuts use macOS symbols: `⌘` Command, `⌥` Option
 | `⌘E` in the launcher | Go to the Full Window |
 | `⌘,` in the launcher | Open Settings |
 
-Tab on a folder works like `dir:`. Tab on an app depends on the document types the app declares and is not a `kind:` category. The Full Window may add sidebar folder, type and date conditions on top; check those as well when results look wrong.
+Tab on a folder works like `dir:`. Tab on an app depends on the document types the app declares and is not a `kind:` category. The Full Window may add sidebar folder, type and date conditions on top, plus the refine steps below; check those as well when results look wrong.
+
+### 15.1 Full Window: search within / exclude from results
+
+Below the Full Window's search field, the “Search within or exclude” field narrows the current results step by step, in both Name and Content search:
+
+- Type words and press `Return` or click “Search Within”: only results with all of these words stay.
+- Press `⌥Return` or click “Exclude”: results with any of these words go. Excluding needs the operators on in **Settings → Search Syntax**; with them off, the Exclude button is disabled.
+- Each step shows as a “with …” or “without …” tag; click a tag to remove that step, or “Undo Last Step” to remove the newest one. Opening the Full Window again from the launcher clears the steps.
+
+Each step adds a quoted word to the query (with a leading `-` to exclude), so `*`, `|`, `dir:` and the like inside it are plain text. A query with `|` is wrapped in parentheses first, so its OR keeps its meaning. The engine searches again with the steps, before the result limit, rather than filtering only the rows already shown.
 
 ## 16. When nothing is found
 

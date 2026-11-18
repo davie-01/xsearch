@@ -209,3 +209,26 @@ import Testing
         #expect(q.chips.contains { !$0.valid && $0.label.contains("嵌套过深") }, "\(q.chips.prefix(2))")
     }
 }
+
+@Test func refinementsAddTermsToTheQuery() {
+    func lit(_ t: String) -> NameExpr { .literal(text: t, key: Array(t.lowercased().utf8)) }
+    let within = Refinement(term: "甲  乙", exclude: false), without = Refinement(term: "草稿", exclude: true)
+    #expect(within.clause == #""甲" "乙""#)
+    #expect(Refinement.apply([within, without], to: "合同", syntax: .default) == #"合同 "甲" "乙" -"草稿""#)
+    #expect(Refinement.apply([], to: "a | b", syntax: .default) == "a | b")
+    // OR is grouped first, and filters inside the group are still filters.
+    let text = Refinement.apply([without], to: "a | b ext:pdf", syntax: .default)
+    #expect(text == #"( a | b ext:pdf ) -"草稿""#)
+    let name = NameQuery.parse(text, home: "/")
+    #expect(name.expr == .and([.or([lit("a"), lit("b")]), .not(lit("草稿"))]))
+    #expect(name.extensions == ["pdf"])
+    #expect(ContentQuery.parse(text, home: "/").expression == #"( a | b ) -"草稿""#)
+    // Operators, wildcards and prefixes in a term are literal.
+    #expect(Refinement(term: #"*.pdf dir:x a"b"#, exclude: false).clause == #""*.pdf" "dir:x" "a\"b""#)
+    #expect(ContentQuery.parse(Refinement.apply([Refinement(term: "dir:x", exclude: false)], to: "y", syntax: .default), home: "/").dirs.isEmpty)
+    // Without the operators an exclusion cannot be written: it is left out, not searched for.
+    let plain = QuerySyntax(operators: false)
+    #expect(!without.isUsable(plain) && within.isUsable(plain))
+    #expect(Refinement.apply([within, without], to: "a | b", syntax: plain) == #"a | b "甲" "乙""#)
+    #expect(Refinement.apply([Refinement(term: "  ", exclude: false)], to: "a", syntax: .default) == "a")
+}

@@ -71,7 +71,7 @@ XSearch/
 │   │   ├── SearchSession.swift             # One name search session and its result rows
 │   │   ├── ContentSearcher.swift           # Content search: background, cancellable, delivered in batches
 │   │   ├── ContentPane.swift, ResultViews.swift  # Result list, hit highlighting, preview pane
-│   │   ├── FullWindow.swift                # Full Window (⌘E)
+│   │   ├── FullWindow.swift                # Full Window (⌘E), search within / exclude from results
 │   │   ├── ReaderWindow.swift              # Reader (⌘↵): step through hits
 │   │   ├── ArchiveMembers.swift            # Archive members as results of their own
 │   │   ├── ResultMenu.swift                # Result context menu (spec: docs/design/CONTEXT-MENU.md)
