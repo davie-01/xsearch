@@ -52,6 +52,9 @@ public final class ContentIndexer: @unchecked Sendable {
     private let workerURL: URL
     private let workerCount: Int
     private let queue = DispatchQueue(label: "xsearch.indexer", qos: .utility)
+    /// Runs onSettled. A queue of its own gets a thread even when the global pool is taken up by
+    /// blocked work; through the global queue the report waited 14 s on a loaded machine.
+    private let settledQueue = DispatchQueue(label: "xsearch.indexer.settled", qos: .utility)
     private let state = OSAllocatedUnfairLock(initialState: Status(pending: 0, failed: 0, indexed: 0, committedBatches: 0, running: false))
     private var catalog: FileCatalog?
     private var writer: ContentIndexWriter?
@@ -93,7 +96,7 @@ public final class ContentIndexer: @unchecked Sendable {
     var limits = ExtractionLimits()
     var errorBackoff: TimeInterval = 5
     var settleDelay: TimeInterval = 30
-    /// A burst of work has finished and nothing has arrived for a while (any thread).
+    /// A burst of work has finished and nothing has arrived for a while (its own serial queue).
     public var onSettled: (@Sendable () -> Void)?
     private var lastWork: Date?
     var oldInstanceGrace: TimeInterval = 60
@@ -218,7 +221,7 @@ public final class ContentIndexer: @unchecked Sendable {
         guard let last = lastWork, Date().timeIntervalSince(last) >= settleDelay,
               status.pending == 0, rebuildId == nil, !needsRecovery, !stopped else { return }
         lastWork = nil
-        if let onSettled { DispatchQueue.global().async(execute: onSettled) }
+        if let onSettled { settledQueue.async(execute: onSettled) }
     }
 
     /// Idle stays idle: the timer fires for the earliest retry or lease expiry, and otherwise
