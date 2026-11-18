@@ -117,10 +117,21 @@ import XSearchCore
     let deadline = Date().addingTimeInterval(10)
     while try c.meta("fsevents_last_id") == before, Date() < deadline { usleep(100_000) }
     #expect(try c.meta("fsevents_last_id") != before)
-    try "x".write(toFile: data.appendingPathComponent("ignored-last").path, atomically: false, encoding: .utf8)
-    // Its event can take a while on a loaded machine; shutdown can only save what has arrived.
-    let arrival = Date().addingTimeInterval(10)
-    while !names.hasUnsavedCursor && Date() < arrival { usleep(100_000) }
+    // real.txt can report more than one event, the last ones late. One arriving in the same
+    // batch as the filtered event below gets that batch journaled, which writes the cursor at
+    // once. So let the cursor settle first, and retry with a new file if a batch still mixed.
+    var stable = try c.meta("fsevents_last_id"), still = Date()
+    while Date().timeIntervalSince(still) < 1.5, Date() < deadline.addingTimeInterval(10) {
+        usleep(100_000)
+        let now = try c.meta("fsevents_last_id")
+        if now != stable { stable = now; still = Date() }
+    }
+    for attempt in 0..<5 where !names.hasUnsavedCursor {
+        try "x".write(toFile: data.appendingPathComponent("ignored-last-\(attempt)").path, atomically: false, encoding: .utf8)
+        // Its event can take a while on a loaded machine; shutdown can only save what has arrived.
+        let arrival = Date().addingTimeInterval(4)
+        while !names.hasUnsavedCursor && Date() < arrival { usleep(100_000) }
+    }
     #expect(names.hasUnsavedCursor)
     let mid = try c.meta("fsevents_last_id")
     names.shutdown()
