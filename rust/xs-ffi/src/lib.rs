@@ -693,6 +693,8 @@ pub struct ArchiveListing {
     pub skipped_by_type: u32,
     pub skipped_too_large: u32,
     pub encrypted: u32,
+    /// Wanted members that could not be unpacked (unsupported compression, damaged data).
+    pub unreadable: u32,
     pub truncated: bool,
     pub warnings: Vec<String>,
 }
@@ -719,6 +721,7 @@ pub fn unpack_archive(
         skipped_by_type: u.skipped_by_type,
         skipped_too_large: u.skipped_too_large,
         encrypted: u.encrypted,
+        unreadable: u.unreadable,
         truncated: u.truncated,
         warnings: u.warnings,
     })

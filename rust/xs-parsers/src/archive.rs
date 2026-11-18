@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ARCHIVE_EXTRACTOR_VERSION: u64 = 3;
+pub const ARCHIVE_EXTRACTOR_VERSION: u64 = 4;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ArchiveLimits {
@@ -33,6 +33,9 @@ pub struct Unpacked {
     pub skipped_by_type: u32,
     pub skipped_too_large: u32,
     pub encrypted: u32,
+    /// Wanted members that could not be unpacked (unsupported compression, damaged data); the
+    /// others are still read. Only when nothing could be read does the archive fail.
+    pub unreadable: u32,
     /// Stopped early: total size or member count limit.
     pub truncated: bool,
     pub warnings: Vec<String>,
@@ -157,6 +160,9 @@ pub fn unpack(path: &Path, dest: &Path, wanted: &dyn Fn(&str) -> bool, limits: A
     if sink.out.encrypted > 0 {
         sink.out.warnings.push(format!("{} 个文件已加密，无法读取", sink.out.encrypted));
     }
+    if sink.out.unreadable > 0 {
+        sink.out.warnings.push(format!("{} 个文件使用了不支持的压缩方式或已损坏，未读取", sink.out.unreadable));
+    }
     if sink.out.skipped_too_large > 0 {
         sink.out.warnings.push(format!("{} 个文件超过单文件上限，未读取", sink.out.skipped_too_large));
     }
@@ -175,31 +181,49 @@ fn member_name(raw: &[u8]) -> String {
     }
 }
 
+/// Each member is judged from its header first (`by_index_raw` decodes nothing), so a member
+/// that is skipped anyway (type, size) never fails on its compression method. A wanted member
+/// that cannot be unpacked is counted and left out; the archive fails only when nothing could
+/// be read, with the first member's error as the reason.
 fn zip(path: &Path, sink: &mut Sink) -> Result<()> {
     let limits = Limits { max_file_bytes: u64::MAX, max_unpacked_bytes: sink.limits.max_total_bytes };
     let mut z = open_zip(path, limits)?;
+    let mut first_error: Option<anyhow::Error> = None;
     for i in 0..z.len() {
-        let mut entry = match z.by_index(i) {
-            Ok(e) => e,
+        let (name, size) = match z.by_index_raw(i) {
+            Ok(e) if e.is_dir() => continue,
+            Ok(e) if e.encrypted() => {
+                sink.out.encrypted += 1;
+                continue;
+            }
+            Ok(e) => (member_name(e.name_raw()), e.size()),
+            Err(e) => {
+                sink.out.unreadable += 1;
+                first_error.get_or_insert(e.into());
+                continue;
+            }
+        };
+        let target = match sink.decide(&name, size) {
+            Decision::Take(target) => target,
+            Decision::Skip => continue,
+            Decision::Stop => break,
+        };
+        let written = match z.by_index(i) {
+            Ok(mut entry) => sink.write(&name, target.clone(), &mut entry),
             Err(zip::result::ZipError::UnsupportedArchive(m)) if m.contains("assword") => {
                 sink.out.encrypted += 1;
                 continue;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e.into()),
         };
-        if entry.is_dir() {
-            continue;
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&target);
+            sink.out.unreadable += 1;
+            first_error.get_or_insert(e);
         }
-        if entry.encrypted() {
-            sink.out.encrypted += 1;
-            continue;
-        }
-        let name = member_name(entry.name_raw());
-        match sink.decide(&name, entry.size()) {
-            Decision::Take(target) => sink.write(&name, target, &mut entry)?,
-            Decision::Skip => {}
-            Decision::Stop => break,
-        }
+    }
+    if sink.out.members.is_empty() && let Some(e) = first_error {
+        return Err(e);
     }
     Ok(())
 }

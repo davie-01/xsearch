@@ -76,7 +76,7 @@ extension Extractor {
         if incomplete > 0 { warnings.append("\(incomplete) 个文件只提取了一部分") }
         if full { warnings.append("压缩包正文超过上限，后续文件未读取") }
         if timedOut { warnings.append("压缩包处理超时，后续文件未读取") }
-        let partial = failed > 0 || incomplete > 0 || full || timedOut || listing.truncated || listing.encrypted > 0 || listing.skippedTooLarge > 0
+        let partial = failed > 0 || incomplete > 0 || full || timedOut || listing.truncated || listing.encrypted > 0 || listing.unreadable > 0 || listing.skippedTooLarge > 0
         return ExtractionResult(text: text, anchorsJSON: json(anchors), pagesJSON: "[]", state: partial ? "partial" : "complete",
                                 warnings: warnings, method: "archive", extractorVersion: archiveVersion)
     }

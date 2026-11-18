@@ -1312,16 +1312,24 @@ public struct ArchiveListing {
     public var skippedByType: UInt32
     public var skippedTooLarge: UInt32
     public var encrypted: UInt32
+    /**
+     * Wanted members that could not be unpacked (unsupported compression, damaged data).
+     */
+    public var unreadable: UInt32
     public var truncated: Bool
     public var warnings: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(members: [ArchiveMember], skippedByType: UInt32, skippedTooLarge: UInt32, encrypted: UInt32, truncated: Bool, warnings: [String]) {
+    public init(members: [ArchiveMember], skippedByType: UInt32, skippedTooLarge: UInt32, encrypted: UInt32, 
+        /**
+         * Wanted members that could not be unpacked (unsupported compression, damaged data).
+         */unreadable: UInt32, truncated: Bool, warnings: [String]) {
         self.members = members
         self.skippedByType = skippedByType
         self.skippedTooLarge = skippedTooLarge
         self.encrypted = encrypted
+        self.unreadable = unreadable
         self.truncated = truncated
         self.warnings = warnings
     }
@@ -1346,6 +1354,9 @@ extension ArchiveListing: Equatable, Hashable {
         if lhs.encrypted != rhs.encrypted {
             return false
         }
+        if lhs.unreadable != rhs.unreadable {
+            return false
+        }
         if lhs.truncated != rhs.truncated {
             return false
         }
@@ -1360,6 +1371,7 @@ extension ArchiveListing: Equatable, Hashable {
         hasher.combine(skippedByType)
         hasher.combine(skippedTooLarge)
         hasher.combine(encrypted)
+        hasher.combine(unreadable)
         hasher.combine(truncated)
         hasher.combine(warnings)
     }
@@ -1378,6 +1390,7 @@ public struct FfiConverterTypeArchiveListing: FfiConverterRustBuffer {
                 skippedByType: FfiConverterUInt32.read(from: &buf), 
                 skippedTooLarge: FfiConverterUInt32.read(from: &buf), 
                 encrypted: FfiConverterUInt32.read(from: &buf), 
+                unreadable: FfiConverterUInt32.read(from: &buf), 
                 truncated: FfiConverterBool.read(from: &buf), 
                 warnings: FfiConverterSequenceString.read(from: &buf)
         )
@@ -1388,6 +1401,7 @@ public struct FfiConverterTypeArchiveListing: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.skippedByType, into: &buf)
         FfiConverterUInt32.write(value.skippedTooLarge, into: &buf)
         FfiConverterUInt32.write(value.encrypted, into: &buf)
+        FfiConverterUInt32.write(value.unreadable, into: &buf)
         FfiConverterBool.write(value.truncated, into: &buf)
         FfiConverterSequenceString.write(value.warnings, into: &buf)
     }

@@ -13,6 +13,7 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Improved
 
+- A zip member with an unsupported compression method (such as BZip2) or damaged data no longer fails the whole archive: the other members are indexed, the archive is marked partly indexed with the number skipped, and it fails only when nothing at all can be read. Members that are not wanted (type, per-file limit) are no longer checked for their compression method. Archives are extracted once more after updating.
 - Indexes can be updated by hand: Update Now in the menu bar and Settings → Index Scope checks the whole scope again, each folder can be rescanned on its own, Index This File Again in a content result's context menu forces a fresh extraction, and the content index card shows how many files failed to extract, with a list of each file and its reason that can reveal them in Finder, copy the list or extract them again.
 - Settings → Privacy & Data shows index storage by kind (name index, content index, personal data, temporary and leftover files) and cleans up leftovers. New Clear Content Index and Clear All Indexes delete the files and pause content indexing until you resume; recents, favorites and settings are always kept.
 - Content indexing can be paused and resumed (menu bar or Settings → Index Scope), and stays so across restarts. While paused, no file content is extracted and the extraction processes exit; what is indexed stays searchable, and file changes are noted and extracted after resuming. The name index keeps updating in real time.
