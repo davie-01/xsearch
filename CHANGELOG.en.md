@@ -10,6 +10,11 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 - Content search accepts `name:` file name conditions together with the text, e.g. `in payment name:invoice`. Semicolon-separated values in one `name:` are alternatives, several `name:` terms must all match, and `*` / `?` match the whole name; the condition applies before the result limit. The Full Window's Content sidebar has a new “File name contains” field.
 
+### Improved
+
+- The launcher's `⌘/` syntax summary is now a grouped list with examples and explanations in two columns, clearer wording, and switched-off syntax clearly marked. Fixes the summary showing as an empty narrow strip over the launcher.
+- `Esc` in the launcher now steps back one layer at a time: it closes the syntax summary or Quick Look first, then clears the input, and only then hides the panel; quick repeated presses are no longer lost.
+
 ## 0.2.0 — 2026-11-18
 
 First public release.

@@ -205,7 +205,7 @@ let englishStrings: [String: String] = [
     "dir:~/文稿": "dir:~/Documents",
     "kind:文件夹": "kind:folder",
     "name:验收;报告": "name:invoice;report",
-    "\n可在 设置 → 搜索语法 中开关各项语法。": "\nTurn each syntax on or off in Settings → Search Syntax.",
+    "可在 设置 → 搜索语法 中开关各项语法。": "Turn each syntax on or off in Settings → Search Syntax.",
     "过滤条件 ": "Filter ",
     "完成": "Done",
     "下一步": "Next",

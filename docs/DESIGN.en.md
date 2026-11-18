@@ -67,6 +67,7 @@ XSearch/
 │   ├── Sources/
 │   │   ├── main.swift, AppDelegate.swift   # Launch, data directory, menu bar, wiring the services
 │   │   ├── LauncherPanel.swift             # ⌥Space launcher: input, mode switch, `in ` prefix, syntax summary
+│   │   ├── SyntaxHelpView.swift            # Grouped list view of the ⌘/ syntax summary
 │   │   ├── SearchSession.swift             # One name search session and its result rows
 │   │   ├── ContentSearcher.swift           # Content search: background, cancellable, delivered in batches
 │   │   ├── ContentPane.swift, ResultViews.swift  # Result list, hit highlighting, preview pane

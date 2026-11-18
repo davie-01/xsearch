@@ -118,6 +118,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     // Spotlight shell: one glass bar, plus round glass mode buttons that split out of it.
     private let container = NSGlassEffectContainerView()
     private let mainGlass = NSGlassEffectView()
+    /// The ⌘/ cheat sheet while it is shown: Esc closes it before the launcher.
+    private var syntaxPopover: NSPopover?
     /// The window's content: the full transparent canvas while the shell animates, just the glass at rest.
     private let shellRoot = FlippedView()
     private static let canvasSize = NSSize(width: Shell.contentWidth + 2 * Shell.inset, height: Shell.maxHeight + 2 * Shell.inset)
@@ -1495,69 +1497,53 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private func showSyntaxHelp() {
         let pop = NSPopover()
         pop.behavior = .transient
-        let label = NSTextField(wrappingLabelWithString: "")
-        label.attributedStringValue = Self.syntaxHelp(mode: mode, syntax: Preferences.shared.querySyntax)
-        // A size of its own: left to Auto Layout, the popover over the glass panel came out a
-        // narrow empty strip (the wrapping label had no width to lay out against).
-        let width: CGFloat = 440
-        let text = label.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude))
-        label.frame = NSRect(x: 16, y: 14, width: width, height: ceil(text.height))
-        let box = NSView(frame: NSRect(x: 0, y: 0, width: width + 32, height: ceil(text.height) + 28))
-        box.addSubview(label)
+        let view = SyntaxHelpView(sections: Self.syntaxHelp(mode: mode, syntax: Preferences.shared.querySyntax),
+                                  footer: L("可在 设置 → 搜索语法 中开关各项语法。"))
+        // Same tinted glass as the launcher, so the sheet reads like the result list in both
+        // appearances (the popover's own material came out a pale grey under dim text).
+        let glass = NSGlassEffectView(frame: NSRect(origin: .zero, size: view.frame.size))
+        glass.style = .regular
+        glass.tintColor = Theme.panelTint
+        glass.contentView = view
         let vc = NSViewController()
-        vc.view = box
-        vc.preferredContentSize = box.frame.size
+        vc.view = glass
+        vc.preferredContentSize = view.frame.size
         pop.contentViewController = vc
-        pop.contentSize = box.frame.size
+        pop.contentSize = view.frame.size
         pop.show(relativeTo: field.bounds, of: field, preferredEdge: .maxY)
+        syntaxPopover = pop
     }
 
     /// ⌘/ cheat sheet; switched-off syntax is marked (ARCHITECTURE §12).
-    static func syntaxHelp(mode: Preferences.Mode, syntax: QuerySyntax) -> NSAttributedString {
-        let s = NSMutableAttributedString()
-        // Two columns: the example, then at a tab stop its meaning; wrapped lines stay in the
-        // second column.
-        let column: CGFloat = 170
-        let rows = NSMutableParagraphStyle()
-        rows.tabStops = [NSTextTab(textAlignment: .left, location: column)]
-        rows.headIndent = column
-        rows.paragraphSpacing = 3
-        let body: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: rows]
-        let code: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: rows]
-        let off: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.systemOrange]
-        func title(_ t: String) {
-            if s.length > 0 { s.append(NSAttributedString(string: "\n")) }
-            s.append(NSAttributedString(string: t + "\n", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.labelColor]))
-        }
-        func row(_ example: String, _ text: String, enabled: Bool = true) {
-            s.append(NSAttributedString(string: example, attributes: code))
-            s.append(NSAttributedString(string: "\t" + text, attributes: body))
-            if !enabled { s.append(NSAttributedString(string: L("（已关闭，按普通字符搜索）"), attributes: off)) }
-            s.append(NSAttributedString(string: "\n"))
-        }
-        title(mode == .name ? L("名称模式语法") : L("内容模式语法"))
-        row(L("报告 2024"), mode == .name ? L("文件名同时含“报告”和“2024”，顺序不限") : L("正文同时含“报告”和“2024”，顺序不限"))
-        row(L("\"年度 报告\""), L("引号内整体当作一个词，空格也算"))
-        row(L("合同 | 协议"), L("含其中任一个"), enabled: syntax.operators)
-        row(L("合同 -草稿"), L("排除含“草稿”的"), enabled: syntax.operators)
-        row(L("(合同 | 协议) 2026"), L("括号分组：先算括号里的"), enabled: syntax.operators)
+    static func syntaxHelp(mode: Preferences.Mode, syntax: QuerySyntax) -> [SyntaxHelpView.Section] {
+        typealias Row = SyntaxHelpView.Row
+        var query: [Row] = [
+            Row(example: L("报告 2024"), text: mode == .name ? L("文件名同时含“报告”和“2024”，顺序不限") : L("正文同时含“报告”和“2024”，顺序不限")),
+            Row(example: L("\"年度 报告\""), text: L("引号内整体当作一个词，空格也算")),
+            Row(example: L("合同 | 协议"), text: L("含其中任一个"), enabled: syntax.operators),
+            Row(example: L("合同 -草稿"), text: L("排除含“草稿”的"), enabled: syntax.operators),
+            Row(example: L("(合同 | 协议) 2026"), text: L("括号分组：先算括号里的"), enabled: syntax.operators),
+        ]
         if mode == .name {
-            row(L("*.pdf  报告?.docx"), L("通配符：* 任意多个字符（不跨目录），? 恰好一个字符"), enabled: syntax.wildcards)
-            row(L("**/合同/*.pdf"), L("含 / 时匹配完整路径，** 可跨目录"), enabled: syntax.wildcards)
-            row("regex:^\\d+\\.txt$", L("正则匹配文件名（含 / 时匹配路径）"), enabled: syntax.regex)
+            query += [
+                Row(example: L("*.pdf  报告?.docx"), text: L("通配符：* 任意多个字符（不跨目录），? 恰好一个字符"), enabled: syntax.wildcards),
+                Row(example: L("**/合同/*.pdf"), text: L("含 / 时匹配完整路径，** 可跨目录"), enabled: syntax.wildcards),
+                Row(example: "regex:^\\d+\\.txt$", text: L("正则匹配文件名（含 / 时匹配路径）"), enabled: syntax.regex),
+            ]
         } else {
-            row(L("\"合同 金额\"~10"), L("两个词相距不超过 10 个字，顺序不限"), enabled: syntax.proximity)
-            row("regex:HT-\\d{4}", L("正则匹配正文；需含 3 字节以上的固定文字，或加 dir: / ext:"), enabled: syntax.regex)
+            query += [
+                Row(example: L("\"合同 金额\"~10"), text: L("两个词相距不超过 10 个字，顺序不限"), enabled: syntax.proximity),
+                Row(example: "regex:HT-\\d{4}", text: L("正则匹配正文；需含 3 字节以上的固定文字，或加 dir: / ext:"), enabled: syntax.regex),
+            ]
         }
-        title(L("过滤条件"))
-        row(L("dir:~/文稿"), mode == .name ? L("只在这个目录里找，可写多个；也可只写目录名 dir:合同/2024") : L("只在这个目录里找（完整路径），可写多个"))
-        row("ext:pdf;docx", L("只看这些扩展名"))
-        if mode == .name { row(L("kind:文件夹"), L("按类别：文件夹 / 应用 / pdf / doc / 图片 …")) }
-        if mode == .content { row(L("name:验收;报告"), L("文件名含其中任一；多个 name: 须同时满足")) }
-        row("size:>10mb", L("按大小：> >= < <=、1m..10m、empty"))
-        row("dm:today", L("按修改时间：today / 本周 / 7d / 2024-05 / >=2025"))
-        s.append(NSAttributedString(string: L("\n可在 设置 → 搜索语法 中开关各项语法。"), attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
-        return s
+        var filters = [Row(example: L("dir:~/文稿"), text: mode == .name ? L("只在这个目录里找，可写多个；也可只写目录名 dir:合同/2024") : L("只在这个目录里找（完整路径），可写多个")),
+                       Row(example: "ext:pdf;docx", text: L("只看这些扩展名"))]
+        if mode == .name { filters.append(Row(example: L("kind:文件夹"), text: L("按类别：文件夹 / 应用 / pdf / doc / 图片 …"))) }
+        if mode == .content { filters.append(Row(example: L("name:验收;报告"), text: L("文件名含其中任一；多个 name: 须同时满足"))) }
+        filters += [Row(example: "size:>10mb", text: L("按大小：> >= < <=、1m..10m、empty")),
+                    Row(example: "dm:today", text: L("按修改时间：today / 本周 / 7d / 2024-05 / >=2025"))]
+        return [SyntaxHelpView.Section(title: mode == .name ? L("名称模式语法") : L("内容模式语法"), rows: query),
+                SyntaxHelpView.Section(title: L("过滤条件"), rows: filters)]
     }
 
     // MARK: Quick Look
@@ -1595,7 +1581,21 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     /// Esc: closes Quick Look first, then the launcher.
     private func cancel() {
-        if quickLookVisible { QLPreviewPanel.shared().orderOut(nil) } else { hide() }
+        // One layer per Esc: cheat sheet, Quick Look, the typed query, then the launcher.
+        // `isShown` stays true while the popover animates out, so the reference is dropped at
+        // once: otherwise a quick second Esc only closed the closing popover again.
+        if let pop = syntaxPopover {
+            syntaxPopover = nil
+            if pop.isShown { pop.close(); return }
+        }
+        if quickLookVisible { QLPreviewPanel.shared().orderOut(nil); return }
+        if !field.stringValue.isEmpty {
+            field.stringValue = ""
+            panel.makeFirstResponder(field)
+            runSearch()
+            return
+        }
+        hide()
     }
 
     /// The launcher never activates XSearch, so the app in front stays in front. Quick Look's own

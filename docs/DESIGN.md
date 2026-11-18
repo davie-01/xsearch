@@ -67,6 +67,7 @@ XSearch/
 │   ├── Sources/
 │   │   ├── main.swift、AppDelegate.swift   # 启动、数据目录、菜单栏与各服务装配
 │   │   ├── LauncherPanel.swift             # ⌥Space 启动器：输入、模式切换、`in ` 前缀、语法速查
+│   │   ├── SyntaxHelpView.swift            # ⌘/ 语法速查的分组列表视图
 │   │   ├── SearchSession.swift             # 一次名称搜索的会话与结果行
 │   │   ├── ContentSearcher.swift           # 内容检索：后台执行、可取消、分批投递
 │   │   ├── ContentPane.swift、ResultViews.swift  # 结果列表、命中高亮与预览面板
