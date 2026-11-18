@@ -115,7 +115,10 @@ import XSearchCore
     while try c.meta("fsevents_last_id") == before, Date() < deadline { usleep(100_000) }
     #expect(try c.meta("fsevents_last_id") != before)
     try "x".write(toFile: data.appendingPathComponent("ignored-last").path, atomically: false, encoding: .utf8)
-    usleep(800_000)
+    // Its event can take a while on a loaded machine; shutdown can only save what has arrived.
+    let arrival = Date().addingTimeInterval(10)
+    while !names.hasUnsavedCursor && Date() < arrival { usleep(100_000) }
+    #expect(names.hasUnsavedCursor)
     let mid = try c.meta("fsevents_last_id")
     names.shutdown()
     #expect(try c.meta("fsevents_last_id") != mid)

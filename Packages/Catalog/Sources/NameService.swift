@@ -239,6 +239,9 @@ public final class NameService: @unchecked Sendable {
 
     struct TaskRow: Equatable { var fileId: Int64; var opSeq: Int64; var kind: Int64; var state: Int64 }
 
+    /// Test: an event cursor is held in memory, not yet written.
+    var hasUnsavedCursor: Bool { queue.sync { unsavedCursor != nil } }
+
     /// Test / diagnostics: content tasks and the file each belongs to.
     func contentTasks() -> [(task: TaskRow, path: String?)] {
         queue.sync {
