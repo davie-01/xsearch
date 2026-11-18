@@ -795,7 +795,7 @@ struct ContentCard: View {
             Text(L("提取的文件类型")).font(.system(size: 13, weight: .medium))
             // A grid that wraps: twelve types do not fit one row.
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12, alignment: .leading)], alignment: .leading, spacing: 8) {
-                ForEach([(ContentType.text, L("文本 / 代码")), (.pdf, "PDF"), (.docx, L("Word（docx）")), (.doc, L("Word（doc）")), (.wps, L("WPS 文字")), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, L("网页 HTML")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包"))], id: \.0) { type, label in
+                ForEach([(ContentType.text, L("文本 / 代码")), (.pdf, "PDF"), (.docx, L("Word（docx、odt）")), (.doc, L("Word（doc）")), (.wps, L("WPS 文字")), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, L("网页 HTML")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包"))], id: \.0) { type, label in
                     Toggle(isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
                         if on { model.content.types.insert(type) } else { model.content.types.remove(type) }
                         model.commitContent()
@@ -803,7 +803,7 @@ struct ContentCard: View {
                     .toggleStyle(.checkbox)
                 }
             }
-            Text(L("WPS 表格、演示分别归入 Excel、PowerPoint；压缩包只读一层；图片 OCR 在 M6")).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(L("WPS 表格、演示和 OpenDocument 的 ods、odp 分别归入 Excel、PowerPoint；压缩包只读一层；图片 OCR 在 M6")).font(.system(size: 11.5)).foregroundStyle(.secondary)
             HStack {
                 Text(L("单文件上限")).font(.system(size: 13))
                 Picker("", selection: Binding(get: { model.content.maxFileBytes }, set: { model.content.maxFileBytes = $0; model.commitContent() })) {

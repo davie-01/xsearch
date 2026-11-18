@@ -108,7 +108,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     static let units = ["kb", "mb", "gb"]
     static let kinds: [(FileKind, String)] = [(.folder, L("文件夹")), (.pdf, "PDF"), (.word, L("文档")), (.sheet, L("表格")), (.slide, L("演示")), (.ofd, "OFD"),
                                               (.text, L("文本 / 代码")), (.image, L("图片")), (.video, L("视频")), (.audio, L("音频")), (.archive, L("压缩包")), (.app, L("应用"))]
-    static let contentTypes: [(ContentType, String)] = [(.pdf, "PDF"), (.docx, L("Word（docx）")), (.doc, L("Word（doc）")), (.sheet, "Excel"), (.slide, "PowerPoint"),
+    static let contentTypes: [(ContentType, String)] = [(.pdf, "PDF"), (.docx, L("Word（docx、odt）")), (.doc, L("Word（doc）")), (.sheet, "Excel"), (.slide, "PowerPoint"),
                                                         (.text, L("文本 / 代码")), (.ofd, "OFD"), (.web, L("网页")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包")), (.wps, L("WPS 文字"))]
     static let matchModes = [L("宽松"), L("区分大小写"), L("严格原文")]
 

@@ -273,3 +273,16 @@ struct PageJSON: Decodable { var page: Int; var state: String }
         Issue.record("missing member should fail"); return
     }
 }
+
+@Test func openDocumentTextDispatchesToItsParser() throws {
+    // AppKit writes real OpenDocument text: what LibreOffice and Pages produce.
+    let path = tmp("plan.odt")
+    let source = NSAttributedString(string: "项目计划\n\n第二段 验收标准 支付条件\n")
+    let data = try source.data(from: NSRange(location: 0, length: source.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.openDocument])
+    try data.write(to: URL(fileURLWithPath: path))
+    let r = try Extractor.extract(path: path, limits: ExtractionLimits())
+    #expect(r.method == "odt" && r.state == "complete" && r.extractorVersion == Extractor.odfVersion)
+    #expect(r.text.contains("项目计划") && r.text.contains("第二段 验收标准 支付条件"))
+    let anchors = try JSONDecoder().decode([AnchorJSON].self, from: Data(r.anchorsJSON.utf8))
+    #expect(anchors.map(\.kind) == ["paragraph", "paragraph"])
+}

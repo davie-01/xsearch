@@ -294,3 +294,51 @@ fn word97_pieces_fields_and_deletions() {
     assert_eq!(e.anchors[1].start, 5);
     assert_eq!(e.state, ExtractState::Complete);
 }
+
+const ODF_NS: &str = r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0""#;
+
+#[test]
+fn odt_paragraphs_tables_notes_and_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("t.odt");
+    let body = format!(
+        r#"<office:document-content {ODF_NS}><office:body><office:text>
+        <text:h text:outline-level="1">第一章 总则</text:h>
+        <text:p>合同<text:span>金额</text:span>为<text:s text:c="2"/>一百万<text:tab/>元<text:note><text:note-citation>1</text:note-citation><text:note-body><text:p>含税价</text:p></text:note-body></text:note></text:p>
+        <text:list><text:list-item><text:p>付款条件：终验后支付</text:p></text:list-item></text:list>
+        <table:table><table:table-row><table:table-cell table:number-columns-repeated="2"/><table:table-cell><text:p>验收</text:p></table:table-cell></table:table-row></table:table>
+        <text:p><draw:frame><draw:text-box><text:p>文本框里的话</text:p></draw:text-box></draw:frame></text:p>
+        <office:annotation><text:p>批注不算正文</text:p></office:annotation>
+        </office:text></office:body></office:document-content>"#
+    );
+    zip(&p, &[("mimetype", "application/vnd.oasis.opendocument.text".into()), ("content.xml", body)]);
+    let e = xs_parsers::odf::text(&p, Limits::default()).unwrap();
+    assert_eq!(e.text, "第一章 总则\n合同金额为  一百万\t元\n含税价\n付款条件：终验后支付\n验收\n文本框里的话\n");
+    let kinds: Vec<_> = e.anchors.iter().map(|a| a.kind.clone()).collect();
+    assert_eq!(kinds, vec![
+        AnchorKind::Paragraph { index: 1 }, AnchorKind::Paragraph { index: 2 }, AnchorKind::Paragraph { index: 3 },
+        AnchorKind::Paragraph { index: 4 }, AnchorKind::Cell { table: 1, cell: "C1".into() }, AnchorKind::Paragraph { index: 5 },
+    ]);
+    assert_eq!((e.state, e.method.as_str()), (ExtractState::Complete, "odt"));
+}
+
+#[test]
+fn odp_pages_with_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("s.odp");
+    let body = format!(
+        r#"<office:document-content {ODF_NS}><office:body><office:presentation>
+        <draw:page draw:name="p1"><draw:frame><draw:text-box><text:p>项目汇报</text:p><text:list><text:list-item><text:p>进度 80%</text:p></text:list-item></text:list></draw:text-box></draw:frame>
+          <presentation:notes><draw:frame><draw:text-box><text:p>讲到预算时停顿</text:p></draw:text-box></draw:frame></presentation:notes></draw:page>
+        <draw:page draw:name="p2"><draw:frame><draw:text-box><text:p>谢谢</text:p></draw:text-box></draw:frame>
+          <presentation:notes><draw:frame><draw:text-box><text:p>2</text:p></draw:text-box></draw:frame></presentation:notes></draw:page>
+        </office:presentation></office:body></office:document-content>"#
+    );
+    zip(&p, &[("mimetype", "application/vnd.oasis.opendocument.presentation".into()), ("content.xml", body)]);
+    let e = xs_parsers::odf::presentation(&p, Limits::default()).unwrap();
+    assert_eq!(e.text, "项目汇报\n进度 80%\n讲到预算时停顿\n谢谢\n");
+    let kinds: Vec<_> = e.anchors.iter().map(|a| a.kind.clone()).collect();
+    // A page-number placeholder alone is not a note.
+    assert_eq!(kinds, vec![AnchorKind::Slide { slide: 1 }, AnchorKind::Part { name: "备注 1".into() }, AnchorKind::Slide { slide: 2 }]);
+    assert!(xs_parsers::odf::presentation(&dir.path().join("missing.odp"), Limits::default()).is_err());
+}

@@ -410,7 +410,9 @@ public final class ContentIndexer: @unchecked Sendable {
     // MARK: Versions and rebuild
 
     static func extractorFingerprint() -> [String: UInt64] {
-        Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
+        var versions = Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
+        versions["odf"] = Extractor.odfVersion
+        return versions
     }
 
     static let fallbackInterval: TimeInterval = 30
@@ -477,7 +479,10 @@ public final class ContentIndexer: @unchecked Sendable {
         if let stored {
             let changed = Set(current.filter { stored[$0.key] != $0.value }.keys)
             if !changed.isEmpty {
-                _ = try requeue { name, _ in ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false }
+                _ = try requeue { name, _ in
+                    let ext = (name as NSString).pathExtension.lowercased()
+                    return Extractor.odfExtensions.contains(ext) ? changed.contains("odf") : ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false
+                }
             }
         }
         try catalog.setMeta("content_extractors", String(decoding: try JSONEncoder().encode(current), as: UTF8.self))

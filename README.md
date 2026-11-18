@@ -20,7 +20,7 @@ XSearch 是一款面向 Apple 芯片 Mac 的原生菜单栏应用。按下 `⌥S
 
 ### 可以搜索哪些正文
 
-- **文档与表格**：有文字层的 PDF，Word（DOC、DOCX、DOT、DOCM），Excel（XLS、XLSX、XLSM）、ODS，PowerPoint（PPT、PPTX、PPS、PPTM），以及部分 WPS 格式（WPS、ET、DPS）。
+- **文档与表格**：有文字层的 PDF，Word（DOC、DOCX、DOT、DOCM），Excel（XLS、XLSX、XLSM），PowerPoint（PPT、PPTX、PPS、PPTM），OpenDocument（ODT、ODS、ODP），以及部分 WPS 格式（WPS、ET、DPS）。
 - **文本与出版物**：纯文本、Markdown、日志、常见代码和配置文件，以及 HTML、EPUB、RTF、OFD。
 - **归档**：ZIP、TAR、GZ、TGZ、7z、RAR。XSearch 可搜索已提取的包内正文，并在结果中标出命中的成员。
 

@@ -570,6 +570,11 @@ pub fn extract_docx(
     path: String,
     max_unpacked_bytes: u64,
 ) -> Result<ExtractionOutput, EngineError> {
+    // OpenDocument text shares the Word type (as .ods does Excel's): told apart by extension.
+    if Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("odt")) {
+        let e = xs_parsers::odf::text(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+        return Ok(output(e, xs_parsers::odf::ODF_EXTRACTOR_VERSION));
+    }
     let e = xs_parsers::docx::extract(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
     Ok(output(e, xs_parsers::DOCX_EXTRACTOR_VERSION))
 }
@@ -589,6 +594,10 @@ pub fn extract_spreadsheet(path: String, max_unpacked_bytes: u64) -> Result<Extr
 
 #[uniffi::export]
 pub fn extract_pptx(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    if Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("odp")) {
+        let e = xs_parsers::odf::presentation(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+        return Ok(output(e, xs_parsers::odf::ODF_EXTRACTOR_VERSION));
+    }
     let e = xs_parsers::office::pptx(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
     Ok(output(e, xs_parsers::office::PPTX_EXTRACTOR_VERSION))
 }
@@ -763,5 +772,6 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.web".to_owned(), xs_parsers::web::HTML_EXTRACTOR_VERSION.to_string()),
         ("extractor.ebook".to_owned(), xs_parsers::web::EPUB_EXTRACTOR_VERSION.to_string()),
         ("extractor.archive".to_owned(), xs_parsers::archive::ARCHIVE_EXTRACTOR_VERSION.to_string()),
+        ("extractor.odf".to_owned(), xs_parsers::odf::ODF_EXTRACTOR_VERSION.to_string()),
     ])
 }

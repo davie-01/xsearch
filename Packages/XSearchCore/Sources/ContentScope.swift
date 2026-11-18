@@ -61,11 +61,11 @@ public enum ContentType: String, Codable, Sendable, CaseIterable {
 
     public var extensions: Set<String> {
         switch self {
-        case .docx: ["docx", "docm"]
+        case .docx: ["docx", "docm", "odt"]
         case .pdf: ["pdf"]
         case .doc: ["doc", "dot"]
         case .sheet: ["xlsx", "xlsm", "xls", "ods", "et"]
-        case .slide: ["pptx", "pptm", "ppt", "pps", "dps"]
+        case .slide: ["pptx", "pptm", "ppt", "pps", "dps", "odp"]
         case .wps: ["wps"]
         case .ofd: ["ofd"]
         case .web: ["html", "htm", "xhtml", "shtml"]

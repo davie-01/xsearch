@@ -378,10 +378,11 @@ Scope
 | XLSX / XLS | M3 | Rust `calamine`（同时支持新旧两种格式） | 显示值；公式、隐藏工作表、批注可选 | 工作表 + 单元格地址 |
 | PPTX | M3 | Rust | 幻灯片文字、表格；备注可选 | 幻灯片编号 + 文本块 |
 | OFD | M3 | Rust（zip + XML，解析 `TextCode`） | 逐页文字 | 页 + 坐标（可以在页面上高亮） |
+| OpenDocument（.odt / .odp；.ods 走 calamine） | 第 3 阶段 ✅ | Rust（zip + `content.xml`），归入 Word / PowerPoint 类型，版本单独计（`extractor.odf`） | .odt：段落、标题、列表、表格、脚注、文本框，跳过批注和修订删除；.odp：各页文字与演讲者备注 | .odt 段落序号 / 表格单元格；.odp 幻灯片 + “备注 N” |
 | RTF / HTML / ePub | M4 ✅ | RTF：NSAttributedString（失败时用 textutil）；HTML / ePub：Rust 容错扫描 | 正文 | 段落；ePub 另按章节 |
 | WPS（.wps / .et / .dps） | M4 ✅ | .wps：OLE 走 .doc 路线，ZIP 走 docx；.et 用 calamine（BIFF8）；.dps 与旧版 PPT 相同 | 正文 | 段落 / 单元格 / 幻灯片 |
 | 旧版 PPT（.ppt / .pps） | M4 ✅ | Rust：读 OLE2 里的 PowerPoint Document 流，按持久化目录定位各页 | 幻灯片和备注的文字 | 幻灯片 |
-| zip / 7z / tar / rar 包内文件 | M4 ✅（简化） | Rust 解包，Swift 按成员类型提取；整个压缩包算一份文档（M4-2 说明），虚拟路径的子文档以后再做 | 包内的子文件 | 成员路径 + 成员内的锚点 |
+| zip / 7z / tar / rar 包内文件 | M4 ✅（简化） | Rust 解包，Swift 按成员类型提取；整个压缩包算一份文档（M4-2 说明），虚拟路径的子文档以后再做；zip 支持 Deflate 与 BZip2，单个成员解不开时只跳过该成员 | 包内的子文件 | 成员路径 + 成员内的锚点 |
 | 邮件 .emlx / .eml | M4 | Rust | 主题、发件人、正文、附件（附件作为子文档） | |
 | 图片、扫描版 PDF | **M6** | Vision | 见第 14 节 | 文字框坐标 |
 

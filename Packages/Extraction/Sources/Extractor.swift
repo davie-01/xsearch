@@ -57,6 +57,11 @@ public enum Extractor {
     public static let rtfVersion: UInt64 = 1
     public static let wpsVersion: UInt64 = 2
 
+    /// OpenDocument text and presentations (.odt / .odp) have a parser of their own inside the
+    /// Word and slide types: versioned apart, so a change re-extracts only them.
+    public static var odfVersion: UInt64 { engineVersions()["extractor.odf"].flatMap(UInt64.init) ?? 1 }
+    public static let odfExtensions: Set<String> = ["odt", "odp"]
+
     /// Current extractor version per type (Rust ones come from the engine).
     public static func version(of type: ContentType) -> UInt64 {
         switch type {
