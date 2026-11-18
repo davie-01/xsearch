@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Toolchain versions
         run: |
@@ -26,7 +26,7 @@ jobs:
           swift --version
 
       # scripts/env.sh keeps Rust inside .tools/ (CARGO_HOME, RUSTUP_HOME); install it there.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             .tools/rustup
@@ -63,7 +63,7 @@ jobs:
       - name: Build app (ad-hoc signature)
         run: bash scripts/build-app.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: XSearch-app-${{ github.sha }}
           path: target/XSearch.app
