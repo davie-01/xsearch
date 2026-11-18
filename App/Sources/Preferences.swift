@@ -1,4 +1,5 @@
 import Foundation
+import Catalog
 import ContentEngine
 import XSearchCore
 
@@ -71,6 +72,12 @@ final class Preferences {
     var summonMode: SummonMode {
         get { SummonMode(rawValue: defaults.string(forKey: "summonMode") ?? "") ?? .alwaysName }
         set { defaults.set(newValue.rawValue, forKey: "summonMode") }
+    }
+
+    /// Settings › 内容索引 › 索引速度.
+    var indexingMode: IndexingMode {
+        get { defaults.string(forKey: "indexingMode").flatMap(IndexingMode.init) ?? .balanced }
+        set { defaults.set(newValue.rawValue, forKey: "indexingMode") }
     }
 
     /// Content indexing paused from the menu bar or Settings; survives restarts.

@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var names: NameService!
     /// Content indexer in IndexService.xpc (in-process without the bundled service).
     private var indexer: IndexServiceClient?
+    private let power = PowerState()
     private var statusTimer: Timer?
     private var menuOpen = false
     private var rebuildingNames = false
@@ -153,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ix.onUpdate = { [weak self] in self?.showContentStatus() }
         ix.maxFileBytes = contentScope.maxFileBytes
         ix.setPaused(Preferences.shared.contentIndexingPaused)
+        ix.setMode(effectiveIndexingMode)
         names.onContentTasks = { [weak ix] in
             Task { @MainActor in ix?.wake() }
         }
@@ -167,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        power.onChange = { [weak self] in self?.applyIndexingMode() }
+        power.start()
         MemberOpener.removeOldExtractions()
         let data = dataDirectory
         IndexFiles.removeRetired(in: data)
@@ -438,6 +442,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func togglePause() { setContentIndexingPaused(!contentIndexingPaused) }
+
+    /// Settings › 内容索引 › 索引速度 (IndexingMode), after the power policy.
+    var effectiveIndexingMode: IndexingMode {
+        // Dev / benchmarks (scripts/bench-indexing-mode.sh): XS_INDEXING_MODE fixes the mode.
+        if let forced = env["XS_INDEXING_MODE"].flatMap(IndexingMode.init) { return forced }
+        return Preferences.shared.indexingMode.effective(onBattery: power.onBattery, lowPower: power.lowPower)
+    }
+
+    /// Why the mode in effect differs from the chosen one, for Settings; nil when it does not.
+    var indexingModeNote: String? {
+        let chosen = Preferences.shared.indexingMode, now = effectiveIndexingMode
+        guard chosen != now else { return nil }
+        return power.lowPower ? L("低电量模式下按“节能”运行") : L("使用电池时按“均衡”运行")
+    }
+
+    func setIndexingMode(_ mode: IndexingMode) {
+        Preferences.shared.indexingMode = mode
+        applyIndexingMode()
+    }
+
+    private func applyIndexingMode() {
+        indexer?.setMode(effectiveIndexingMode)
+        settings?.refresh()
+    }
 
     /// 立即更新索引 (menu bar, Settings): every folder in scope is listed again and compared with
     /// the catalog, catching changes FSEvents missed; changed content files are extracted (unless

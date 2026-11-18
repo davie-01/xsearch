@@ -29,6 +29,9 @@ final class IndexServiceClient {
     var maxFileBytes: UInt64 = 100 << 20
     /// Content indexing paused by the user; set before `start`, then through `setPaused`.
     private(set) var paused = false
+    /// The indexing mode in effect (after the power policy); set before `start`, then through
+    /// `setMode`.
+    private(set) var mode = IndexingMode.balanced
 
     var status: ContentIndexer.Status? { snapshot.status.running ? snapshot.status : nil }
 
@@ -56,7 +59,7 @@ final class IndexServiceClient {
 
     func start() {
         guard Self.serviceBundled && ProcessInfo.processInfo.environment["XS_INPROCESS_INDEX"] != "1" else {
-            let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: 2)
+            let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: mode.workers, background: mode.background)
             ix.setMaxFileBytes(maxFileBytes)
             ix.setPaused(paused)
             do { try ix.start(); local = ix } catch { onError?(String(describing: error)) }
@@ -120,7 +123,7 @@ final class IndexServiceClient {
     private func startRemote() {
         guard !stopping else { return }
         let gen = generation
-        proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: 2, maxFileBytes: maxFileBytes, paused: paused) { [weak self] error in
+        proxy?.start(dataDirectory: dataDirectory.path, workerPath: worker.path, workers: mode.workers, background: mode.background, maxFileBytes: maxFileBytes, paused: paused) { [weak self] error in
             Task { @MainActor in
                 guard let self, !self.stopping, gen == self.generation else { return }
                 if let error {
@@ -175,6 +178,20 @@ final class IndexServiceClient {
         guard bytes != maxFileBytes else { return }
         maxFileBytes = bytes
         if let local { local.setMaxFileBytes(bytes) } else { proxy?.setMaxFileBytes(bytes) }
+    }
+
+    /// Another mode restarts the indexer with its workers and priority (the service replaces a
+    /// running one whose shape differs); queued work carries on.
+    func setMode(_ m: IndexingMode) {
+        guard m != mode else { return }
+        mode = m
+        if let local {
+            local.stop()
+            self.local = nil
+            start()
+        } else if connection != nil {
+            startRemote()
+        }
     }
 
     /// Also the value every later (re)start passes on.

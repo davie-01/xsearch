@@ -127,6 +127,9 @@ public final class ExtractionWorker: @unchecked Sendable {
     /// A single file may not take the machine down with it.
     public var memoryLimit: UInt64 = 2 << 30
 
+    /// Quality of service of the worker process (节能: background, on the efficiency cores).
+    public var qualityOfService: QualityOfService = .utility
+
     public init(executable: URL, environment: [String: String] = [:]) {
         self.executable = executable
         self.environment = environment
@@ -200,6 +203,7 @@ public final class ExtractionWorker: @unchecked Sendable {
         p.standardInput = input
         p.standardOutput = output
         p.standardError = FileHandle.nullDevice
+        p.qualityOfService = qualityOfService
         try p.run()
         process = p
         toWorker = input.fileHandleForWriting

@@ -8,18 +8,21 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var indexer: ContentIndexer?
     private var directory: String?
+    private var shape: (workers: Int, background: Bool)?
 
-    func start(dataDirectory: String, workerPath: String, workers: Int, maxFileBytes: UInt64, paused: Bool, reply: @escaping (String?) -> Void) {
+    func start(dataDirectory: String, workerPath: String, workers: Int, background: Bool, maxFileBytes: UInt64, paused: Bool, reply: @escaping (String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
-        if let indexer, directory == dataDirectory {
+        // Same index, same indexing mode: keep it. Another mode needs new workers and queue: the
+        // indexer is stopped (running extractions go back to the queue) and started again.
+        if let indexer, directory == dataDirectory, shape.map({ $0.workers == workers && $0.background == background }) == true {
             indexer.setMaxFileBytes(maxFileBytes)
             indexer.setPaused(paused)
             reply(nil)
             return
         }
         indexer?.stop()
-        let ix = ContentIndexer(directory: URL(fileURLWithPath: dataDirectory), workerExecutable: URL(fileURLWithPath: workerPath), workers: workers)
+        let ix = ContentIndexer(directory: URL(fileURLWithPath: dataDirectory), workerExecutable: URL(fileURLWithPath: workerPath), workers: workers, background: background)
         ix.setMaxFileBytes(maxFileBytes)
         ix.setPaused(paused)
         ix.onSettled = { [weak self] in self?.recycleIfLarge() }
@@ -27,6 +30,7 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
             try ix.start()
             indexer = ix
             directory = dataDirectory
+            shape = (workers, background)
             reply(nil)
         } catch {
             indexer = nil
@@ -119,6 +123,7 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         let ix = indexer
         indexer = nil
         directory = nil
+        shape = nil
         lock.unlock()
         // Outside the lock: snapshots must not wait for the stop.
         ix?.stop()

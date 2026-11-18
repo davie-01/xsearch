@@ -39,6 +39,8 @@ final class SettingsModel: ObservableObject {
     @Published var content: ContentScope
     @Published var contentStatus: ContentIndexer.Status?
     @Published var contentPaused = false
+    @Published var indexingMode = Preferences.shared.indexingMode
+    @Published var indexingModeNote: String?
     /// Settings › 隐私与数据; nil until measured.
     @Published var storage: IndexStorage?
     @Published var storageBusy = false
@@ -68,6 +70,13 @@ final class SettingsModel: ObservableObject {
         status = names.status
         contentStatus = delegate?.contentStatus
         contentPaused = delegate?.contentIndexingPaused ?? false
+        indexingModeNote = delegate?.indexingModeNote
+    }
+
+    func setIndexingMode(_ mode: IndexingMode) {
+        indexingMode = mode
+        delegate?.setIndexingMode(mode)
+        indexingModeNote = delegate?.indexingModeNote
     }
 
     func setContentPaused(_ paused: Bool) {
@@ -699,6 +708,14 @@ struct ContentCard: View {
     @ObservedObject var model: SettingsModel
     @State private var showFailed = false
 
+    private var modeDetail: String {
+        switch model.indexingMode {
+        case .performance: L("同时用 %@ 个进程提取，最快建好索引，风扇和耗电会增加；使用电池时自动按“均衡”运行。", "\(IndexingMode.performance.workers)")
+        case .balanced: L("同时用 2 个进程提取，速度和资源占用兼顾（推荐）。")
+        case .quiet: L("只用 1 个进程、以后台优先级提取，最省电、几乎不打扰，建好索引需要更久。")
+        }
+    }
+
     var statusLine: String {
         guard let st = model.contentStatus else { return L("内容索引未启动") }
         var parts = [L("%@ 个文件", "\(Theme.count(st.indexed))")]
@@ -738,6 +755,24 @@ struct ContentCard: View {
                 }
                 Spacer()
                 Button(model.contentPaused ? L("恢复内容索引") : L("暂停内容索引")) { model.setContentPaused(!model.contentPaused) }
+            }
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("索引速度")).font(.system(size: 13, weight: .medium))
+                    Text(modeDetail).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let note = model.indexingModeNote {
+                        Text(note).font(.system(size: 11.5)).foregroundStyle(.orange)
+                    }
+                }
+                Spacer(minLength: 16)
+                Picker("", selection: Binding(get: { model.indexingMode }, set: { model.setIndexingMode($0) })) {
+                    Text(L("性能")).tag(IndexingMode.performance)
+                    Text(L("均衡")).tag(IndexingMode.balanced)
+                    Text(L("节能")).tag(IndexingMode.quiet)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
             }
             if let failed = model.contentStatus?.failed, failed > 0 {
                 HStack(alignment: .firstTextBaseline) {

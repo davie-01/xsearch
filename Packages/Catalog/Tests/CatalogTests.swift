@@ -590,3 +590,12 @@ func pendingByName(_ s: NameService) -> [String: [Int64]] {
     #expect(fm.fileExists(atPath: box.data.appendingPathComponent("user.sqlite").path) && fm.fileExists(atPath: box.data.appendingPathComponent("content/abc/seg").path))
     #expect(IndexStorage.measure(in: box.data, temporary: tmp).leftovers < 30_000)
 }
+
+@Test func indexingModePowerPolicy() {
+    #expect(IndexingMode.balanced.workers == 2 && IndexingMode.quiet.workers == 1 && IndexingMode.quiet.background)
+    #expect((2...4).contains(IndexingMode.performance.workers) && !IndexingMode.performance.background)
+    #expect(IndexingMode.performance.effective(onBattery: true, lowPower: false) == .balanced)
+    #expect(IndexingMode.performance.effective(onBattery: false, lowPower: false) == .performance)
+    #expect(IndexingMode.balanced.effective(onBattery: true, lowPower: false) == .balanced)
+    for m in IndexingMode.allCases { #expect(m.effective(onBattery: false, lowPower: true) == .quiet) }
+}

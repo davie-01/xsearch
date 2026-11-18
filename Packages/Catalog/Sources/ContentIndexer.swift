@@ -53,7 +53,7 @@ public final class ContentIndexer: @unchecked Sendable {
     public let directory: URL
     private let workerURL: URL
     private let workerCount: Int
-    private let queue = DispatchQueue(label: "xsearch.indexer", qos: .utility)
+    private let queue: DispatchQueue
     /// Runs onSettled. A queue of its own gets a thread even when the global pool is taken up by
     /// blocked work; through the global queue the report waited 14 s on a loaded machine.
     private let settledQueue = DispatchQueue(label: "xsearch.indexer.settled", qos: .utility)
@@ -145,11 +145,17 @@ public final class ContentIndexer: @unchecked Sendable {
         return sha.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    public init(directory: URL, workerExecutable: URL, workers: Int = 2, environment: [String: String] = [:]) {
+    /// `background`: the queue and the extraction processes run at background priority (节能).
+    public init(directory: URL, workerExecutable: URL, workers: Int = 2, background: Bool = false, environment: [String: String] = [:]) {
         self.directory = directory
         workerURL = workerExecutable
         workerCount = max(1, workers)
-        self.workers = (0..<workerCount).map { _ in ExtractionWorker(executable: workerExecutable, environment: environment) }
+        queue = DispatchQueue(label: "xsearch.indexer", qos: background ? .background : .utility)
+        self.workers = (0..<workerCount).map { _ in
+            let w = ExtractionWorker(executable: workerExecutable, environment: environment)
+            w.qualityOfService = background ? .background : .utility
+            return w
+        }
     }
 
     public var status: Status { state.withLock { $0 } }
