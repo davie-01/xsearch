@@ -14,6 +14,7 @@
 
 ## 文档
 
-- [ ] 查询语法变化已同步 `docs/SEARCH-GUIDE.md`
+- [ ] 查询语法变化已同步 `docs/SEARCH-GUIDE.md` 与 `docs/SEARCH-GUIDE.en.md`
 - [ ] 依赖变化已同步 `THIRD_PARTY_NOTICES.md`
-- [ ] 面向用户的变化已写入 `CHANGELOG.md`
+- [ ] 面向用户的变化已写入 `CHANGELOG.md` 与 `CHANGELOG.en.md`
+- [ ] 改动了有英文版（`*.en.md`）的文档时，中英文已同步

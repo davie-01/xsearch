@@ -1,3 +1,5 @@
+**简体中文** · [English](README.en.md)
+
 ![XSearch 产品概览：在 Mac 上搜索文件名和文件正文，预览并高亮命中](docs/assets/xsearch-overview-zh.png)
 
 # XSearch
@@ -106,7 +108,7 @@ bash scripts/swift-test.sh
 
 ## 本机数据与反馈
 
-索引和记录保存在 `~/Library/Application Support/XSearch/`。内容索引中包含提取出的正文。可从 **设置 → 隐私与数据** 重建索引，收藏和最近打开记录保存在单独数据库中。卸载时先退出应用，再将应用移入废纸篓。如需同时清理本机数据，删除数据目录前请备份需要保留的收藏和历史。
+索引和记录保存在 `~/Library/Application Support/XSearch/`。全部写入位置见[本机文件位置](docs/STORAGE.md)。内容索引中包含提取出的正文。可从 **设置 → 隐私与数据** 重建索引，收藏和最近打开记录保存在单独数据库中。卸载时先退出应用，再将应用移入废纸篓。如需同时清理本机数据，删除数据目录前请备份需要保留的收藏和历史。
 
 如果遇到问题，可通过项目的 GitHub **Issues** 提交系统版本、XSearch 版本、搜索模式和最小复现步骤。可用合成文件重现时，附上合成样本即可。
 

@@ -1,3 +1,5 @@
+**简体中文** · [English](STORAGE.en.md)
+
 # XSearch 运行时的文件位置
 
 XSearch 在使用过程中写入的全部位置。除特别说明外，都只在本机，不会上传。路径里的 `~` 指用户主目录，`$TMPDIR` 是系统为当前用户分配的临时目录（`/var/folders/…/T/`）。
@@ -77,7 +79,7 @@ XSearch 在使用过程中写入的全部位置。除特别说明外，都只在
 - **开机启动**：通过系统的 SMAppService 注册登录项，不写文件；在 系统设置 › 通用 › 登录项 中可见。
 - **系统权限记录**：完全磁盘访问、自动化（控制 Skim / 预览）、辅助功能等授权由系统的 TCC 数据库保存，不在 XSearch 的目录里。
 - **钥匙串**：应用运行时不使用钥匙串。（开发者机器上，发布更新用的 Sparkle 签名私钥存在登录钥匙串的 `xsearch` 账户下，这只与发布有关，与使用无关。）
-- **应用本身**：`XSearch.app`，其中包含 `Contents/MacOS/xs-extract`（提取进程）、`Contents/XPCServices/IndexService.xpc`（索引服务）、`Contents/Frameworks/Sparkle.framework`（自动更新），约 47 MB。
+- **应用本身**：`XSearch.app`，其中包含 `Contents/MacOS/xs-extract`（提取进程）、`Contents/XPCServices/IndexService.xpc`（索引服务）、`Contents/Frameworks/Sparkle.framework`（自动更新）、`Contents/Resources/Licenses/`（许可原文），约 50 MB。
 
 ## 6. 完全卸载
 

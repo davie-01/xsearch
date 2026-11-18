@@ -1,3 +1,5 @@
+**简体中文** · [English](CONTRIBUTING.en.md)
+
 # 参与 XSearch 开发
 
 欢迎提交问题和改动。动手前建议先读 [docs/DESIGN.md](docs/DESIGN.md)：它说明了进程结构、两条检索路径和各目录的职责。界面改动以 [docs/design/UI-SPEC.md](docs/design/UI-SPEC.md) 为准。
@@ -26,7 +28,8 @@ bash scripts/build-app.sh          # 组装 target/XSearch.app（未设 XS_SIGN_
 ## 提交约定
 
 - 一个提交只做一件事。标题用英文，格式为 `模块: 说明行为的一句话`，例如 `Catalog: purging tombstones never frees the highest file id`；需要解释原因时写在正文里。
-- 查询语法变化同步 [docs/SEARCH-GUIDE.md](docs/SEARCH-GUIDE.md)；新增或升级依赖同步 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；面向用户的变化写入 [CHANGELOG.md](CHANGELOG.md)。
+- 查询语法变化同步搜索指南（[中文](docs/SEARCH-GUIDE.md)、[英文](docs/SEARCH-GUIDE.en.md)）；新增或升级依赖同步 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；面向用户的变化写入更新日志（[中文](CHANGELOG.md)、[英文](CHANGELOG.en.md)）。
+- 有英文版（`*.en.md`）的文档，中英文一起修改。
 - 界面文字以中文为源语言，写法见 [docs/design/LOCALIZATION.md](docs/design/LOCALIZATION.md)。
 - 测试样例只用合成数据，不提交真实文档、真实路径或个人索引。
 
@@ -39,6 +42,6 @@ XSearch 以 GPLv3 附 UnRAR 链接例外发布。提交代码即表示你同意�
 1. `XS_SIGN_IDENTITY='…' XS_GITHUB_REPO='davie-01/xsearch' bash scripts/release.sh <版本>`：改版本号、构建 DMG（含许可与源码说明）、生成签名的 `appcast.xml`。
 2. 提交版本号改动，打 `v<版本>` tag，推送 `main` 与 tag。
 3. `bash scripts/source-archive.sh <版本>`：生成附带全部 Rust 依赖源码的 `work/source/XSearch-<版本>-source.tar.gz`。
-4. 在 GitHub 新建 `v<版本>` Release，标为 Latest，上传 DMG、`appcast.xml` 和源码包，发行说明取自 CHANGELOG。
+4. CI 通过后，在 GitHub 新建 `v<版本>` Release，标为 Latest，上传 DMG、`appcast.xml` 和源码包，发行说明取自 CHANGELOG。
 
 详细说明见 [docs/DESIGN.md](docs/DESIGN.md) 第 6 节。

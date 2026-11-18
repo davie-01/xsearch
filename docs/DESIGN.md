@@ -1,6 +1,8 @@
+**简体中文** · [English](DESIGN.en.md)
+
 # XSearch 设计与工程指南
 
-本文以提交 `ca30e7e` 的实现为准，供维护者了解程序如何运行、从哪里修改，以及怎样通过 GitHub 分发。平台为 macOS 26+、Apple Silicon。界面常驻菜单栏，文件名搜索和正文搜索使用各自的索引，共用文件目录与变更流水线。
+本文以 `v0.2.0` 的实现为准，供维护者了解程序如何运行、从哪里修改，以及怎样通过 GitHub 分发。平台为 macOS 26+、Apple Silicon。界面常驻菜单栏，文件名搜索和正文搜索使用各自的索引，共用文件目录与变更流水线。
 
 产品方案与历次决策（D 编号）见 [ARCHITECTURE.md](ARCHITECTURE.md)，代码注释中的 `ARCHITECTURE §N` 指向该文件的章节；界面规范见 [design/UI-SPEC.md](design/UI-SPEC.md)；面向用户的完整查询语法见 [SEARCH-GUIDE.md](SEARCH-GUIDE.md)。
 
@@ -114,6 +116,7 @@ XSearch/
 ├── scripts/
 │   ├── env.sh                        # 项目内工具链环境（source 后使用，不改全局 PATH）
 │   ├── build-app.sh、build-dmg.sh、release.sh  # 组装与签名 .app、打 DMG、生成 appcast
+│   ├── source-archive.sh、collect-licenses.py  # 对应源码包、Rust crate 许可原文汇总
 │   ├── fetch-sparkle.sh、gen-bindings.sh       # 获取锁定版本 Sparkle、生成 UniFFI 绑定
 │   ├── swift-test.sh、regression.sh            # Swift 测试、发版回归门禁
 │   ├── perf_compare.py、perf-baseline.json     # 性能对比脚本与基线
@@ -125,12 +128,12 @@ XSearch/
 │
 ├── Package.swift                     # SwiftPM 目标与链接配置
 ├── Cargo.toml、Cargo.lock            # Rust workspace 与依赖锁
-├── README.md
+├── README.md、README.en.md
 ├── LICENSE、LICENSES/、THIRD_PARTY_NOTICES.md
 └── .gitignore                        # 忽略 .tools/、target/、work/、docs/archive/ 等
 ```
 
-SwiftPM 目标的依赖关系：`XSearch`（App）→ `Catalog` → `NameEngine`、`Extraction` → `ContentEngine`、`XSearchCore`，两条底层分别经 `xs_ffiFFI` 与 `CXSearchCore` 链接 Rust 静态库；`IndexService` 只依赖 `Catalog`，`xs-extract` 只依赖 `Extraction`。修改查询语法时通常要同时改 `Packages/XSearchCore/Sources/*Query.swift`、`rust/xs-core/src/query.rs` 及 [SEARCH-GUIDE.md](SEARCH-GUIDE.md)。
+SwiftPM 目标的依赖关系：`XSearch`（App）→ `Catalog` → `NameEngine`、`Extraction` → `ContentEngine`、`XSearchCore`，两条底层分别经 `xs_ffiFFI` 与 `CXSearchCore` 链接 Rust 静态库；`IndexService` 只依赖 `Catalog`，`xs-extract` 只依赖 `Extraction`。修改查询语法时通常要同时改 `Packages/XSearchCore/Sources/*Query.swift`、`rust/xs-core/src/query.rs` 及搜索指南（[中文](SEARCH-GUIDE.md)、[英文](SEARCH-GUIDE.en.md)）。
 
 ### 本地目录（不纳入 git）
 
@@ -138,17 +141,20 @@ SwiftPM 目标的依赖关系：`XSearch`（App）→ `Catalog` → `NameEngine`
 XSearch/
 ├── .tools/          # 项目内 Rust 工具链（rustup、cargo 缓存）与 Sparkle，构建必需
 ├── target/          # Cargo、SwiftPM 产物，以及 XSearch.app、DMG，可随时重新生成
-├── work/            # 验证与基准输出、模块缓存（scripts/env.sh 指向 work/m0/*-cache）
+├── work/            # 验证与基准输出、模块缓存（scripts/env.sh 指向 work/m0/*-cache），
+│                    #   发布文件（work/releases/）与源码包（work/source/）
 └── docs/archive/    # 开发过程文档归档，见第 5 节
 ```
 
 ## 5. 文档与 GitHub 配置
 
+面向用户和工程的文档有中文（`*.md`）与英文（`*.en.md`）两版，开头互相链接。供维护者使用的规范（ARCHITECTURE、UI-SPEC 及 `docs/design/` 下的说明）和第三方声明只有中文。
+
 ```text
 XSearch/
-├── README.md                         # 仓库首页：功能、安装、第一次搜索、源码构建、许可
-├── CHANGELOG.md                      # 面向用户的版本变化，Release 说明取自这里
-├── CONTRIBUTING.md                   # 开发环境、测试、提交约定与发布步骤
+├── README.md、README.en.md                   # 仓库首页：功能、安装、第一次搜索、源码构建、许可
+├── CHANGELOG.md、CHANGELOG.en.md             # 面向用户的版本变化，Release 说明取自这里
+├── CONTRIBUTING.md、CONTRIBUTING.en.md       # 开发环境、测试、提交约定与发布步骤
 ├── .github/
 │   ├── workflows/ci.yml              # 推送 main 与 PR 时：Rust/Swift 测试、clippy、ad-hoc 构建
 │   ├── ISSUE_TEMPLATE/               # 问题反馈、功能建议表单
@@ -159,10 +165,10 @@ XSearch/
 │   └── UnRAR-license.txt                    # UnRAR 许可原文
 ├── THIRD_PARTY_NOTICES.md            # 第三方许可与逐项依赖清单
 └── docs/
-    ├── DESIGN.md                     # 本文：按当前实现维护的架构与工程索引
+    ├── DESIGN.md、DESIGN.en.md       # 本文：按当前实现维护的架构与工程索引
     ├── ARCHITECTURE.md               # 产品方案与决策记录（代码注释引用其章节号）
-    ├── SEARCH-GUIDE.md               # 面向用户的搜索语法与正则指南
-    ├── STORAGE.md                    # 运行时文件位置、容量估算、清理与卸载
+    ├── SEARCH-GUIDE.md、SEARCH-GUIDE.en.md   # 面向用户的搜索语法与正则指南
+    ├── STORAGE.md、STORAGE.en.md     # 运行时文件位置、容量估算、清理与卸载
     ├── assets/
     │   └── xsearch-overview-zh.png   # README 产品概览图
     ├── design/

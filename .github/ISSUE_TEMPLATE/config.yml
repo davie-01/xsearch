@@ -3,3 +3,6 @@ contact_links:
   - name: 搜索语法与正则指南
     url: https://github.com/davie-01/xsearch/blob/main/docs/SEARCH-GUIDE.md
     about: "查询写法、dir: / ext: / kind: 过滤和正则示例"
+  - name: Search Syntax and Regex Guide (English)
+    url: https://github.com/davie-01/xsearch/blob/main/docs/SEARCH-GUIDE.en.md
+    about: "Query syntax, dir: / ext: / kind: filters and regex examples"

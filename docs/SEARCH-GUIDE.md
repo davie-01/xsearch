@@ -1,3 +1,5 @@
+**简体中文** · [English](SEARCH-GUIDE.en.md)
+
 # XSearch 搜索语法与正则指南
 
 核对日期：2026-11-04。面向桌面应用的搜索框，按当前源码与测试核对，只描述已实现的语法；早期 `xs` CLI 的语法见其 `help` 输出。部分示例未逐项在界面中验收，若行为与本文不符，以所运行版本为准并请反馈。
@@ -530,4 +532,4 @@ Tab 对文件夹的范围操作与 `dir:` 类似；对应用的范围操作依�
 - `rust/xs-ffi/src/lib.rs`、`rust/xs-index/src/reader.rs`：内容正则范围要求和全局过滤。
 - `Packages/XSearchCore/Tests/XSearchCoreTests.swift`、`Packages/NameEngine/Tests/NameEngineTests.swift`、`rust/xs-index/tests/engine.rs`：已有行为示例及边界测试。
 
-以上路径相对于仓库根目录。后续语法或解析器调整时，应同步修订本文，尤其是 `size:` 单位桶、过滤条件全局作用域、两种模式的目录规则和正则差异。
+以上路径相对于仓库根目录。后续语法或解析器调整时，应同步修订本文及[英文版](SEARCH-GUIDE.en.md)，尤其是 `size:` 单位桶、过滤条件全局作用域、两种模式的目录规则和正则差异。
