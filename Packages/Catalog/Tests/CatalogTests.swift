@@ -22,7 +22,7 @@ final class Sandbox {
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         data = base.appendingPathComponent("data")
         // FSEvents reports resolved paths (/private/var/...), so the scan root must be resolved too.
-        rootReal = realpath(root, nil).map { defer { free($0) }; return String(cString: $0) } ?? root
+        rootReal = realpath(root, nil).map { p in defer { free(p) }; return String(cString: p) } ?? root
     }
 
     let rootReal: String

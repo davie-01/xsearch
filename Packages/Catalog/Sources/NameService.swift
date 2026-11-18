@@ -297,7 +297,7 @@ public final class NameService: @unchecked Sendable {
         // name rules exclude it, and so does the hard exclusion that content folders (which skip
         // path rules) and roots chosen inside it cannot outrank.
         // Resolved as events report it (/private/var/…), not as resolvingSymlinksInPath (/var/…).
-        let own = realpath(directory.path, nil).map { defer { free($0) }; return String(cString: $0) } ?? directory.path
+        let own = realpath(directory.path, nil).map { p in defer { free(p) }; return String(cString: p) } ?? directory.path
         s.excludes.append(own)
         // One catalog covers the union of both scopes (§6.2): content folders outside the name
         // scope are scanned too.
