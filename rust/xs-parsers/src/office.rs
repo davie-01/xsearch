@@ -664,36 +664,6 @@ fn ppt_by_persist(d: &[u8], slides: &mut BTreeMap<u32, Vec<String>>, notes: &mut
     true
 }
 
-#[cfg(test)]
-mod budget_tests {
-    use super::*;
-
-    fn out(max: u64) -> Out {
-        Out::new(Limits { max_file_bytes: 1 << 20, max_unpacked_bytes: max })
-    }
-
-    #[test]
-    fn text_never_exceeds_the_byte_budget() {
-        let mut o = out(4);
-        assert!(!o.push("中文ABC"));
-        assert_eq!((o.text.as_str(), o.chars), ("中", 1), "cut on a character boundary");
-        assert_eq!(o.done("t").state, ExtractState::Partial);
-
-        let mut o = out(6);
-        assert!(o.push("中文"), "exactly the budget fits");
-        assert!(!o.partial);
-        assert!(!o.push("中文"));
-        assert_eq!(o.text, "中文");
-        assert_eq!(o.done("t").state, ExtractState::Partial);
-
-        let mut o = out(5);
-        assert!(!o.push("😀😀"));
-        assert_eq!(o.text, "😀");
-        assert!(!o.push("x"), "one byte is free, but text after the cut would leave a hole");
-        assert_eq!(o.text, "😀");
-    }
-}
-
 /// Text of a Word 97–2003 binary document ([MS-DOC]): the FIB locates the piece table (CLX) in
 /// the table stream, and each piece is either 8-bit (cp1252) or UTF-16 text in the WordDocument
 /// stream. AppKit's .doc reader returns nothing for some real documents; this does not depend
@@ -860,4 +830,34 @@ fn word97_hidden_runs(wd: &[u8], table: &[u8], fclcb: usize) -> Vec<(u32, u32)> 
     }
     runs.sort_unstable();
     runs
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn out(max: u64) -> Out {
+        Out::new(Limits { max_file_bytes: 1 << 20, max_unpacked_bytes: max })
+    }
+
+    #[test]
+    fn text_never_exceeds_the_byte_budget() {
+        let mut o = out(4);
+        assert!(!o.push("中文ABC"));
+        assert_eq!((o.text.as_str(), o.chars), ("中", 1), "cut on a character boundary");
+        assert_eq!(o.done("t").state, ExtractState::Partial);
+
+        let mut o = out(6);
+        assert!(o.push("中文"), "exactly the budget fits");
+        assert!(!o.partial);
+        assert!(!o.push("中文"));
+        assert_eq!(o.text, "中文");
+        assert_eq!(o.done("t").state, ExtractState::Partial);
+
+        let mut o = out(5);
+        assert!(!o.push("😀😀"));
+        assert_eq!(o.text, "😀");
+        assert!(!o.push("x"), "one byte is free, but text after the cut would leave a hole");
+        assert_eq!(o.text, "😀");
+    }
 }
