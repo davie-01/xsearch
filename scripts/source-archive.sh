@@ -19,9 +19,9 @@ git archive --format=tar --prefix="$name/" "$tag" | tar -x -C "$tmp"
 mkdir -p "$tmp/$name/.cargo"
 (cd "$tmp/$name" && cargo vendor --locked --versioned-dirs vendor > .cargo/config.toml)
 cat > "$tmp/$name/SOURCE.md" <<EOF
-# XSearch $version 对应源码
+# XSearch ${version} 对应源码
 
-本目录为 XSearch $version（tag \`$tag\`）的完整源码。\`vendor/\` 收录 \`Cargo.lock\` 锁定的全部
+本目录为 XSearch ${version}（tag \`${tag}\`）的完整源码。\`vendor/\` 收录 \`Cargo.lock\` 锁定的全部
 Rust 依赖源码，UnRAR 源码位于 \`vendor/unrar_sys-*/vendor/unrar/\`；\`.cargo/config.toml\`
 让 Cargo 直接使用这些副本，无需访问 crates.io。构建步骤见 README.md 的“从源码构建”。
 Sparkle 框架仍由 \`scripts/fetch-sparkle.sh\` 按固定版本下载并校验。

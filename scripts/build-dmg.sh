@@ -23,7 +23,7 @@ mkdir -p "$docs"
 cp "$app/Contents/Resources/Licenses/"* "$docs/"
 source_url="${XS_SOURCE_URL:-本项目 GitHub 仓库 Releases 页面中同一版本的 XSearch-$version-source.tar.gz}"
 cat > "$docs/对应源码.txt" <<EOF
-XSearch $version 以 GNU 通用公共许可证第 3 版（LICENSE）发布，附 UnRAR 链接例外
+XSearch ${version} 以 GNU 通用公共许可证第 3 版（LICENSE）发布，附 UnRAR 链接例外
 （XSearch-UnRAR-linking-exception.md）。
 
 本版本的对应源码，包括构建脚本以及链接进应用的全部 Rust 依赖源码（含 UnRAR 源码），
