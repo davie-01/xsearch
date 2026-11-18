@@ -52,6 +52,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
     private lazy var previewDividerWidth = previewDivider.widthAnchor.constraint(equalToConstant: 1)
     private let sidebar = NSStackView()
     private let timePopup = NSPopUpButton()
+    /// Content mode: `name:` values, `;` between alternatives.
+    private let nameFilter = NSTextField()
     private let matchPopup = NSPopUpButton()
     private var folderChecks: [(path: String, box: NSButton)] = []
     private var typeChecks: [(token: String, box: NSButton)] = []
@@ -109,6 +111,10 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         field.focusRingType = .none
         field.delegate = self
         field.sendsSearchStringImmediately = true
+        nameFilter.placeholderString = L("例如 验收;报告")
+        nameFilter.font = .systemFont(ofSize: 13)
+        nameFilter.delegate = self
+        nameFilter.widthAnchor.constraint(equalToConstant: 200).isActive = true
         modeControl.target = self
         modeControl.action = #selector(modeChanged)
         modeControl.selectedSegment = 0
@@ -266,6 +272,11 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         }
         if folders.isEmpty { sidebar.addArrangedSubview(sectionTitle(L("（未设置）"))) }
         sidebar.setCustomSpacing(16, after: sidebar.arrangedSubviews.last!)
+        if mode == .content {
+            sidebar.addArrangedSubview(sectionTitle(L("文件名包含")))
+            sidebar.addArrangedSubview(nameFilter)
+            sidebar.setCustomSpacing(16, after: nameFilter)
+        }
         sidebar.addArrangedSubview(sectionTitle(L("文件类型")))
         if mode == .content {
             typeChecks = Self.contentTypes.map { type, label in
@@ -376,6 +387,8 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
             parts.append("ext:" + types.map { String($0.dropFirst(4)) }.joined(separator: ";"))
         }
         if let t = Self.times[max(0, timePopup.indexOfSelectedItem)].1 { parts.append("dm:" + t) }
+        let names = nameFilter.stringValue.replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespaces)
+        if mode == .content, !names.isEmpty { parts.append("name:\"" + names + "\"") }
         return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 

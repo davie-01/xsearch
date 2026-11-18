@@ -103,6 +103,23 @@ import Testing
     #expect(ContentQuery.parse("dir:/a ext:pdf", home: "/").isEmpty)
 }
 
+@Test func contentQueryNameFilter() {
+    let q = ContentQuery.parse(#"支付条件 name:验收 name:"年度 报告;Contract" ext:pdf"#, home: "/")
+    #expect(q.expression == "支付条件")
+    #expect(q.names == [["验收"], ["年度 报告", "Contract"]])
+    #expect(q.chips.map(\.label) == ["name:验收", "name:年度 报告;Contract", "ext:pdf"])
+    #expect(ContentQuery.parse("name: x", home: "/").names.isEmpty)
+    #expect(ContentQuery.parse("name:合同", home: "/").isEmpty, "a name alone is not a content query")
+    // Live scan: the engine's rule — all tokens, any value; case-insensitive; * and ? whole-name.
+    #expect(q.allows(name: "2026 验收 CONTRACT.pdf"))
+    #expect(q.allows(name: "年度 报告-验收.docx"))
+    #expect(!q.allows(name: "验收单.pdf"))
+    let g = ContentQuery.parse("x name:*.md;报告?.txt", home: "/")
+    #expect(g.allows(name: "Notes.MD") && g.allows(name: "报告1.txt"))
+    #expect(!g.allows(name: "notes.md.bak") && !g.allows(name: "报告12.txt"))
+    #expect(ContentQuery.parse("x", home: "/").allows(name: "anything"))
+}
+
 @Test func nameOperatorsWildcardsAndRegex() {
     func lit(_ t: String) -> NameExpr { .literal(text: t, key: Array(t.lowercased().utf8)) }
     #expect(NameQuery.parse("a b | c -d", home: "/").expr == .or([.and([lit("a"), lit("b")]), .and([lit("c"), .not(lit("d"))])]))

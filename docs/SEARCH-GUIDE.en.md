@@ -47,6 +47,7 @@ Notes:
 | `(…)` | Groups text expressions | Yes | Yes | `(contract \| agreement) -draft` |
 | `dir:` | Limits to a folder and everything below it | Full paths and folder name segments | Full paths only | `dir:~/Documents` |
 | `ext:` | Filters by extension | Yes | Yes | `ext:pdf;docx` |
+| `name:` | Narrows text results by file name | Not needed; type the keyword | Yes | `in payment name:invoice` |
 | `kind:` | Filters by file kind | Yes | **No kind filter** | `kind:folder` |
 | `size:` | Filters by file size on disk | Yes, folders excluded | Yes | `size:>10mb` |
 | `dm:` | Filters by modification date | Yes | Yes | `dm:7d` |
@@ -230,7 +231,36 @@ Works in both modes and ignores case; the leading dot is optional (`ext:.pdf` wo
 
 Don't use wildcards in `ext:`; `ext:*.pdf` is not `ext:pdf`. The filter only narrows existing candidates; it doesn't make unsupported formats searchable by text.
 
-## 7. `size:`: filter by file size
+## 7. `name:`: narrow Content search by file name
+
+Keywords in Content search look at the text only. To limit the file name as well, add `name:`:
+
+```text
+in payment name:invoice
+in payment name:invoice;settlement
+in payment name:invoice name:2026
+in budget name:*.xlsx
+in goals name:"annual report"
+```
+
+In order: text contains “payment” and the file name contains “invoice”; the name contains “invoice” or “settlement”; the name contains both “invoice” and “2026”; the name ends in `.xlsx`; the name contains “annual report”, with its space.
+
+Rules:
+
+- It is a **contains** match, ignoring case, with the same folding as Name search.
+- Values in one `name:`, separated by semicolons or commas, form a **union**; several `name:` terms **intersect** and must all match.
+- With `*` or `?` a value is a **whole-name wildcard**: `*` any number of characters, `?` exactly one. Wildcards in `name:` don't depend on the Wildcards syntax switch.
+- Quote values containing spaces with straight double quotes.
+- Archive members pass when either the archive's name or the member's own name matches.
+- The name condition applies before the text is verified and before the result limit, so a match is never hidden just because it wasn't among the first 1,000 results.
+- Like other filters it applies to the whole query, not to one OR branch; `-name:` is not an exclusion.
+- `in name:invoice` alone has no text condition and lists nothing; to find files by name only, use Name search.
+
+In the Full Window, the Content sidebar has a “File name contains” field that does the same as `name:`; separate several values with semicolons there too.
+
+Name search doesn't need `name:`: the keywords you type already search file names.
+
+## 8. `size:`: filter by file size
 
 Size is the file's size on disk in bytes, not a word count, page count or the size of the extracted text. In Name search, `size:` excludes folders; it can't compute a folder's total size.
 
@@ -259,11 +289,11 @@ rollout ext:pdf size:>10mb
 in contract ext:docx size:<=20m
 ```
 
-## 8. `dm:`: filter by modification date
+## 9. `dm:`: filter by modification date
 
 `dm` is the modification date, not the creation date or the indexing date. Dates follow your Mac's calendar and time zone; the first day of the week follows your calendar settings.
 
-### 8.1 Shortcuts
+### 9.1 Shortcuts
 
 | English | Chinese alias | Meaning |
 | --- | --- | --- |
@@ -284,7 +314,7 @@ in rollout dm:7d
 
 Relative times take a positive integer with `d/天`, `w/周`, `m/月` or `y/年`. `7d` runs from 7 days before the moment of the query until now; `3m` goes back 3 calendar months, which is not the same as three whole calendar months.
 
-### 8.2 Dates, comparisons and ranges
+### 9.2 Dates, comparisons and ranges
 
 | Input | Meaning |
 | --- | --- |
@@ -299,7 +329,7 @@ Relative times take a positive integer with `d/天`, `w/周`, `m/月` or `y/年`
 
 Dates also accept `/` or `.` as separators, but `YYYY-MM-DD` is recommended. A range includes the whole periods at both ends. Repeated `dm:` terms intersect, e.g. `dm:>=2026-01-01 dm:<2027-01-01`.
 
-## 9. Name search wildcards: `*`, `?`, `**`
+## 10. Name search wildcards: `*`, `?`, `**`
 
 Wildcards must be switched on in Settings. Content search doesn't treat these characters as name wildcards; to limit content results by extension, use `ext:`.
 
@@ -332,9 +362,9 @@ Taking `009-smartcity-project` as an example:
 
 `[0-9]` is not a character class in wildcards; use `regex:` for digit patterns.
 
-## 10. `regex:`: regular expressions
+## 11. `regex:`: regular expressions
 
-### 10.1 Syntax and what is matched
+### 11.1 Syntax and what is matched
 
 ```text
 regex:expression
@@ -359,7 +389,7 @@ regex:HT-[0-9]{4} -draft
 
 In the second line, the space before the outer closing parenthesis keeps it out of the regex token.
 
-### 10.2 Quick reference
+### 11.2 Quick reference
 
 | Symbol | Meaning | Example |
 | --- | --- | --- |
@@ -379,7 +409,7 @@ In the second line, the space before the outer closing parenthesis keeps it out 
 | `(a\|b)` | Alternatives inside the regex | `(contract\|agreement)` |
 | `(?:…)` | Non-capturing group | `\.(?:pdf\|docx)$` |
 
-### 10.3 Name regexes to copy
+### 11.3 Name regexes to copy
 
 ```text
 regex:^009-.*
@@ -392,7 +422,7 @@ regex:/contracts/[^/]*\.pdf$
 
 In order: names starting with 009-; exactly that folder name; “report” plus four digits as a PDF; names containing “contract” or “agreement” with the given extensions; PDFs whose names contain “rollout”; PDFs directly inside a “contracts” folder.
 
-### 10.4 Content regexes to copy
+### 11.4 Content regexes to copy
 
 ```text
 in regex:HT-[0-9]{4}-[0-9]+ ext:pdf;docx
@@ -412,14 +442,14 @@ A regex needs at least 3 bytes of fixed text, or dir: / ext: to narrow it down
 
 Adding a folder or extension is the safest fix. It is **3 UTF-8 bytes, not 3 characters**; whether candidates can be recalled in advance also depends on whether the whole expression yields a safe candidate condition. `size:` or `dm:` alone can't replace the folder/extension requirement.
 
-### 10.5 How the two modes differ
+### 11.5 How the two modes differ
 
 - Name regexes use `NSRegularExpression` on the case-folded name key; switching the content match setting doesn't restore a name's original case.
 - Content regexes use Rust `regex`. It has no look-around or backreferences, so `(?<=contract)` or `(word)\1` won't work as content queries. See the [Rust regex syntax](https://docs.rs/regex/1.13.1/regex/#syntax).
 - Content regexes run against the text as processed by the current mode; the regex itself is not normalized the way plain keywords are. For full-width characters or exact line structure, prefer Exact and write against the actual extracted text.
 - Regexes are for finding and locating only; there is no replace or batch rename.
 
-## 11. Content proximity: `"a b"~N`
+## 12. Content proximity: `"a b"~N`
 
 ```text
 in "contract amount"~10
@@ -432,7 +462,7 @@ For example, in “contract total amount”, the characters between “contract�
 
 Give at least two words separated by whitespace, and put `~` and a non-negative integer right after the closing quote; `~0` allows no extra characters. Name search has no proximity queries.
 
-## 12. Combining filters
+## 13. Combining filters
 
 ```text
 (rollout | acceptance) ext:pdf;docx dir:~/Documents dm:thismonth size:<20m
@@ -450,9 +480,9 @@ Rules:
 
 - Filters of different kinds must all hold (AND).
 - Several `dir:` terms form a union; so do several extensions or kinds.
-- Several `size:` or `dm:` terms intersect.
+- Several `size:` or `dm:` terms intersect; so do several `name:` terms, while the values inside one `name:` form a union.
 - Filters are taken out of the expression and apply globally; **each OR branch does not get its own filters**.
-- `-dir:…`, `-ext:…` and `-kind:…` are not negative filters; don't use them to exclude folders or extensions.
+- `-dir:…`, `-ext:…`, `-kind:…` and `-name:…` are not negative filters; don't use them to exclude folders, extensions or names.
 
 So this does not mean “a in Documents, or b in Downloads”:
 
@@ -464,7 +494,7 @@ Its folder conditions merge into a global union: in effect, a or b in either fol
 
 Content search needs a text expression. `in ext:pdf dir:~/Documents` alone doesn't list every PDF; to find files by attributes only, switch back to Name search.
 
-## 13. Recipes
+## 14. Recipes
 
 | To do this | Type |
 | --- | --- |
@@ -473,6 +503,7 @@ Content search needs a text expression. `in ext:pdf dir:~/Documents` alone doesn
 | Find rollout PDFs by name in the project | `rollout ext:pdf dir:"/Users/me/Documents/Work Files/Clients/009-smartcity-project"` |
 | Find “rollout” in the project's document text | `in rollout dir:"/Users/me/Documents/Work Files/Clients/009-smartcity-project"` |
 | Word and PDF files whose text contains “rollout” | `in rollout ext:doc;docx;pdf` |
+| Name contains “invoice”, text contains “payment” | `in payment name:invoice` |
 | Word documents named “contract”, without “draft” | `contract -draft kind:word` |
 | PDFs modified in the last 7 days | `ext:pdf dm:7d` |
 | Files larger than 50 MiB | `size:>50m` |
@@ -481,7 +512,7 @@ Content search needs a text expression. `in ext:pdf dir:~/Documents` alone doesn
 | Text where “contract” and “amount” are close | `in "contract amount"~10 ext:pdf;docx` |
 | Text shaped like a contract number | `in regex:HT-[0-9]{4}-[0-9]+ ext:pdf;docx` |
 
-## 14. Interface actions related to search
+## 15. Interface actions related to search
 
 Mostly in the launcher; shortcuts use macOS symbols: `⌘` Command, `⌥` Option, `⇧` Shift.
 
@@ -503,12 +534,12 @@ Mostly in the launcher; shortcuts use macOS symbols: `⌘` Command, `⌥` Option
 
 Tab on a folder works like `dir:`. Tab on an app depends on the document types the app declares and is not a `kind:` category. The Full Window may add sidebar folder, type and date conditions on top; check those as well when results look wrong.
 
-## 15. When nothing is found
+## 16. When nothing is found
 
 1. Check the mode: Name search for file names, Content search for text.
 2. Reduce the query to one distinctive word, to see whether multiple words, exclusions, dates or types filtered the results out.
 3. Look at the syntax switches and any “not recognized” notice. An invalid name regex, kind or metadata filter may not limit anything; results still showing doesn't mean the filter worked.
-4. In Content search, replace `kind:` with `ext:`, and use full paths with `dir:`.
+4. In Content search, replace `kind:` with `ext:`, use full paths with `dir:`, and put alternative names in one `name:` separated by semicolons.
 5. Folder name segments must match whole folder names; quote paths with spaces.
 6. With wildcards, remember they match the whole term; check whether the name has extra text such as “project” at the end.
 7. Check the name scope, the content scope, exclusion rules, file access permissions, and whether the format has been extracted. Being findable by name doesn't make a file searchable by text.
@@ -516,22 +547,22 @@ Tab on a folder works like `dir:`. Tab on an app depends on the document types t
 9. Images and scanned PDFs depend on the actual OCR extraction state; text that failed, isn't done yet, or was misrecognized can't appear in the index.
 10. The launcher limits how many name results it shows. For many results with the same word, narrow with `kind:`, `dir:` or `ext:`, or go to the Full Window; “not in the first few” is not the same as “not matching”.
 
-There is no `name:`, `path:`, `type:`, `created:`, `before:`, `after:` or `case:` syntax, no `find` prefix, and no SQL-style AND/OR keywords. For path conditions use `dir:` or path wildcards / path regexes; for dates use `dm:`; for content case rules, switch the match mode in Settings or the Full Window.
+There is no `path:`, `type:`, `created:`, `before:`, `after:` or `case:` syntax, no `find` prefix, and no SQL-style AND/OR keywords; `name:` is for Content search only. For path conditions use `dir:` or path wildcards / path regexes; for dates use `dm:`; for content case rules, switch the match mode in Settings or the Full Window.
 
-## 16. Sources checked (for maintainers)
+## 17. Sources checked (for maintainers)
 
 This guide follows these implementations:
 
 - `App/Sources/LauncherPanel.swift`: the `in ` prefix, mode switching, syntax summary, scope tokens and shortcuts.
 - `App/Sources/FullWindow.swift`: Full Window modes, sidebar filters and shortcuts; no automatic `in ` switch.
 - `App/Sources/Settings.swift`, `Preferences.swift`: syntax switches and content match modes.
-- `Packages/XSearchCore/Sources/NameQuery.swift`, `ContentQuery.swift`: filters and token parsing in both modes.
+- `Packages/XSearchCore/Sources/NameQuery.swift`, `ContentQuery.swift`: filters and token parsing in both modes, including `name:` in Content search.
 - `Packages/XSearchCore/Sources/QuerySyntax.swift`: wildcards, size and date bounds, syntax defaults.
 - `Packages/XSearchCore/Sources/FileKind.swift`, `NameKey.swift`: kind aliases, extension groups and name keys.
 - `Packages/NameEngine/Sources/NameView.swift`: folder segment parsing, filter combination, wildcard/regex matching.
 - `Packages/Catalog/Sources/AppCatalog.swift`: what the separate app launch results cover.
 - `rust/xs-core/src/query.rs`, `normalize.rs`: content Boolean syntax, regexes, proximity and normalization.
-- `rust/xs-ffi/src/lib.rs`, `rust/xs-index/src/reader.rs`: the content regex scope requirement and global filters.
+- `rust/xs-ffi/src/lib.rs`, `rust/xs-index/src/reader.rs`: the content regex scope requirement, global filters and the `name:` condition.
 - `Packages/XSearchCore/Tests/XSearchCoreTests.swift`, `Packages/NameEngine/Tests/NameEngineTests.swift`, `rust/xs-index/tests/engine.rs`: existing behavior examples and edge-case tests.
 
 Paths are relative to the repository root. When the syntax or parsers change, update this guide and its [Chinese version](SEARCH-GUIDE.md), especially the `size:` unit rule, the global scope of filters, the folder rules of both modes and the regex differences.

@@ -68,9 +68,10 @@ A signature check only confirms that the signature matches the files. If it fail
 | `ext:pdf dm:7d` | PDFs modified in the last seven days. |
 | `in "project plan" dir:~/Documents ext:pdf;docx` | PDF or Word documents in Documents whose text contains the phrase. |
 | `in "contract amount"~10` | Text where “contract” and “amount” appear within the given number of characters. |
+| `in payment name:invoice` | Documents whose file name contains “invoice” and whose text contains “payment”. |
 | `in regex:HT-[0-9]{4}` | Text matching a reference-number pattern. |
 
-Both modes support Boolean combinations and `dir:`, `ext:`, `size:` and `dm:`. Name search adds `kind:` and wildcards; Content search adds proximity queries. In Content search `dir:` takes a file system path and accepts `~/`. Put paths containing spaces in straight double quotes. Press `⌘/` in the launcher for a syntax summary and the state of each switch. The full syntax, regular expressions and more examples are in the [Search Syntax and Regex Guide](docs/SEARCH-GUIDE.en.md).
+Both modes support Boolean combinations and `dir:`, `ext:`, `size:` and `dm:`. Name search adds `kind:` and wildcards; Content search adds `name:` file name conditions and proximity queries. In Content search `dir:` takes a file system path and accepts `~/`. Put paths containing spaces in straight double quotes. Press `⌘/` in the launcher for a syntax summary and the state of each switch. The full syntax, regular expressions and more examples are in the [Search Syntax and Regex Guide](docs/SEARCH-GUIDE.en.md).
 
 ### When nothing is found
 

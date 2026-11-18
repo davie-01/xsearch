@@ -2472,18 +2472,26 @@ public struct SearchFilters {
      */
     public var sizeRange: [Int64]?
     public var mtimeRange: [Int64]?
+    /**
+     * `name:` conditions: values within a group OR-ed, groups AND-ed (see `SearchRequest`).
+     */
+    public var names: [[String]]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(dirs: [String], exts: [String], scopes: [UInt64], 
         /**
          * Inclusive bounds of `size:` / `dm:`; candidates outside are never read.
-         */sizeRange: [Int64]? = nil, mtimeRange: [Int64]? = nil) {
+         */sizeRange: [Int64]? = nil, mtimeRange: [Int64]? = nil, 
+        /**
+         * `name:` conditions: values within a group OR-ed, groups AND-ed (see `SearchRequest`).
+         */names: [[String]] = []) {
         self.dirs = dirs
         self.exts = exts
         self.scopes = scopes
         self.sizeRange = sizeRange
         self.mtimeRange = mtimeRange
+        self.names = names
     }
 }
 
@@ -2509,6 +2517,9 @@ extension SearchFilters: Equatable, Hashable {
         if lhs.mtimeRange != rhs.mtimeRange {
             return false
         }
+        if lhs.names != rhs.names {
+            return false
+        }
         return true
     }
 
@@ -2518,6 +2529,7 @@ extension SearchFilters: Equatable, Hashable {
         hasher.combine(scopes)
         hasher.combine(sizeRange)
         hasher.combine(mtimeRange)
+        hasher.combine(names)
     }
 }
 
@@ -2534,7 +2546,8 @@ public struct FfiConverterTypeSearchFilters: FfiConverterRustBuffer {
                 exts: FfiConverterSequenceString.read(from: &buf), 
                 scopes: FfiConverterSequenceUInt64.read(from: &buf), 
                 sizeRange: FfiConverterOptionSequenceInt64.read(from: &buf), 
-                mtimeRange: FfiConverterOptionSequenceInt64.read(from: &buf)
+                mtimeRange: FfiConverterOptionSequenceInt64.read(from: &buf), 
+                names: FfiConverterSequenceSequenceString.read(from: &buf)
         )
     }
 
@@ -2544,6 +2557,7 @@ public struct FfiConverterTypeSearchFilters: FfiConverterRustBuffer {
         FfiConverterSequenceUInt64.write(value.scopes, into: &buf)
         FfiConverterOptionSequenceInt64.write(value.sizeRange, into: &buf)
         FfiConverterOptionSequenceInt64.write(value.mtimeRange, into: &buf)
+        FfiConverterSequenceSequenceString.write(value.names, into: &buf)
     }
 }
 
@@ -3295,6 +3309,31 @@ fileprivate struct FfiConverterSequenceTypeUtf16Range: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeUtf16Range.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [[String]]
+
+    public static func write(_ value: [[String]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterSequenceString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[String]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[String]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterSequenceString.read(from: &buf))
         }
         return seq
     }

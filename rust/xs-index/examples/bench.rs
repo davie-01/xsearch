@@ -151,7 +151,7 @@ fn main() -> anyhow::Result<()> {
                 mode: Mode::Loose,
                 dirs,
                 exts: vec![],
-                scopes: vec![], size: None, mtime: None
+                scopes: vec![], size: None, mtime: None, names: vec![]
             };
             let (mut first, mut full) = (vec![], vec![]);
             let (mut hits, mut candidates, mut recall) = (0, 0, String::new());

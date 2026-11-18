@@ -46,6 +46,87 @@ pub struct SearchRequest {
     /// Inclusive ranges (`size:`, `dm:`), applied to candidates.
     pub size: Option<(i64, i64)>,
     pub mtime: Option<(i64, i64)>,
+    /// File name conditions (`name:`): the values of one group are OR-ed, the groups AND-ed.
+    /// A value is a case-insensitive substring of the name, or with `*` / `?` a whole-name
+    /// pattern. Archive members also pass on their own name. Checked before the text, so they
+    /// apply ahead of any result limit.
+    pub names: Vec<Vec<String>>,
+}
+
+/// `name:` conditions, folded once like file names.
+#[derive(Debug, Clone, Default)]
+struct NameFilter {
+    groups: Vec<Vec<NamePattern>>,
+}
+
+#[derive(Debug, Clone)]
+enum NamePattern {
+    Contains(String),
+    Glob(Vec<char>),
+}
+
+impl NameFilter {
+    fn new(groups: &[Vec<String>]) -> Self {
+        let groups = groups
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| {
+                        let key = name_key(v);
+                        if key.contains(['*', '?']) {
+                            NamePattern::Glob(key.chars().collect())
+                        } else {
+                            NamePattern::Contains(key)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|g| !g.is_empty())
+            .collect();
+        Self { groups }
+    }
+
+    fn matches(&self, name: &str) -> bool {
+        if self.groups.is_empty() {
+            return true;
+        }
+        let key = name_key(name);
+        let chars: Vec<char> = key.chars().collect();
+        self.groups.iter().all(|g| {
+            g.iter().any(|p| match p {
+                NamePattern::Contains(s) => key.contains(s.as_str()),
+                NamePattern::Glob(pat) => glob(pat, &chars),
+            })
+        })
+    }
+}
+
+/// Whole-string match: `*` any run of characters, `?` exactly one.
+fn glob(pat: &[char], s: &[char]) -> bool {
+    let (mut p, mut i) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while i < s.len() {
+        if p < pat.len() && (pat[p] == '?' || pat[p] == s[i]) {
+            p += 1;
+            i += 1;
+        } else if p < pat.len() && pat[p] == '*' {
+            star = Some((p, i));
+            p += 1;
+        } else if let Some((sp, si)) = star {
+            p = sp + 1;
+            i = si + 1;
+            star = Some((sp, si + 1));
+        } else {
+            return false;
+        }
+    }
+    pat[p..].iter().all(|&c| c == '*')
+}
+
+/// The last component of an archive member path.
+fn base_name(member: &str) -> &str {
+    member.rsplit(['/', '\\']).next().unwrap_or(member)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -430,6 +511,7 @@ pub struct SearchSession {
     next: usize,
     /// An archive document partly checked: budget and cancel apply between its members.
     members: Option<MemberCursor>,
+    names: NameFilter,
     pub recall: Recall,
 }
 
@@ -541,6 +623,7 @@ impl SearchSession {
             candidates: keyed.into_iter().map(|(_, a)| a).collect(),
             next: 0,
             members: None,
+            names: NameFilter::new(&req.names),
             recall,
         })
     }
@@ -580,13 +663,20 @@ impl SearchSession {
             let addr = self.candidates[self.next];
             self.next += 1;
             let d = self.searcher.doc::<TantivyDocument>(addr)?;
+            let named = self.names.matches(&str_of(&d, f.name));
             let text = d.get_first(f.text).and_then(|v| v.as_str()).unwrap_or("");
             let anchors = bytes_of(&d, f.anchors);
             if anchors.windows(8).any(|w| w == b"\"member\"") {
-                let members = member_ranges(text, anchors);
+                let mut members = member_ranges(text, anchors);
+                if !named {
+                    members.retain(|(m, _, _)| self.names.matches(base_name(m)));
+                }
                 if !members.is_empty() {
                     self.members = Some(MemberCursor { doc: d, members, next: 0 });
                 }
+                continue;
+            }
+            if !named {
                 continue;
             }
             let norm = normalize_text(text, self.mode);

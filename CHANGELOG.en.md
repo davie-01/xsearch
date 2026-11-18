@@ -4,6 +4,12 @@
 
 User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
+## Unreleased
+
+### Added
+
+- Content search accepts `name:` file name conditions together with the text, e.g. `in payment name:invoice`. Semicolon-separated values in one `name:` are alternatives, several `name:` terms must all match, and `*` / `?` match the whole name; the condition applies before the result limit. The Full Window's Content sidebar has a new “File name contains” field.
+
 ## 0.2.0 — 2026-11-18
 
 First public release.

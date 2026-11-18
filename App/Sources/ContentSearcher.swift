@@ -145,7 +145,8 @@ final class ContentSearcher: @unchecked Sendable {
         do {
             search = try index.search(query: q.expression, mode: mode, filters: SearchFilters(dirs: q.dirs, exts: q.exts, scopes: [],
                                                                                             sizeRange: q.size.map { [$0.lowerBound, $0.upperBound] },
-                                                                                            mtimeRange: q.modified.map { [$0.lowerBound, $0.upperBound] }))
+                                                                                            mtimeRange: q.modified.map { [$0.lowerBound, $0.upperBound] },
+                                                                                            names: q.names))
         } catch EngineError.Query(let message) {
             // Engine messages in Chinese are already user-facing (regex needs a scope…).
             out.error = message.unicodeScalars.contains { $0.value >= 0x4E00 } ? message : L("查询无法解析：%@", "\(message)")
@@ -229,7 +230,7 @@ final class ContentSearcher: @unchecked Sendable {
             var last = Date()
             for (i, f) in files.enumerated() {
                 guard current() else { return }
-                if q.allows(size: f.size, mtime: f.mtime), let h = scan.check(path: f.path) {
+                if q.allows(size: f.size, mtime: f.mtime), q.allows(name: (f.path as NSString).lastPathComponent), let h = scan.check(path: f.path) {
                     let url = URL(fileURLWithPath: f.path)
                     pending.append(ContentHit(fileId: UInt64(f.fileId), name: url.lastPathComponent, dir: url.deletingLastPathComponent().path,
                                               mtime: f.mtime, size: f.size, state: .complete, hitCount: h.hitCount, snippet: h.snippet,

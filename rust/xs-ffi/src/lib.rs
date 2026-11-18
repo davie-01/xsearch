@@ -151,6 +151,9 @@ pub struct SearchFilters {
     pub size_range: Option<Vec<i64>>,
     #[uniffi(default = None)]
     pub mtime_range: Option<Vec<i64>>,
+    /// `name:` conditions: values within a group OR-ed, groups AND-ed (see `SearchRequest`).
+    #[uniffi(default = [])]
+    pub names: Vec<Vec<String>>,
 }
 
 /// Stored document for the preview. Anchors and page states are JSON (`xs_index::Anchor`,
@@ -251,6 +254,7 @@ impl ContentIndex {
             scopes: filters.scopes,
             size: bounds(filters.size_range),
             mtime: bounds(filters.mtime_range),
+            names: filters.names,
         };
         let scoped = !req.dirs.is_empty() || !req.exts.is_empty();
         // Before collecting candidates: this refusal must not cost a scan's worth of work.

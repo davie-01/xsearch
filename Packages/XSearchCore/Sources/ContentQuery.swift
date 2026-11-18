@@ -1,7 +1,7 @@
 import Foundation
 
-/// Content-mode input (ARCHITECTURE §12): `dir:` / `ext:` / `size:` / `dm:` filters are taken
-/// out; everything else goes to the engine's parser (spaces = AND, `|`, leading `-`, quotes,
+/// Content-mode input (ARCHITECTURE §12): `dir:` / `ext:` / `name:` / `size:` / `dm:` filters are
+/// taken out; everything else goes to the engine's parser (spaces = AND, `|`, leading `-`, quotes,
 /// parens, `"甲 乙"~N`, `regex:`). Switched-off syntax is quoted so the engine reads it literally.
 public struct ContentQuery: Sendable, Equatable {
     public var expression: String
@@ -11,11 +11,49 @@ public struct ContentQuery: Sendable, Equatable {
     /// Applied to hits after verification (bytes / Unix seconds).
     public var size: ClosedRange<Int64>?
     public var modified: ClosedRange<Int64>?
+    /// `name:` conditions: the values of one token are OR-ed, several tokens AND-ed. A value is
+    /// a case-insensitive part of the file name, or with `*` / `?` the whole name.
+    public var names: [[String]] = []
 
     public var isEmpty: Bool { expression.trimmingCharacters(in: .whitespaces).isEmpty }
 
     public func allows(size s: Int64, mtime: Int64) -> Bool {
         (size?.contains(s) ?? true) && (modified?.contains(mtime) ?? true)
+    }
+
+    /// The engine applies `name:` itself; this is for files read outside the index (live scan).
+    public func allows(name: String) -> Bool {
+        guard !names.isEmpty else { return true }
+        let key = NameKey.key(name)
+        let scalars = Array(key.unicodeScalars)
+        return names.allSatisfy { group in
+            group.contains { value in
+                let pattern = NameKey.key(value)
+                guard pattern.contains("*") || pattern.contains("?") else { return key.contains(pattern) }
+                return Self.glob(Array(pattern.unicodeScalars)[...], scalars[...])
+            }
+        }
+    }
+
+    /// Whole-name match: `*` any run, `?` one scalar (the engine's rule).
+    static func glob(_ p: ArraySlice<Unicode.Scalar>, _ s: ArraySlice<Unicode.Scalar>) -> Bool {
+        var p = p, s = s
+        var star: (ArraySlice<Unicode.Scalar>, ArraySlice<Unicode.Scalar>)?
+        while let c = s.first {
+            if let h = p.first, h == "?" || h == c {
+                p = p.dropFirst(); s = s.dropFirst()
+            } else if p.first == "*" {
+                star = (p.dropFirst(), s)
+                p = p.dropFirst()
+            } else if let (rest, at) = star {
+                p = rest
+                s = at.dropFirst()
+                star = (rest, s)
+            } else {
+                return false
+            }
+        }
+        return p.allSatisfy { $0 == "*" }
     }
 
     public static func parse(_ input: String, home: String, syntax: QuerySyntax = .default, now: Date = Date()) -> ContentQuery {
@@ -41,6 +79,13 @@ public struct ContentQuery: Sendable, Equatable {
                 guard !exts.isEmpty else { continue }
                 q.exts += exts
                 q.chips.append(.init(label: "ext:" + exts.joined(separator: ";"), valid: true))
+            } else if lower.hasPrefix("name:") {
+                var value = String(raw.dropFirst(5))
+                if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 { value = String(value.dropFirst().dropLast()) }
+                let values = value.split(whereSeparator: { $0 == ";" || $0 == "," }).map(String.init).filter { !$0.isEmpty }
+                guard !values.isEmpty else { continue }
+                q.names.append(values)
+                q.chips.append(.init(label: "name:" + values.joined(separator: ";"), valid: true))
             } else if lower.hasPrefix("size:") || lower.hasPrefix("dm:") {
                 let isSize = lower.hasPrefix("size:")
                 let value = String(raw.drop(while: { $0 != ":" }).dropFirst())

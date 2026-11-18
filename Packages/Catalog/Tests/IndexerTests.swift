@@ -62,9 +62,9 @@ final class Pipeline {
         return false
     }
 
-    func search(_ q: String, dirs: [String] = []) throws -> Set<String> {
+    func search(_ q: String, dirs: [String] = [], names: [[String]] = []) throws -> Set<String> {
         let index = try ContentIndex.open(path: indexer.indexURL.path)
-        let s = try index.search(query: q, mode: .loose, filters: SearchFilters(dirs: dirs, exts: [], scopes: []))
+        let s = try index.search(query: q, mode: .loose, filters: SearchFilters(dirs: dirs, exts: [], scopes: [], names: names))
         var out = Set<String>()
         while true {
             let b = try s.next(budgetMs: 1000, maxHits: 1000)
@@ -154,6 +154,21 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(p.until { try p.search("token1b") == ["f1.txt"] })
     #expect(try p.search("token1a").isEmpty, "old version must not survive")
     for i in 2...6 { #expect(try p.search("token\(i)a") == ["f\(i).txt"], "file \(i) after \(fault)") }
+}
+
+@Test func nameFilterNarrowsIndexedContent() throws {
+    let p = try Pipeline("namefilter")
+    defer { p.stop() }
+    try p.box.write("docs/验收报告.txt", "支付条件 按里程碑")
+    try p.box.write("docs/合同草稿.txt", "支付条件 一次付清")
+    try p.box.write("docs/Notes.md", "支付条件 待定")
+    try p.start()
+    #expect(p.settle())
+    #expect(try p.search("支付条件") == ["验收报告.txt", "合同草稿.txt", "Notes.md"])
+    let q = ContentQuery.parse("支付条件 name:验收;notes", home: "/")
+    #expect(try p.search(q.expression, names: q.names) == ["验收报告.txt", "Notes.md"])
+    #expect(try p.search("支付条件", names: [["*.md"]]) == ["Notes.md"])
+    #expect(try p.search("支付条件", names: [["合同"], ["验收"]]).isEmpty)
 }
 
 @Test func hungParserIsQuarantined() throws {

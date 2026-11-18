@@ -1497,27 +1497,33 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         pop.behavior = .transient
         let label = NSTextField(wrappingLabelWithString: "")
         label.attributedStringValue = Self.syntaxHelp(mode: mode, syntax: Preferences.shared.querySyntax)
-        label.preferredMaxLayoutWidth = 380
-        let vc = NSViewController()
-        let box = NSView()
-        label.translatesAutoresizingMaskIntoConstraints = false
+        // A size of its own: left to Auto Layout, the popover over the glass panel came out a
+        // narrow empty strip (the wrapping label had no width to lay out against).
+        let width: CGFloat = 440
+        let text = label.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude))
+        label.frame = NSRect(x: 16, y: 14, width: width, height: ceil(text.height))
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: width + 32, height: ceil(text.height) + 28))
         box.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
-            label.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -16),
-            label.topAnchor.constraint(equalTo: box.topAnchor, constant: 14),
-            label.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -14),
-        ])
+        let vc = NSViewController()
         vc.view = box
+        vc.preferredContentSize = box.frame.size
         pop.contentViewController = vc
+        pop.contentSize = box.frame.size
         pop.show(relativeTo: field.bounds, of: field, preferredEdge: .maxY)
     }
 
     /// ⌘/ cheat sheet; switched-off syntax is marked (ARCHITECTURE §12).
     static func syntaxHelp(mode: Preferences.Mode, syntax: QuerySyntax) -> NSAttributedString {
         let s = NSMutableAttributedString()
-        let body: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.labelColor]
-        let code: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor]
+        // Two columns: the example, then at a tab stop its meaning; wrapped lines stay in the
+        // second column.
+        let column: CGFloat = 170
+        let rows = NSMutableParagraphStyle()
+        rows.tabStops = [NSTextTab(textAlignment: .left, location: column)]
+        rows.headIndent = column
+        rows.paragraphSpacing = 3
+        let body: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: rows]
+        let code: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor, .paragraphStyle: rows]
         let off: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.systemOrange]
         func title(_ t: String) {
             if s.length > 0 { s.append(NSAttributedString(string: "\n")) }
@@ -1525,30 +1531,31 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
         func row(_ example: String, _ text: String, enabled: Bool = true) {
             s.append(NSAttributedString(string: example, attributes: code))
-            s.append(NSAttributedString(string: "  " + text, attributes: body))
+            s.append(NSAttributedString(string: "\t" + text, attributes: body))
             if !enabled { s.append(NSAttributedString(string: L("（已关闭，按普通字符搜索）"), attributes: off)) }
             s.append(NSAttributedString(string: "\n"))
         }
         title(mode == .name ? L("名称模式语法") : L("内容模式语法"))
-        row(L("报告 2024"), L("同时包含多个词"))
-        row("\"a b\"", L("引号里的空格当作文字"))
-        row(L("甲 | 乙"), L("任一即可"), enabled: syntax.operators)
-        row(L("-草稿"), L("排除"), enabled: syntax.operators)
-        row(L("(甲 | 乙) 丙"), L("分组"), enabled: syntax.operators)
+        row(L("报告 2024"), mode == .name ? L("文件名同时含“报告”和“2024”，顺序不限") : L("正文同时含“报告”和“2024”，顺序不限"))
+        row(L("\"年度 报告\""), L("引号内整体当作一个词，空格也算"))
+        row(L("合同 | 协议"), L("含其中任一个"), enabled: syntax.operators)
+        row(L("合同 -草稿"), L("排除含“草稿”的"), enabled: syntax.operators)
+        row(L("(合同 | 协议) 2026"), L("括号分组：先算括号里的"), enabled: syntax.operators)
         if mode == .name {
-            row(L("*.pdf  报告?.docx"), L("通配符：* 不跨目录，? 匹配一个字符"), enabled: syntax.wildcards)
+            row(L("*.pdf  报告?.docx"), L("通配符：* 任意多个字符（不跨目录），? 恰好一个字符"), enabled: syntax.wildcards)
             row(L("**/合同/*.pdf"), L("含 / 时匹配完整路径，** 可跨目录"), enabled: syntax.wildcards)
             row("regex:^\\d+\\.txt$", L("正则匹配文件名（含 / 时匹配路径）"), enabled: syntax.regex)
         } else {
-            row(L("\"合同 金额\"~10"), L("邻近：几个词相距不超过 10 个字，顺序不限"), enabled: syntax.proximity)
-            row("regex:HT-\\d{4}", L("正则扫描已提取的正文；需含 3 字节以上的固定文字，或搭配 dir:/ext:"), enabled: syntax.regex)
+            row(L("\"合同 金额\"~10"), L("两个词相距不超过 10 个字，顺序不限"), enabled: syntax.proximity)
+            row("regex:HT-\\d{4}", L("正则匹配正文；需含 3 字节以上的固定文字，或加 dir: / ext:"), enabled: syntax.regex)
         }
         title(L("过滤条件"))
-        row(L("dir:~/文稿"), mode == .name ? L("限定目录，可写多个；也可写目录名片段 dir:合同/2024") : L("限定目录（完整路径），可写多个"))
-        row("ext:pdf;docx", L("扩展名"))
-        if mode == .name { row(L("kind:文件夹"), L("类型：文件夹 / 应用 / pdf / doc / 图片 …")) }
-        row("size:>10mb", L("大小：> >= < <=、1m..10m、empty"))
-        row("dm:today", L("修改时间：today / 本周 / 7d / 2024-05 / >=2025 / 2024..2025-06"))
+        row(L("dir:~/文稿"), mode == .name ? L("只在这个目录里找，可写多个；也可只写目录名 dir:合同/2024") : L("只在这个目录里找（完整路径），可写多个"))
+        row("ext:pdf;docx", L("只看这些扩展名"))
+        if mode == .name { row(L("kind:文件夹"), L("按类别：文件夹 / 应用 / pdf / doc / 图片 …")) }
+        if mode == .content { row(L("name:验收;报告"), L("文件名含其中任一；多个 name: 须同时满足")) }
+        row("size:>10mb", L("按大小：> >= < <=、1m..10m、empty"))
+        row("dm:today", L("按修改时间：today / 本周 / 7d / 2024-05 / >=2025"))
         s.append(NSAttributedString(string: L("\n可在 设置 → 搜索语法 中开关各项语法。"), attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
         return s
     }

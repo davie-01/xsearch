@@ -104,7 +104,7 @@ fn matches_brute_force_in_all_modes_with_filters() {
                     mode,
                     dirs: dirs.clone(),
                     exts: exts.clone(),
-                    scopes: scopes.clone(), size: None, mtime: None
+                    scopes: scopes.clone(), size: None, mtime: None, names: vec![]
                 };
                 let (got, _, _) = run_all(&reader, req);
                 assert_eq!(got, want, "{e:?} {mode:?} {dirs:?} {exts:?} {scopes:?}");
@@ -128,7 +128,7 @@ fn recall_kinds_explain_cost() {
             mode: Mode::Loose,
             dirs: vec![],
             exts: vec![],
-            scopes: vec![], size: None, mtime: None
+            scopes: vec![], size: None, mtime: None, names: vec![]
         })
         .unwrap()
         .recall
@@ -161,7 +161,7 @@ fn progressive_batches_cancel_and_completeness() {
         mode: Mode::Loose,
         dirs: vec![],
         exts: vec![],
-        scopes: vec![], size: None, mtime: None
+        scopes: vec![], size: None, mtime: None, names: vec![]
     };
     // Tiny budget: many batches, each making progress, union equals the full answer.
     let mut s = r.session(req.clone()).unwrap();
@@ -232,7 +232,7 @@ fn updates_tombstones_and_restart() {
                 mode: Mode::Loose,
                 dirs: vec![],
                 exts: vec![],
-                scopes: vec![], size: None, mtime: None
+                scopes: vec![], size: None, mtime: None, names: vec![]
             },
         )
         .0
@@ -263,7 +263,7 @@ fn snippets_and_highlights_point_at_hits() {
             mode: Mode::Loose,
             dirs: vec![],
             exts: vec![],
-            scopes: vec![], size: None, mtime: None
+            scopes: vec![], size: None, mtime: None, names: vec![]
         })
         .unwrap();
     let h = s
@@ -369,7 +369,7 @@ fn proximity_and_regex() {
     }
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
-    let req = |q: &str| SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None };
+    let req = |q: &str| SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None, names: vec![] };
     assert_eq!(run_all(&reader, req(r#""合同 金额"~3"#)).0, BTreeSet::from([1]));
     assert_eq!(run_all(&reader, req(r#""合同 金额"~30"#)).0, BTreeSet::from([1, 2]));
     let (ids, recall, _) = run_all(&reader, req(r"regex:ht-\d{4}-\d+"));
@@ -392,7 +392,7 @@ fn text_matcher_agrees_with_indexed_search() {
     for q in ["合同", "ht-2024 -草稿", r"regex:HT-\d+", r#""合同 金额"~2"#] {
         let expr = parse(q).unwrap();
         let m = TextMatcher::new(&expr, Mode::Loose);
-        let mut s = reader.session(SearchRequest { expr: expr.clone(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
+        let mut s = reader.session(SearchRequest { expr: expr.clone(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None, names: vec![] }).unwrap();
         let indexed = s.next(Duration::from_secs(5), 10, &AtomicBool::new(false)).unwrap().hits.pop().unwrap();
         let live = m.check(text).unwrap();
         assert_eq!((live.hit_count, &live.snippet, &live.snippet_highlights), (indexed.hit_count, &indexed.snippet, &indexed.snippet_highlights), "{q}");
@@ -419,7 +419,7 @@ fn archive_members_are_separate_hits() {
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
     let hits = |q: &str| {
-        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
+        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None, names: vec![] }).unwrap();
         let mut v: Vec<(u64, String, u32, String)> = s
             .next(Duration::from_secs(5), 100, &AtomicBool::new(false))
             .unwrap()
@@ -558,7 +558,7 @@ fn large_archive_is_paged_member_by_member() {
     w.put(&d).unwrap();
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
-    let session = || reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
+    let session = || reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None, names: vec![] }).unwrap();
     let never = AtomicBool::new(false);
     let mut s = session();
     let first = s.next(Duration::from_secs(5), 3, &never).unwrap();
@@ -594,7 +594,7 @@ fn size_and_time_filters_apply_to_candidates() {
     w.commit(1).unwrap();
     let reader = ContentReader::open(tmp.path()).unwrap();
     let ids = |size: Option<(i64, i64)>, mtime: Option<(i64, i64)>| {
-        let mut s = reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size, mtime }).unwrap();
+        let mut s = reader.session(SearchRequest { expr: parse("合同").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size, mtime, names: vec![] }).unwrap();
         // Filtered out before verification: the candidate count already says so.
         let n = s.candidates();
         let mut v: Vec<u64> = s.next(Duration::from_secs(5), 100, &AtomicBool::new(false)).unwrap().hits.iter().map(|h| h.file_id).collect();
@@ -607,6 +607,71 @@ fn size_and_time_filters_apply_to_candidates() {
     assert_eq!(ids(None, Some((0, 500))), [1, 2]);
     assert_eq!(ids(Some((100, 1000)), Some((0, 500))), [2]);
     assert_eq!(reader.recall_of(&parse(r"regex:\d{2}").unwrap()), Recall::Scan);
+}
+
+#[test]
+fn name_filter_applies_before_verification_and_the_limit() {
+    use xs_index::{Anchor, AnchorKind};
+    let tmp = tempfile::tempdir().unwrap();
+    let mut w = ContentWriter::open(tmp.path(), "inst-a").unwrap();
+    let named = |id: u64, name: &str, text: &str| {
+        let mut d = doc(id, text);
+        d.name = name.into();
+        d
+    };
+    w.put(&named(1, "验收报告.docx", "支付条件 一")).unwrap();
+    w.put(&named(2, "合同-验收.pdf", "支付条件 二")).unwrap();
+    w.put(&named(3, "Contract FINAL.txt", "支付条件 三")).unwrap();
+    w.put(&named(4, "notes.md", "支付条件 四")).unwrap();
+    // An archive whose own name does not match: only the matching member passes.
+    let mut zip = named(5, "资料.zip", "支付条件 甲\n支付条件 乙\n");
+    zip.anchors = vec![
+        Anchor { start: 0, kind: AnchorKind::Member { name: "a/验收单.txt".into() } },
+        Anchor { start: 7, kind: AnchorKind::Member { name: "b/其他.txt".into() } },
+    ];
+    w.put(&zip).unwrap();
+    // An archive whose name matches: every member passes.
+    let mut zip2 = named(6, "验收资料.zip", "支付条件 丙\n支付条件 丁\n");
+    zip2.anchors = vec![
+        Anchor { start: 0, kind: AnchorKind::Member { name: "x.txt".into() } },
+        Anchor { start: 7, kind: AnchorKind::Member { name: "y.txt".into() } },
+    ];
+    w.put(&zip2).unwrap();
+    // Many matching texts with other names, newer than the named ones: they come first in
+    // candidate order and would fill a result limit if names were checked afterwards.
+    for id in 100..160u64 {
+        let mut d = named(id, &format!("其他-{id}.txt"), "支付条件 其他");
+        d.mtime = 10_000 + id as i64;
+        w.put(&d).unwrap();
+    }
+    w.commit(1).unwrap();
+    let reader = ContentReader::open(tmp.path()).unwrap();
+    let hits = |names: Vec<Vec<&str>>, max: usize| {
+        let names = names.into_iter().map(|g| g.into_iter().map(String::from).collect()).collect();
+        let mut s = reader.session(SearchRequest { expr: parse("支付条件").unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None, names }).unwrap();
+        let mut v: Vec<(u64, String)> = vec![];
+        loop {
+            let b = s.next(Duration::from_secs(5), max, &AtomicBool::new(false)).unwrap();
+            v.extend(b.hits.into_iter().map(|h| (h.file_id, h.member)));
+            if b.done || v.len() >= max { break; }
+        }
+        v.sort();
+        v
+    };
+    let ids = |v: Vec<(u64, String)>| v.into_iter().map(|(id, m)| if m.is_empty() { id.to_string() } else { format!("{id}:{m}") }).collect::<Vec<_>>();
+    assert_eq!(ids(hits(vec![vec!["验收"]], 100)), ["1", "2", "5:a/验收单.txt", "6:x.txt", "6:y.txt"]);
+    // Groups are AND-ed, values within a group OR-ed; case-insensitive like file names.
+    assert_eq!(ids(hits(vec![vec!["验收"], vec!["报告"]], 100)), ["1"]);
+    assert_eq!(ids(hits(vec![vec!["报告", "contract"]], 100)), ["1", "3"]);
+    // `*` / `?` match the whole name.
+    assert_eq!(ids(hits(vec![vec!["*.md"]], 100)), ["4"]);
+    assert_eq!(ids(hits(vec![vec!["notes.m?"]], 100)), ["4"]);
+    assert_eq!(ids(hits(vec![vec!["合同*"]], 100)), ["2"]);
+    assert!(hits(vec![vec!["*.pd"]], 100).is_empty());
+    // Applied before the limit: the first hit is the named file, not one of the 60 newer others.
+    assert_eq!(ids(hits(vec![vec!["contract"]], 1)), ["3"]);
+    // No condition: everything, members included.
+    assert_eq!(hits(vec![], 1000).len(), 1 + 1 + 1 + 1 + 2 + 2 + 60);
 }
 
 /// Measurement, not run by default (`-- --ignored --nocapture`): how long creating a session takes on a large index,
@@ -631,7 +696,7 @@ fn session_creation_and_big_document_cost() {
     let reader = ContentReader::open(tmp.path()).unwrap();
     for q in ["a", "的", "-合同", "项目"] {
         let t = std::time::Instant::now();
-        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None }).unwrap();
+        let mut s = reader.session(SearchRequest { expr: parse(q).unwrap(), mode: Mode::Loose, dirs: vec![], exts: vec![], scopes: vec![], size: None, mtime: None, names: vec![] }).unwrap();
         let created = t.elapsed();
         let cancel = AtomicBool::new(false);
         let t = std::time::Instant::now();
@@ -639,7 +704,7 @@ fn session_creation_and_big_document_cost() {
         println!("q={q} candidates={} create_ms={} first_next_ms={} hits={}", s.candidates(), created.as_millis(), t.elapsed().as_millis(), b.hits.len());
     }
     // The big document alone: one verification step, no cancel check inside it.
-    let mut s = reader.session(SearchRequest { expr: parse("验收").unwrap(), mode: Mode::Loose, dirs: vec!["/Work/A".into()], exts: vec![], scopes: vec![], size: Some((50_000_000, i64::MAX)), mtime: None }).unwrap();
+    let mut s = reader.session(SearchRequest { expr: parse("验收").unwrap(), mode: Mode::Loose, dirs: vec!["/Work/A".into()], exts: vec![], scopes: vec![], size: Some((50_000_000, i64::MAX)), mtime: None, names: vec![] }).unwrap();
     let cancel = AtomicBool::new(false);
     let t = std::time::Instant::now();
     let b = s.next(Duration::from_millis(1), 1, &cancel).unwrap();
