@@ -140,9 +140,9 @@ fn gz_without_a_size_stops_at_the_total_budget() {
     assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing beyond the budget stays on disk");
 }
 
-/// A stored zip whose members named in `bzip2` claim BZip2 (method 12), which this build
-/// cannot decode: what a zip from another tool with a BZip2 member looks like to the reader.
-fn zip_with_bzip2_members(path: &Path, members: &[&str], bzip2: &[&str]) {
+/// A stored zip whose members named in `ppmd` claim PPMd (method 98), which this build cannot
+/// decode: what a zip from another tool with such a member looks like to the reader.
+fn zip_with_ppmd_members(path: &Path, members: &[&str], ppmd: &[&str]) {
     let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
     let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     for name in members {
@@ -164,8 +164,8 @@ fn zip_with_bzip2_members(path: &Path, members: &[&str], bzip2: &[&str]) {
             }
         };
         let n = u16_at(&data, i + len);
-        if bzip2.iter().any(|b| b.as_bytes() == &data[i + name..i + name + n]) {
-            data[i + method..i + method + 2].copy_from_slice(&12u16.to_le_bytes());
+        if ppmd.iter().any(|b| b.as_bytes() == &data[i + name..i + name + n]) {
+            data[i + method..i + method + 2].copy_from_slice(&98u16.to_le_bytes());
         }
         i += 4;
     }
@@ -176,7 +176,7 @@ fn zip_with_bzip2_members(path: &Path, members: &[&str], bzip2: &[&str]) {
 fn zip_member_with_unsupported_compression_is_left_out() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("mixed.zip");
-    zip_with_bzip2_members(&p, &["a.txt", "b.txt", "c.txt", "d.png"], &["b.txt", "d.png"]);
+    zip_with_ppmd_members(&p, &["a.txt", "b.txt", "c.txt", "d.png"], &["b.txt", "d.png"]);
     let out = tempfile::tempdir().unwrap();
     let u = unpack(&p, out.path(), &docs, LIMITS).unwrap();
     // The other members are read; d.png is not wanted, so its method never matters.
@@ -187,7 +187,22 @@ fn zip_member_with_unsupported_compression_is_left_out() {
 
     // Nothing readable at all: the archive fails, with the member's own reason.
     let q = dir.path().join("only.zip");
-    zip_with_bzip2_members(&q, &["x.txt", "y.txt"], &["x.txt", "y.txt"]);
+    zip_with_ppmd_members(&q, &["x.txt", "y.txt"], &["x.txt", "y.txt"]);
     let err = unpack(&q, out.path(), &docs, LIMITS).unwrap_err();
     assert!(format!("{err}").to_lowercase().contains("compression"), "{err}");
+}
+
+#[test]
+fn zip_bzip2_members_are_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("bz.zip");
+    let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+    let bz = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Bzip2);
+    z.start_file("报告.txt", bz).unwrap();
+    z.write_all("BZip2 压缩的正文".as_bytes()).unwrap();
+    z.finish().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let u = unpack(&p, out.path(), &docs, LIMITS).unwrap();
+    assert_eq!((names(&u), u.unreadable), (vec!["报告.txt"], 0));
+    assert_eq!(std::fs::read_to_string(&u.members[0].extracted).unwrap(), "BZip2 压缩的正文");
 }

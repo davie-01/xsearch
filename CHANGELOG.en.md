@@ -8,6 +8,7 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Added
 
+- Zip members compressed with BZip2 can be read (the pure-Rust bzip2 decoder 7z support already uses; no new dependency).
 - Content search accepts `name:` file name conditions together with the text, e.g. `in payment name:invoice`. Semicolon-separated values in one `name:` are alternatives, several `name:` terms must all match, and `*` / `?` match the whole name; the condition applies before the result limit. In the Full Window, Content search can set “File name” in the condition bar.
 - The Full Window can narrow the current results with “Within” steps (`⇧⌘F`): words that must all appear, any of which may appear, or none of which may appear (optionally an exact match). Steps can be removed one by one or undone; it works in Name and Content search and applies before the result limit.
 

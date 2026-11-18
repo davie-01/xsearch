@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ARCHIVE_EXTRACTOR_VERSION: u64 = 4;
+pub const ARCHIVE_EXTRACTOR_VERSION: u64 = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ArchiveLimits {

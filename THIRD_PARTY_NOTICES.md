@@ -1,6 +1,6 @@
 # XSearch 第三方许可
 
-本清单对应 XSearch 提交 `ca30e7e`。它覆盖主 Rust 工作区锁定的 **250 个第三方 crate 版本**、M0-B 独立工作区的 **176 个锁定 crate 版本**（与主工作区重复的版本共用同一条记录），以及 Rust 锁文件以外随应用使用或随源码分发的组件和素材。第三方材料保留各自的许可与版权声明。XSearch 原创代码采用 GPL 第 3 版，附 UnRAR 链接例外。[GPLv3 原文](LICENSE) · [链接例外](LICENSES/XSearch-UnRAR-linking-exception.md)
+本清单对应 XSearch 提交 `ca30e7e`。它覆盖主 Rust 工作区锁定的 **249 个第三方 crate 版本**、M0-B 独立工作区的 **176 个锁定 crate 版本**（与主工作区重复的版本共用同一条记录），以及 Rust 锁文件以外随应用使用或随源码分发的组件和素材。第三方材料保留各自的许可与版权声明。XSearch 原创代码采用 GPL 第 3 版，附 UnRAR 链接例外。[GPLv3 原文](LICENSE) · [链接例外](LICENSES/XSearch-UnRAR-linking-exception.md)
 
 ## UnRAR 与 GPLv3 发行
 
@@ -298,7 +298,7 @@ Sparkle 许可原文还随下载的框架资源提供。文档内的架构调研
 | `xattr` | [1.7.0](https://crates.io/crates/xattr/1.7.0) | `MIT OR Apache-2.0` | 主 | 是 |
 | `zerocopy` | [0.8.63](https://crates.io/crates/zerocopy/0.8.63) | `BSD-2-Clause OR Apache-2.0 OR MIT` | 主、M0-B | 是 |
 | `zerocopy-derive` | [0.8.63](https://crates.io/crates/zerocopy-derive/0.8.63) | `BSD-2-Clause OR Apache-2.0 OR MIT` | 主、M0-B | — |
-| `zip` | [2.6.1](https://crates.io/crates/zip/2.6.1) | `MIT` | 主、M0-B | 是 |
+| `zip` | [2.6.1](https://crates.io/crates/zip/2.6.1) | `MIT` | M0-B | — |
 | `zip` | [4.6.1](https://crates.io/crates/zip/4.6.1) | `MIT` | 主 | 是 |
 | `zlib-rs` | [0.6.8](https://crates.io/crates/zlib-rs/0.6.8) | `Zlib` | 主 | 是 |
 | `zmij` | [1.0.23](https://crates.io/crates/zmij/1.0.23) | `MIT` | 主、M0-B | 是 |

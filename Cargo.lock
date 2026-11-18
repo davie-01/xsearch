@@ -238,7 +238,7 @@ dependencies = [
  "log",
  "quick-xml",
  "serde",
- "zip 4.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -2201,7 +2201,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "unicode-normalization",
- "zip 2.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -2245,7 +2245,7 @@ dependencies = [
  "tempfile",
  "unrar",
  "xs-index",
- "zip 2.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -2270,26 +2270,12 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "crossbeam-utils",
- "flate2",
- "indexmap",
- "memchr",
- "zopfli",
-]
-
-[[package]]
-name = "zip"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
+ "bzip2",
  "crc32fast",
  "flate2",
  "indexmap",
