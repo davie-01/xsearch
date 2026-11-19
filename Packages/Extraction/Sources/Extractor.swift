@@ -78,6 +78,7 @@ public enum Extractor {
         case .archive: archiveVersion
         case .wps: wpsVersion
         case .email: engineVersions()["extractor.email"].flatMap(UInt64.init) ?? 1
+        case .mindmap: engineVersions()["extractor.mindmap"].flatMap(UInt64.init) ?? 1
         }
     }
 
@@ -150,6 +151,9 @@ public enum Extractor {
         case .email:
             // Large messages are mostly attachments: the first part is read, the rest is noted.
             return try rust { try extractEmail(path: path, maxFileBytes: limits.maxFileBytes) }
+        case .mindmap:
+            try checkSize(path, limits)
+            return try rust { try extractXmind(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
         }
     }
 

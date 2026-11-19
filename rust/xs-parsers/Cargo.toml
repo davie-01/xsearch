@@ -17,6 +17,7 @@ mail-parser = { version = "=0.11.2", features = ["full_encoding"] }
 encoding_rs.workspace = true
 roxmltree.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 zip.workspace = true
 xs-index = { path = "../xs-index" }
 

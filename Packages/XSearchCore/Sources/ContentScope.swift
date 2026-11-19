@@ -57,7 +57,7 @@ public struct ContentScope: Codable, Sendable, Equatable {
 /// Content types (D7: .doc/.docx in M2; spreadsheets, slides and OFD in M3; HTML, ePub, RTF
 /// and WPS in M4; OCR M6).
 public enum ContentType: String, Codable, Sendable, CaseIterable {
-    case text, docx, pdf, doc, sheet, slide, ofd, web, ebook, rtf, archive, wps, email
+    case text, docx, pdf, doc, sheet, slide, ofd, web, ebook, rtf, archive, wps, email, mindmap
 
     public var extensions: Set<String> {
         switch self {
@@ -68,6 +68,7 @@ public enum ContentType: String, Codable, Sendable, CaseIterable {
         case .slide: ["pptx", "pptm", "ppt", "pps", "dps", "odp"]
         case .wps: ["wps"]
         case .email: ["eml", "emlx"]
+        case .mindmap: ["xmind"]
         case .ofd: ["ofd"]
         case .web: ["html", "htm", "xhtml", "shtml"]
         case .ebook: ["epub"]

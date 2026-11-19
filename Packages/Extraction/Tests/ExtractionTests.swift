@@ -295,3 +295,20 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(r.method == "email" && r.state == "complete" && r.extractorVersion == Extractor.version(of: .email))
     #expect(r.text == "主题：周报\n发件人：a@example.com\n本周完成验收。\n")
 }
+
+@Test func xmindDispatchesThroughRust() throws {
+    let dir = tmp("xmind-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    try #"[{"id":"s","title":"画布 1","rootTopic":{"id":"r","title":"验收","children":{"attached":[{"id":"a","title":"支付条件"}]}}}]"#
+        .write(toFile: dir + "/content.json", atomically: true, encoding: .utf8)
+    let zip = Process()
+    zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+    zip.currentDirectoryURL = URL(fileURLWithPath: dir)
+    zip.arguments = ["-q", "plan.xmind", "content.json"]
+    try zip.run()
+    zip.waitUntilExit()
+    #expect(ExtractionKind.of(path: dir + "/plan.xmind") == .mindmap)
+    let r = try Extractor.extract(path: dir + "/plan.xmind", limits: ExtractionLimits())
+    #expect(r.method == "xmind" && r.state == "complete" && r.extractorVersion == Extractor.version(of: .mindmap))
+    #expect(r.text == "画布 1\n验收\n支付条件\n")
+}

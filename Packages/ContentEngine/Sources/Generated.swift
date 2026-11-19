@@ -3508,6 +3508,17 @@ public func extractWord97(path: String, maxUnpackedBytes: UInt64)throws  -> Extr
 })
 }
 /**
+ * XMind mind maps: topics, labels, notes, boundary and relationship titles.
+ */
+public func extractXmind(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_xmind(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+/**
  * Unpacks members whose extension is in `extensions` (lowercase, no dot) into `dest`.
  */
 public func unpackArchive(path: String, dest: String, extensions: [String], maxMemberBytes: UInt64, maxTotalBytes: UInt64, maxMembers: UInt32)throws  -> ArchiveListing  {
@@ -3569,6 +3580,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_word97() != 23624) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_xmind() != 63195) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_unpack_archive() != 28679) {

@@ -793,9 +793,9 @@ struct ContentCard: View {
             }
             Divider()
             Text(L("提取的文件类型")).font(.system(size: 13, weight: .medium))
-            // A grid that wraps: thirteen types do not fit one row.
+            // A grid that wraps: fourteen types do not fit one row.
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12, alignment: .leading)], alignment: .leading, spacing: 8) {
-                ForEach([(ContentType.text, L("文本 / 代码")), (.pdf, "PDF"), (.docx, L("Word（docx、odt）")), (.doc, L("Word（doc）")), (.wps, L("WPS 文字")), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, L("网页 HTML")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包")), (.email, L("邮件（eml）"))], id: \.0) { type, label in
+                ForEach([(ContentType.text, L("文本 / 代码")), (.pdf, "PDF"), (.docx, L("Word（docx、odt）")), (.doc, L("Word（doc）")), (.wps, L("WPS 文字")), (.sheet, "Excel"), (.slide, "PowerPoint"), (.ofd, "OFD"), (.web, L("网页 HTML")), (.ebook, "ePub"), (.rtf, "RTF"), (.archive, L("压缩包")), (.email, L("邮件（eml）")), (.mindmap, L("思维导图（xmind）"))], id: \.0) { type, label in
                     Toggle(isOn: Binding(get: { model.content.types.contains(type) }, set: { on in
                         if on { model.content.types.insert(type) } else { model.content.types.remove(type) }
                         model.commitContent()

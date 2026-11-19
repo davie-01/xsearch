@@ -9,6 +9,7 @@ pub mod email;
 pub mod odf;
 pub mod office;
 pub mod web;
+pub mod xmind;
 pub mod archive;
 
 /// Bumped when an extractor's output can change for the same input bytes, so affected files

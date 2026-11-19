@@ -609,6 +609,13 @@ pub fn extract_email(path: String, max_file_bytes: u64) -> Result<ExtractionOutp
     Ok(output(e, xs_parsers::email::EMAIL_EXTRACTOR_VERSION))
 }
 
+/// XMind mind maps: topics, labels, notes, boundary and relationship titles.
+#[uniffi::export]
+pub fn extract_xmind(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::xmind::xmind(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
+    Ok(output(e, xs_parsers::xmind::XMIND_EXTRACTOR_VERSION))
+}
+
 #[uniffi::export]
 pub fn extract_ofd(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
     let e = xs_parsers::office::ofd(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
@@ -781,5 +788,6 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.archive".to_owned(), xs_parsers::archive::ARCHIVE_EXTRACTOR_VERSION.to_string()),
         ("extractor.odf".to_owned(), xs_parsers::odf::ODF_EXTRACTOR_VERSION.to_string()),
         ("extractor.email".to_owned(), xs_parsers::email::EMAIL_EXTRACTOR_VERSION.to_string()),
+        ("extractor.mindmap".to_owned(), xs_parsers::xmind::XMIND_EXTRACTOR_VERSION.to_string()),
     ])
 }
