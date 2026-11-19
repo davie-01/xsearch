@@ -1,6 +1,6 @@
 # XSearch 第三方许可
 
-本清单对应 XSearch 提交 `ca30e7e`。它覆盖主 Rust 工作区锁定的 **249 个第三方 crate 版本**、M0-B 独立工作区的 **176 个锁定 crate 版本**（与主工作区重复的版本共用同一条记录），以及 Rust 锁文件以外随应用使用或随源码分发的组件和素材。第三方材料保留各自的许可与版权声明。XSearch 原创代码采用 GPL 第 3 版，附 UnRAR 链接例外。[GPLv3 原文](LICENSE) · [链接例外](LICENSES/XSearch-UnRAR-linking-exception.md)
+本清单对应 XSearch 提交 `ca30e7e`。它覆盖主 Rust 工作区锁定的 **251 个第三方 crate 版本**、M0-B 独立工作区的 **176 个锁定 crate 版本**（与主工作区重复的版本共用同一条记录），以及 Rust 锁文件以外随应用使用或随源码分发的组件和素材。第三方材料保留各自的许可与版权声明。XSearch 原创代码采用 GPL 第 3 版，附 UnRAR 链接例外。[GPLv3 原文](LICENSE) · [链接例外](LICENSES/XSearch-UnRAR-linking-exception.md)
 
 ## UnRAR 与 GPLv3 发行
 
@@ -145,6 +145,7 @@ Sparkle 许可原文还随下载的框架资源提供。文档内的架构调研
 | `goblin` | [0.8.2](https://crates.io/crates/goblin/0.8.2) | `MIT` | 主 | 是 |
 | `hashbrown` | [0.15.5](https://crates.io/crates/hashbrown/0.15.5) | `MIT OR Apache-2.0` | 主、M0-B | 是 |
 | `hashbrown` | [0.17.1](https://crates.io/crates/hashbrown/0.17.1) | `MIT OR Apache-2.0` | 主、M0-B | 是 |
+| `hashify` | [0.2.9](https://crates.io/crates/hashify/0.2.9) | `Apache-2.0 OR MIT` | 主 | 是 |
 | `hashlink` | [0.10.0](https://crates.io/crates/hashlink/0.10.0) | `MIT OR Apache-2.0` | 主、M0-B | 是 |
 | `heck` | [0.5.0](https://crates.io/crates/heck/0.5.0) | `MIT OR Apache-2.0` | 主 | 是 |
 | `htmlescape` | [0.3.1](https://crates.io/crates/htmlescape/0.3.1) | `Apache-2.0 / MIT / MPL-2.0` | 主、M0-B | 是 |
@@ -166,6 +167,7 @@ Sparkle 许可原文还随下载的框架资源提供。文档内的架构调研
 | `lru` | [0.18.5](https://crates.io/crates/lru/0.18.5) | `MIT` | 主、M0-B | 是 |
 | `lz4_flex` | [0.14.0](https://crates.io/crates/lz4_flex/0.14.0) | `MIT` | 主、M0-B | 是 |
 | `lzma-rust2` | [0.23.0](https://crates.io/crates/lzma-rust2/0.23.0) | `Apache-2.0` | 主 | 是 |
+| `mail-parser` | [0.11.2](https://crates.io/crates/mail-parser/0.11.2) | `Apache-2.0 OR MIT` | 主 | 是 |
 | `measure_time` | [0.9.0](https://crates.io/crates/measure_time/0.9.0) | `MIT` | 主、M0-B | 是 |
 | `memchr` | [2.8.3](https://crates.io/crates/memchr/2.8.3) | `Unlicense OR MIT` | 主、M0-B | 是 |
 | `memmap2` | [0.9.12](https://crates.io/crates/memmap2/0.9.12) | `MIT OR Apache-2.0` | 主、M0-B | 是 |

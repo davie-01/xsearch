@@ -22,6 +22,7 @@ XSearch is a native menu bar app for Apple silicon Macs. Press `⌥Space` to ope
 
 - **Documents and spreadsheets**: PDFs with a text layer, Word (DOC, DOCX, DOT, DOCM), Excel (XLS, XLSX, XLSM), PowerPoint (PPT, PPTX, PPS, PPTM), OpenDocument (ODT, ODS, ODP), and some WPS formats (WPS, ET, DPS).
 - **Text and publications**: plain text, Markdown, logs, common source and configuration files, plus HTML, EPUB, RTF and OFD.
+- **Email**: EML and Apple Mail EMLX messages: subject, sender, recipients, date, body and attachment names.
 - **Archives**: ZIP, TAR, GZ, TGZ, 7z and RAR. XSearch searches the text extracted from members and marks which member matched.
 
 Text search depends on what can actually be extracted. Pages of a scanned PDF without a text layer are marked as waiting for OCR; image text recognition is not available yet. Encrypted, damaged, oversized or inaccessible files may be extracted only in part, or not at all. Archives are opened one level deep, within an unpacking limit.

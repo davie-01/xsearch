@@ -8,6 +8,7 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Added
 
+- The content index reads email messages (.eml, and Apple Mail .emlx): subject, sender, recipients, Cc, date, body and attachment names, located by “Headers / Body / Attachments”. MIME multipart messages, encoded words (GBK or UTF-8 subjects, for example) and other character sets are handled; HTML-only bodies are read like web pages. Attachment contents are not read yet. Settings and the Full Window have a new “Email” type.
 - The content index reads OpenDocument text (.odt) and presentations (.odp): .odt located by paragraph and table cell, with footnotes and text frames; .odp by slide, speaker notes after their slide. They count as the Word and PowerPoint types (.ods already counted as Excel).
 - Zip members compressed with BZip2 can be read (the pure-Rust bzip2 decoder 7z support already uses; no new dependency).
 - Content search accepts `name:` file name conditions together with the text, e.g. `in payment name:invoice`. Semicolon-separated values in one `name:` are alternatives, several `name:` terms must all match, and `*` / `?` match the whole name; the condition applies before the result limit. In the Full Window, Content search can set “File name” in the condition bar.

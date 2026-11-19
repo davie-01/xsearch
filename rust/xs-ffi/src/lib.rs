@@ -602,6 +602,13 @@ pub fn extract_pptx(path: String, max_unpacked_bytes: u64) -> Result<ExtractionO
     Ok(output(e, xs_parsers::office::PPTX_EXTRACTOR_VERSION))
 }
 
+/// E-mail messages (.eml, Apple Mail .emlx): headers, body, attachment names.
+#[uniffi::export]
+pub fn extract_email(path: String, max_file_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::email::email(Path::new(&path), limits(max_file_bytes, max_file_bytes))?;
+    Ok(output(e, xs_parsers::email::EMAIL_EXTRACTOR_VERSION))
+}
+
 #[uniffi::export]
 pub fn extract_ofd(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
     let e = xs_parsers::office::ofd(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
@@ -773,5 +780,6 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.ebook".to_owned(), xs_parsers::web::EPUB_EXTRACTOR_VERSION.to_string()),
         ("extractor.archive".to_owned(), xs_parsers::archive::ARCHIVE_EXTRACTOR_VERSION.to_string()),
         ("extractor.odf".to_owned(), xs_parsers::odf::ODF_EXTRACTOR_VERSION.to_string()),
+        ("extractor.email".to_owned(), xs_parsers::email::EMAIL_EXTRACTOR_VERSION.to_string()),
     ])
 }

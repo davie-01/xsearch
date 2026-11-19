@@ -3434,6 +3434,17 @@ public func extractDocx(path: String, maxUnpackedBytes: UInt64)throws  -> Extrac
     )
 })
 }
+/**
+ * E-mail messages (.eml, Apple Mail .emlx): headers, body, attachment names.
+ */
+public func extractEmail(path: String, maxFileBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_email(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxFileBytes),$0
+    )
+})
+}
 public func extractEpub(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
     return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
     uniffi_xs_ffi_fn_func_extract_epub(
@@ -3534,6 +3545,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_docx() != 40192) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_extract_email() != 15832) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_epub() != 4575) {

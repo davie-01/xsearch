@@ -77,6 +77,7 @@ public enum Extractor {
         case .rtf: rtfVersion
         case .archive: archiveVersion
         case .wps: wpsVersion
+        case .email: engineVersions()["extractor.email"].flatMap(UInt64.init) ?? 1
         }
     }
 
@@ -146,6 +147,9 @@ public enum Extractor {
         case .ofd:
             try checkSize(path, limits)
             return try rust { try extractOfd(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case .email:
+            // Large messages are mostly attachments: the first part is read, the rest is noted.
+            return try rust { try extractEmail(path: path, maxFileBytes: limits.maxFileBytes) }
         }
     }
 

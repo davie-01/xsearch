@@ -286,3 +286,12 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     let anchors = try JSONDecoder().decode([AnchorJSON].self, from: Data(r.anchorsJSON.utf8))
     #expect(anchors.map(\.kind) == ["paragraph", "paragraph"])
 }
+
+@Test func emailDispatchesThroughRust() throws {
+    let path = tmp("weekly.eml")
+    try "Subject: 周报\r\nFrom: a@example.com\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n本周完成验收。\r\n".write(toFile: path, atomically: true, encoding: .utf8)
+    #expect(ExtractionKind.of(path: path) == .email && ExtractionKind.of(path: "x.EMLX") == .email)
+    let r = try Extractor.extract(path: path, limits: ExtractionLimits())
+    #expect(r.method == "email" && r.state == "complete" && r.extractorVersion == Extractor.version(of: .email))
+    #expect(r.text == "主题：周报\n发件人：a@example.com\n本周完成验收。\n")
+}

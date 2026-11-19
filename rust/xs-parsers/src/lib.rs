@@ -5,6 +5,7 @@ use std::{fs::File, io::Read, path::Path};
 use xs_index::{Anchor, AnchorKind, ExtractState};
 
 pub mod docx;
+pub mod email;
 pub mod odf;
 pub mod office;
 pub mod web;

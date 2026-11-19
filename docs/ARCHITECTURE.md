@@ -383,7 +383,7 @@ Scope
 | WPS（.wps / .et / .dps） | M4 ✅ | .wps：OLE 走 .doc 路线，ZIP 走 docx；.et 用 calamine（BIFF8）；.dps 与旧版 PPT 相同 | 正文 | 段落 / 单元格 / 幻灯片 |
 | 旧版 PPT（.ppt / .pps） | M4 ✅ | Rust：读 OLE2 里的 PowerPoint Document 流，按持久化目录定位各页 | 幻灯片和备注的文字 | 幻灯片 |
 | zip / 7z / tar / rar 包内文件 | M4 ✅（简化） | Rust 解包，Swift 按成员类型提取；整个压缩包算一份文档（M4-2 说明），虚拟路径的子文档以后再做；zip 支持 Deflate 与 BZip2，单个成员解不开时只跳过该成员 | 包内的子文件 | 成员路径 + 成员内的锚点 |
-| 邮件 .emlx / .eml | M4 | Rust | 主题、发件人、正文、附件（附件作为子文档） | |
+| 邮件 .eml / .emlx | 第 3 阶段 ✅（附件内容未做） | Rust `mail-parser`（MIME、编码字、字符集）；.emlx 先按首行字节数截出邮件；独立类型 `email`（`extractor.email`） | 主题、发件人、收件人、抄送、日期、正文（纯文本优先，只有 HTML 时按网页读取）、附件名；附件内容以后作为子文档 | “邮件头”“正文”“附件”；HTML 正文另按段落 |
 | 图片、扫描版 PDF | **M6** | Vision | 见第 14 节 | 文字框坐标 |
 
 **提取结果复用（参考 fsearch、rga）**：下载目录里同一份公文的多个副本、改名或移动后的文件，不需要重新解析 .doc 或 PDF，直接复用已有的提取结果。

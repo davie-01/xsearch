@@ -442,6 +442,11 @@ RustBuffer uniffi_xs_ffi_fn_func_extract_archive_member(RustBuffer path, RustBuf
 RustBuffer uniffi_xs_ffi_fn_func_extract_docx(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EMAIL
+RustBuffer uniffi_xs_ffi_fn_func_extract_email(RustBuffer path, uint64_t max_file_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EPUB
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EPUB
 RustBuffer uniffi_xs_ffi_fn_func_extract_epub(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
@@ -777,6 +782,12 @@ uint16_t uniffi_xs_ffi_checksum_func_extract_archive_member(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_DOCX
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_DOCX
 uint16_t uniffi_xs_ffi_checksum_func_extract_docx(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_EMAIL
+uint16_t uniffi_xs_ffi_checksum_func_extract_email(void
     
 );
 #endif
