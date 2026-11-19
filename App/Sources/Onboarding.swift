@@ -98,7 +98,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.title = L("XSearch 首次启动引导")
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: OnboardingView(model: model))
+        window.contentView = NSHostingView(rootView: OnboardingView(model: model).focusEffectDisabled())
         window.center()
         super.init(window: window)
         window.delegate = self

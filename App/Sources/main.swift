@@ -4,6 +4,7 @@ import AppKit
 umask(0o077)
 
 let app = NSApplication.shared
+FocusRings.disable()
 let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)  // menu bar app (LSUIElement)

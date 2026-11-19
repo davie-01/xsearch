@@ -154,8 +154,6 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         modeControl.action = #selector(modeChanged)
         field.font = .systemFont(ofSize: 15)
         field.controlSize = .large
-        // No blue focus ring: the caret already shows where typing goes (as in Spotlight and Finder).
-        field.focusRingType = .none
         field.delegate = self
         field.sendsSearchStringImmediately = true
         field.target = self

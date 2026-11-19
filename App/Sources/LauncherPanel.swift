@@ -266,7 +266,6 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
         field.isBordered = false
         field.drawsBackground = false
-        field.focusRingType = .none
         field.font = Theme.inputFont
         field.delegate = self
         field.cell?.isScrollable = true

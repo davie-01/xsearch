@@ -297,7 +297,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.title = L("XSearch 设置")
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        window.contentViewController = NSHostingController(rootView: SettingsView(model: model))
+        window.contentViewController = NSHostingController(rootView: SettingsView(model: model).focusEffectDisabled())
         window.setContentSize(NSSize(width: 940, height: 660))
         window.center()
         window.delegate = self
@@ -335,8 +335,6 @@ struct SettingsView: View {
                             .contentShape(RoundedRectangle(cornerRadius: 7))
                     }
                     .buttonStyle(.plain)
-                    // The selection highlight shows where you are; no keyboard focus ring.
-                    .focusEffectDisabled()
                 }
                 Spacer()
             }
