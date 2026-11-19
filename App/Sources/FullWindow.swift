@@ -502,6 +502,20 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
 
     @objc private func closePopover() { popover?.close() }
 
+    /// After the open popover's content grows or shrinks (steps added or undone, custom dates or
+    /// sizes shown or hidden): a popover follows its content when it grows, never when it shrinks.
+    /// In one step, not animated: the animation runs through several sizes, each one recomposing
+    /// the translucent popover over the refreshing results, which flickers.
+    private func fitPopover() {
+        guard let pop = popover, pop.isShown, let view = pop.contentViewController?.view else { return }
+        let size = view.fittingSize
+        guard pop.contentSize != size else { return }
+        let animates = pop.animates
+        pop.animates = false
+        pop.contentSize = size
+        pop.animates = animates
+    }
+
     @objc private func popoverClear(_ sender: NSButton) {
         guard let raw = sender.identifier?.rawValue, let id = Pill(rawValue: raw) else { return }
         clear(id)
@@ -695,6 +709,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         case .time:
             let custom = on("time.custom")
             timeDates?.isHidden = !custom
+            fitPopover()
             if custom {
                 c.modified = nil
                 c.modifiedFrom = on("time.from") ? (popoverControls["time.fromDate"] as? NSDatePicker)?.dateValue : nil
@@ -707,6 +722,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         case .size:
             let custom = on("size.custom")
             sizeFields?.isHidden = !custom
+            fitPopover()
             if custom {
                 c.sizeMin = Double(text("size.min").trimmingCharacters(in: .whitespaces))
                 c.sizeMax = Double(text("size.max").trimmingCharacters(in: .whitespaces))
@@ -758,6 +774,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         guard let column = refineStepsColumn else { return }
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
         refineUndoButton?.isEnabled = !refinements.isEmpty
+        defer { fitPopover() }
         guard !refinements.isEmpty else { return }
         column.addArrangedSubview(ConditionForm.title(L("已加的步骤（%@）· 点 ✕ 移除", "\(refinements.count)")))
         for (i, step) in refinements.enumerated() {
