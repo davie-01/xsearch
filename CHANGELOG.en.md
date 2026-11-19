@@ -18,6 +18,7 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Improved
 
+- The content index no longer keeps its extraction processes while idle: they exit after 30 seconds with nothing to extract and start again (in a few milliseconds) when a file comes in, saving about 70–140 MB of memory when idle.
 - No blue keyboard focus rings anywhere (checkboxes, buttons, tables, Settings, the onboarding window and so on): the caret, the selection and the highlighted row show where you are.
 - Content indexing has a speed setting: Performance, Balanced (default) and Energy Saving. Energy Saving uses one process at background priority, measured at about 40% of Balanced's CPU energy but about 5.7 times the time; Performance finishes about 30% sooner than Balanced for similar energy. Low Power Mode always runs as Energy Saving, and Performance runs as Balanced on battery.
 - A zip member with an unsupported compression method (such as BZip2) or damaged data no longer fails the whole archive: the other members are indexed, the archive is marked partly indexed with the number skipped, and it fails only when nothing at all can be read. Members that are not wanted (type, per-file limit) are no longer checked for their compression method. Archives are extracted once more after updating.

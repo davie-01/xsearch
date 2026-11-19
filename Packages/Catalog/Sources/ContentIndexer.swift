@@ -107,6 +107,11 @@ public final class ContentIndexer: @unchecked Sendable {
     var limits = ExtractionLimits()
     var errorBackoff: TimeInterval = 5
     var settleDelay: TimeInterval = 30
+    /// The extraction processes exit after this long without an extraction and start again with
+    /// the next one (a few ms): an idle indexer holds no processes and none of their memory.
+    /// Long enough that a burst of saves keeps them.
+    var workerIdleTimeout: TimeInterval = 30
+    private var lastExtraction: Date?
     /// A burst of work has finished and nothing has arrived for a while (its own serial queue).
     public var onSettled: (@Sendable () -> Void)?
     private var lastWork: Date?
@@ -253,8 +258,19 @@ public final class ContentIndexer: @unchecked Sendable {
     private func cycleAndReschedule() {
         cycle()
         reportSettled()
+        stopIdleWorkers()
         scheduleNextCycle()
     }
+
+    /// On the queue, between cycles: no extraction is running.
+    private func stopIdleWorkers() {
+        guard let last = lastExtraction, Date().timeIntervalSince(last) >= workerIdleTimeout else { return }
+        lastExtraction = nil
+        workers.forEach { $0.stop(idle: true) }
+    }
+
+    /// Extraction processes alive now (tests, diagnostics).
+    var runningWorkers: Int { queue.sync { workers.filter { $0.pid != nil }.count } }
 
     /// Once per burst of work, after `settleDelay` with nothing to do.
     private func reportSettled() {
@@ -273,6 +289,9 @@ public final class ContentIndexer: @unchecked Sendable {
         // waiting for a retry, an elapsed settle delay pinned the timer to 50 ms until the retry.
         if let last = lastWork, status.pending == 0, rebuildId == nil, !needsRecovery {
             delay = min(delay, max(0.05, settleDelay - Date().timeIntervalSince(last)))
+        }
+        if let last = lastExtraction {
+            delay = min(delay, max(0.05, workerIdleTimeout - Date().timeIntervalSince(last)))
         }
         if needsRecovery {
             delay = max(0.05, errorBackoffUntil.timeIntervalSinceNow)
@@ -772,6 +791,7 @@ public final class ContentIndexer: @unchecked Sendable {
                 lock.lock(); results[i] = r; lock.unlock()
             }
         }
+        if !toExtract.isEmpty { lastExtraction = Date() }
         for (p, r) in zip(toExtract, results) { outcomes.append((p.task, r ?? .retry(after: 0, error: nil, countAttempt: false))) }
         results = []  // `outcomes` is now the only owner of the texts; staging releases them
         try stageAndCommit(&outcomes)

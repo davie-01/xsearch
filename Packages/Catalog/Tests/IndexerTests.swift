@@ -194,6 +194,20 @@ func crashAtEveryCommitStepRecovers(fault: ContentIndexer.Fault) throws {
     #expect(p.until { try p.search("tau") == ["b.txt"] })
 }
 
+@Test func idleWorkersExitAndStartAgain() throws {
+    let p = try Pipeline("idleworkers") { $0.workerIdleTimeout = 0.5 }
+    defer { p.stop() }
+    try p.box.write("docs/a.txt", "空闲之前 omega")
+    try p.start()
+    #expect(p.settle())
+    #expect(try p.search("omega") == ["a.txt"])
+    // Nothing more to extract: the processes exit on their own.
+    #expect(p.until(timeout: 10) { p.indexer.runningWorkers == 0 })
+    // The next change starts them again.
+    try p.box.write("docs/b.txt", "空闲之后 psi")
+    #expect(p.until { try p.search("psi") == ["b.txt"] })
+}
+
 @Test func clearedContentIndexWaitsWhilePaused() throws {
     let p = try Pipeline("clear")
     defer { p.stop() }

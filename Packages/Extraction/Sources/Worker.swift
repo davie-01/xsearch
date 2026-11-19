@@ -139,11 +139,14 @@ public final class ExtractionWorker: @unchecked Sendable {
 
     public var pid: Int32? { process?.processIdentifier }
 
-    public func stop() {
+    /// Ends the process; the next request starts a new one. `idle`: let go because there is
+    /// nothing to do, so the next start is not counted in `restarts` (crashes and kills are).
+    public func stop(idle: Bool = false) {
         if let p = process, p.isRunning { kill(p.processIdentifier, SIGKILL); Self.awaitExit(p) }
         process = nil
         toWorker = nil
         fromWorker = nil
+        if idle { started = false }
     }
 
     /// Kills the running request at once, from any thread; later requests return `.cancelled`

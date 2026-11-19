@@ -107,6 +107,14 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(worker.extract(path: tmp("missing.pdf"), limits: ExtractionLimits(), timeout: 10) != .crashed)
     guard case .extracted = worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) else { Issue.record("not restarted"); return }
     #expect(worker.restarts == 2)
+
+    // Let go while idle: the next request starts a process again, not counted as a restart.
+    let pid = worker.pid
+    worker.stop(idle: true)
+    #expect(worker.pid == nil)
+    if let pid { #expect(kill(pid, 0) != 0, "idle worker is gone") }
+    guard case .extracted = worker.extract(path: txt, limits: ExtractionLimits(), timeout: 10) else { Issue.record("not started again"); return }
+    #expect(worker.pid != nil && worker.restarts == 2)
 }
 
 @Test func slidesDispatchThroughRust() throws {
