@@ -187,7 +187,7 @@ struct OnboardingView: View {
                 Text(L("暂不添加也可以，之后随时设置")).font(.system(size: 12)).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 12)
-            Text(L("支持 Word（含 .doc、WPS）、PDF、Excel、PowerPoint（含旧版 .ppt）、OFD、网页、ePub、RTF、文本和代码，以及压缩包里的这些文件。"))
+            Text(L("支持 Word（含 .doc、WPS）、PDF、Excel、PowerPoint（含旧版 .ppt）、OpenDocument、OFD、网页、电子书（ePub、FB2）、RTF、邮件、XMind 思维导图、文本和代码，以及压缩包里的这些文件。"))
                 .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }

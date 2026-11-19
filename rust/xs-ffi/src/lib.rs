@@ -630,6 +630,11 @@ pub fn extract_html(path: String, max_file_bytes: u64) -> Result<ExtractionOutpu
 
 #[uniffi::export]
 pub fn extract_epub(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    // FictionBook shares the e-book type: one XML file rather than a package.
+    if Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("fb2")) {
+        let e = xs_parsers::fb2::fb2(Path::new(&path), limits(max_unpacked_bytes, max_unpacked_bytes))?;
+        return Ok(output(e, xs_parsers::fb2::FB2_EXTRACTOR_VERSION));
+    }
     let e = xs_parsers::web::epub(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
     Ok(output(e, xs_parsers::web::EPUB_EXTRACTOR_VERSION))
 }
@@ -787,6 +792,7 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.ebook".to_owned(), xs_parsers::web::EPUB_EXTRACTOR_VERSION.to_string()),
         ("extractor.archive".to_owned(), xs_parsers::archive::ARCHIVE_EXTRACTOR_VERSION.to_string()),
         ("extractor.odf".to_owned(), xs_parsers::odf::ODF_EXTRACTOR_VERSION.to_string()),
+        ("extractor.fb2".to_owned(), xs_parsers::fb2::FB2_EXTRACTOR_VERSION.to_string()),
         ("extractor.email".to_owned(), xs_parsers::email::EMAIL_EXTRACTOR_VERSION.to_string()),
         ("extractor.mindmap".to_owned(), xs_parsers::xmind::XMIND_EXTRACTOR_VERSION.to_string()),
     ])

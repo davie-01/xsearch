@@ -281,7 +281,7 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     let data = try source.data(from: NSRange(location: 0, length: source.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.openDocument])
     try data.write(to: URL(fileURLWithPath: path))
     let r = try Extractor.extract(path: path, limits: ExtractionLimits())
-    #expect(r.method == "odt" && r.state == "complete" && r.extractorVersion == Extractor.odfVersion)
+    #expect(r.method == "odt" && r.state == "complete" && r.extractorVersion == Extractor.separateVersion("odf"))
     #expect(r.text.contains("项目计划") && r.text.contains("第二段 验收标准 支付条件"))
     let anchors = try JSONDecoder().decode([AnchorJSON].self, from: Data(r.anchorsJSON.utf8))
     #expect(anchors.map(\.kind) == ["paragraph", "paragraph"])
@@ -311,4 +311,14 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     let r = try Extractor.extract(path: dir + "/plan.xmind", limits: ExtractionLimits())
     #expect(r.method == "xmind" && r.state == "complete" && r.extractorVersion == Extractor.version(of: .mindmap))
     #expect(r.text == "画布 1\n验收\n支付条件\n")
+}
+
+@Test func fictionBookSharesTheEbookType() throws {
+    let path = tmp("novel.fb2")
+    try #"<?xml version="1.0" encoding="utf-8"?><FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body><section><title><p>第一章</p></title><p>出发</p></section></body></FictionBook>"#
+        .write(toFile: path, atomically: true, encoding: .utf8)
+    #expect(ExtractionKind.of(path: path) == .ebook)
+    let r = try Extractor.extract(path: path, limits: ExtractionLimits())
+    #expect(r.method == "fb2" && r.state == "complete" && r.extractorVersion == Extractor.separateVersion("fb2"))
+    #expect(r.text == "第一章\n出发\n")
 }

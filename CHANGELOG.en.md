@@ -8,6 +8,7 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Added
 
+- The content index reads FictionBook e-books (.fb2, inside archives too): title, authors, annotation, keywords and the text (poems, citations and tables included), then the notes. Located by chapter and paragraph; the encoding declared in the XML header (windows-1251, for example) is honoured, and malformed files are read leniently like web pages. They count as the e-book type, shown in Settings as “E-book (epub, fb2)”.
 - The content index reads XMind mind maps (.xmind), both the `content.json` of current versions and the `content.xml` of XMind 8 and earlier: topics (floating and summary topics included), labels, notes, boundary and relationship text, located by sheet. Encrypted maps cannot be read. Settings and the Full Window have a new “Mind map” type.
 - The content index reads email messages (.eml, and Apple Mail .emlx): subject, sender, recipients, Cc, date, body and attachment names, located by “Headers / Body / Attachments”. MIME multipart messages, encoded words (GBK or UTF-8 subjects, for example) and other character sets are handled; HTML-only bodies are read like web pages. Attachment contents are not read yet. Settings and the Full Window have a new “Email” type.
 - The content index reads OpenDocument text (.odt) and presentations (.odp): .odt located by paragraph and table cell, with footnotes and text frames; .odp by slide, speaker notes after their slide. They count as the Word and PowerPoint types (.ods already counted as Excel).

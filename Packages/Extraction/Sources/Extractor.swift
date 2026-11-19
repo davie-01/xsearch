@@ -57,10 +57,11 @@ public enum Extractor {
     public static let rtfVersion: UInt64 = 1
     public static let wpsVersion: UInt64 = 2
 
-    /// OpenDocument text and presentations (.odt / .odp) have a parser of their own inside the
-    /// Word and slide types: versioned apart, so a change re-extracts only them.
-    public static var odfVersion: UInt64 { engineVersions()["extractor.odf"].flatMap(UInt64.init) ?? 1 }
-    public static let odfExtensions: Set<String> = ["odt", "odp"]
+    /// Formats with a parser of their own inside a broader type (OpenDocument text and
+    /// presentations in Word and slides, FictionBook in e-books): versioned apart, so a change
+    /// re-extracts only them. Engine version key "extractor.<key>".
+    public static let separatelyVersioned: [String: Set<String>] = ["odf": ["odt", "odp"], "fb2": ["fb2"]]
+    public static func separateVersion(_ key: String) -> UInt64 { engineVersions()["extractor.\(key)"].flatMap(UInt64.init) ?? 1 }
 
     /// Current extractor version per type (Rust ones come from the engine).
     public static func version(of type: ContentType) -> UInt64 {
@@ -137,7 +138,8 @@ public enum Extractor {
             // Not bound by the single-file limit: members are (size, total and count limits).
             return try archive(path, limits: limits)
         case .ebook:
-            // An Apple Books ePub can be a folder: its size is the sum of its files.
+            // An Apple Books ePub can be a folder: its size is the sum of its files. FB2 is one file.
+            if (path as NSString).pathExtension.lowercased() == "fb2" { try checkSize(path, limits) }
             return try rust { try extractEpub(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
         case .sheet:
             try checkSize(path, limits)

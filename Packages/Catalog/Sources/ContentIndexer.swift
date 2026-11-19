@@ -411,7 +411,7 @@ public final class ContentIndexer: @unchecked Sendable {
 
     static func extractorFingerprint() -> [String: UInt64] {
         var versions = Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
-        versions["odf"] = Extractor.odfVersion
+        for key in Extractor.separatelyVersioned.keys { versions[key] = Extractor.separateVersion(key) }
         return versions
     }
 
@@ -481,7 +481,8 @@ public final class ContentIndexer: @unchecked Sendable {
             if !changed.isEmpty {
                 _ = try requeue { name, _ in
                     let ext = (name as NSString).pathExtension.lowercased()
-                    return Extractor.odfExtensions.contains(ext) ? changed.contains("odf") : ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false
+                    if let key = Extractor.separatelyVersioned.first(where: { $0.value.contains(ext) })?.key { return changed.contains(key) }
+                    return ContentType.of(name: name).map { changed.contains($0.rawValue) } ?? false
                 }
             }
         }

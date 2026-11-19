@@ -6,6 +6,7 @@ use xs_index::{Anchor, AnchorKind, ExtractState};
 
 pub mod docx;
 pub mod email;
+pub mod fb2;
 pub mod odf;
 pub mod office;
 pub mod web;

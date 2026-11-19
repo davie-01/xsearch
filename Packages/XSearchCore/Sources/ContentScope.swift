@@ -71,7 +71,7 @@ public enum ContentType: String, Codable, Sendable, CaseIterable {
         case .mindmap: ["xmind"]
         case .ofd: ["ofd"]
         case .web: ["html", "htm", "xhtml", "shtml"]
-        case .ebook: ["epub"]
+        case .ebook: ["epub", "fb2"]
         case .rtf: ["rtf"]
         case .archive: ["zip", "tar", "gz", "tgz", "7z", "rar"]
         case .text: [
