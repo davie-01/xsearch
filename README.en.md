@@ -17,6 +17,7 @@ XSearch is a native menu bar app for Apple silicon Macs. Press `⌥Space` to ope
 | Full Window and Reader | Filter and review large result sets in the Full Window; read hits in context and step through them in the Reader. How precisely a PDF or similar file opens at the hit depends on its format and the viewer you use. |
 | Search inside archives | Index the supported files inside archives, see which member matched, and extract a single member to open it. |
 | Separate index scopes | Manage folders, exclusions and status for names and content separately. The content index can also be limited by file type and file size. |
+| Index control | Changes are picked up in real time. Pause content indexing, check everything again now, rescan a single folder, choose an indexing speed, and see and clear what the indexes take up. |
 
 ### Which documents can be searched
 
@@ -79,6 +80,21 @@ Both modes support Boolean combinations and `dir:`, `ext:`, `size:` and `dm:`. N
 
 First check the search mode, then look at **Settings → Index Scope** for the folder, exclusion rules, file types and size limit. Use **Diagnosis** to check the path and its index state. Right after you add a folder or change a file, its text may still be waiting to be extracted. Protected folders may need permission in **System Settings → Privacy & Security**; Full Disk Access is optional. Reopen XSearch after granting access.
 
+If a file is in scope but its text cannot be found, look at the content index part of **Settings → Index Scope**: when files failed to extract it shows how many, with **Show Failed Files…** to see why each file failed and extract it again. If you suspect changes were missed, **Update Now** checks the whole scope again, or **Rescan** a single folder; if one content result looks wrong, choose **Index This File Again** from its context menu.
+
+### Managing the indexes
+
+XSearch follows file changes in real time through FSEvents, so there is normally nothing to update by hand. These actions are in the menu bar or Settings:
+
+| Action | Where | What it does |
+| --- | --- | --- |
+| Pause / Resume Content Indexing | Menu bar; **Settings → Index Scope** | While paused, no file content is extracted; what is indexed stays searchable and the name index keeps updating. Changes in the meantime are noted and caught up after you resume. The paused state survives a restart. |
+| Update Index Now | Menu bar; **Settings → Index Scope** | Checks the whole scope again, for when you suspect changes were missed (say, an external drive changed on another Mac). Each folder can also be **Rescan**ned on its own. |
+| Index This File Again | Context menu of a content result | Extracts one file again. |
+| Show Failed Files | **Settings → Index Scope** (when there are failures) | Lists the files that timed out, crashed the reader, used too much memory or could not be recognised, with the reason; extract the selected ones or all again, or copy the list for a report. |
+| Indexing speed | **Settings → Index Scope** | **Performance**: several processes in parallel (2 to 4, depending on CPU cores), the fastest to finish; runs as Balanced on battery. **Balanced** (default): 2 processes. **Energy Saving**: 1 process at background priority, the least energy, slower to finish. Low Power Mode runs as Energy Saving. |
+| Index storage and clearing | **Settings → Privacy & Data** | Shows what the name index, content index, personal data and temporary files take up, and cleans up leftover files. **Clear Content Index** or **Clear All Indexes** deletes the index files and pauses content indexing; resuming extracts again (clearing all rescans the name index at once, so name search keeps working). Favorites, recents and settings are always kept. |
+
 ## Build from source
 
 You need an Apple silicon Mac, a full Xcode with the macOS 26 SDK and Swift 6.2 or later, and Rust stable (with Cargo) for Apple silicon. Finish installing components in Xcode and make sure `xcode-select -p` points to it. The build scripts download the locked versions of the Rust dependencies and Sparkle, so the first build needs a network connection.
@@ -111,7 +127,7 @@ Before the first Swift test run in a clean checkout, build the app or run `bash 
 
 ## Data on your Mac and feedback
 
-Indexes and records live in `~/Library/Application Support/XSearch/`. The content index contains the extracted text. You can rebuild indexes under **Settings → Privacy & Data**; favorites and recently opened items are kept in a separate database. To uninstall, quit the app and move it to the Trash. To remove its data as well, back up any favorites and history you want to keep before deleting the data folder. All locations are listed in [Files on Your Mac](docs/STORAGE.en.md).
+Indexes and records live in `~/Library/Application Support/XSearch/`. The content index contains the extracted text. Under **Settings → Privacy & Data** you can see what each part takes up and clear or rebuild the indexes; favorites and recently opened items are kept in a separate database and survive clearing. To uninstall, quit the app and move it to the Trash. To remove its data as well, back up any favorites and history you want to keep before deleting the data folder. All locations are listed in [Files on Your Mac](docs/STORAGE.en.md).
 
 If you run into a problem, open a GitHub **Issue** with your macOS version, XSearch version, search mode and the smallest steps that reproduce it. If synthetic files reproduce it, attach those.
 
