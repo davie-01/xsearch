@@ -29,6 +29,13 @@ import Foundation
     func stop(reply: @escaping () -> Void)
 }
 
+/// The app's side of the connection: the service tells it when the indexer's status changes
+/// (at most about once a second while it works, never while idle), instead of being polled.
+@objc public protocol IndexServiceClientProtocol {
+    /// JSON `IndexServiceSnapshot`.
+    func statusChanged(_ snapshot: Data)
+}
+
 /// What the app shows and needs: progress, and the instance directory readers open.
 public struct IndexServiceSnapshot: Codable, Sendable, Equatable {
     public var status: ContentIndexer.Status

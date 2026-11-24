@@ -9,8 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Content indexer in IndexService.xpc (in-process without the bundled service).
     private var indexer: IndexServiceClient?
     private let power = PowerState()
-    private var statusTimer: Timer?
-    private var menuOpen = false
     private var rebuildingNames = false
     private let contentStatusItem = NSMenuItem(title: L("内容索引：正在打开"), action: nil, keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: L("暂停内容索引"), action: nil, keyEquivalent: "")
@@ -108,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Callbacks shared by every launcher instance (startup and index rebuild).
     private func wireLauncher() {
-        launcher.onVisibilityChange = { [weak self] in self?.updateStatusTimer() }
+        launcher.onVisibilityChange = { [weak self] in self?.refreshStatusIfShown() }
         launcher.openSettings = { [weak self] in self?.openSettings(tab: .scope) }
         launcher.openDiagnostics = { [weak self] in self?.openSettings(tab: .diagnostics) }
         launcher.onRead = { [weak self] hit, expression, n, live in self?.reader.show(hit, expression: expression, live: live, startAt: n) }
@@ -189,13 +187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         names.start(scope: nameScope, content: contentScope)
         startIndexer()
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                // After the close: the window still counts as visible during this notification.
-                DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateStatusTimer() } }
-            }
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshStatusIfShown() }
         }
-        updateStatusTimer()
 
         buildStatusItem()
         installKeyMenu()
@@ -342,32 +336,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        menuOpen = true
         statusChanged()
-        updateStatusTimer()
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        menuOpen = false
-        updateStatusTimer()
-    }
-
-    /// Status is polled only while someone can see it. Also how readers learn the index path
-    /// after a rebuild, so opening the launcher refreshes at once.
-    private func updateStatusTimer() {
-        let visible = menuOpen || launcher?.isVisible == true || NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
-        guard visible != (statusTimer != nil) else { return }
-        if visible {
-            let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.statusChanged() }
-            }
-            timer.tolerance = 0.5
-            statusTimer = timer
-            statusChanged()
-        } else {
-            statusTimer?.invalidate()
-            statusTimer = nil
-        }
+    /// Status is pushed, not polled: the name index's from this process (`onStatus`), the
+    /// content index's (figures and the instance readers open) by IndexService when it changes.
+    /// What comes into view pulls once anyway, so it never shows a message that went missing.
+    private func refreshStatusIfShown() {
+        guard launcher?.isVisible == true || NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
+        statusChanged()
     }
 
     private func statusChanged() {
@@ -392,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
         if st.failed > 0 { parts.append(L("%@ 个失败", "\(st.failed)")) }
         contentStatusItem.title = parts.joined(separator: " · ")
+        launcher?.updateStatus()
         settings?.refresh()
     }
 

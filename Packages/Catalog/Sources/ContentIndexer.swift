@@ -88,7 +88,7 @@ public final class ContentIndexer: @unchecked Sendable {
     private var lastBatch: UInt64 = 0
     public private(set) var instanceId: String {
         get { status.instanceId }
-        set { state.withLock { $0.instanceId = newValue } }
+        set { setState { $0.instanceId = newValue } }
     }
 
     // Tunables (tests shorten them).
@@ -165,6 +165,19 @@ public final class ContentIndexer: @unchecked Sendable {
 
     public var status: Status { state.withLock { $0 } }
 
+    /// The status changed (any thread): IndexService tells the app instead of being polled.
+    public var onStatusChange: (@Sendable () -> Void)?
+
+    /// Every status change goes through here, so `onStatusChange` sees each one (and only those).
+    private func setState(_ change: (inout Status) -> Void) {
+        let changed = state.withLockUnchecked { s in
+            let before = s
+            change(&s)
+            return s != before
+        }
+        if changed { onStatusChange?() }
+    }
+
     /// Instance being rebuilt (written to) while readers stay on `instanceId` until it catches up.
     private var rebuildId: String?
 
@@ -201,7 +214,7 @@ public final class ContentIndexer: @unchecked Sendable {
             if !paused { workers.forEach { $0.resume() } }
             Extractor.removeStaleArchiveScratch()
             stopped = false
-            state.withLock { $0.running = true }
+            setState { $0.running = true }
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + 0.2)
             t.setEventHandler { [weak self] in
@@ -223,7 +236,7 @@ public final class ContentIndexer: @unchecked Sendable {
             writer = nil
             catalog = nil
             workers.forEach { $0.stop() }
-            state.withLock { $0.running = false }
+            setState { $0.running = false }
         }
     }
 
@@ -236,7 +249,7 @@ public final class ContentIndexer: @unchecked Sendable {
             defer { old = p }
             return old != p
         }
-        state.withLock { $0.paused = p }
+        setState { $0.paused = p }
         guard changed else { return }
         if p {
             workers.forEach { $0.cancel() }
@@ -325,7 +338,7 @@ public final class ContentIndexer: @unchecked Sendable {
         if try w.lastCommit() == nil { try w.commit(batchId: 0) }  // readers can open at once
         committedSeq = try w.appliedSeqs()
         lastBatch = try w.lastCommit()?.batchId ?? 0
-        state.withLock { $0.committedBatches = lastBatch }
+        setState { $0.committedBatches = lastBatch }
     }
 
     /// Replaces an unreadable index instance (schema mismatch) with a new, empty one; every
@@ -447,7 +460,7 @@ public final class ContentIndexer: @unchecked Sendable {
                 try refreshCounts()
                 scheduleNextCycle()
             } catch {
-                state.withLock { $0.lastError = String(describing: error) }
+                setState { $0.lastError = String(describing: error) }
             }
         }
     }
@@ -644,7 +657,7 @@ public final class ContentIndexer: @unchecked Sendable {
         if let writer {
             committedSeq = try writer.appliedSeqs()
             lastBatch = try writer.lastCommit()?.batchId ?? 0
-            state.withLock { $0.committedBatches = lastBatch }
+            setState { $0.committedBatches = lastBatch }
         }
         needsRecovery = false
     }
@@ -699,7 +712,7 @@ public final class ContentIndexer: @unchecked Sendable {
             if worked { lastWork = Date() }
             try finishRebuildIfCaughtUp()
             removeRetiredInstances()
-            if status.lastError != nil { state.withLock { $0.lastError = nil } }
+            if status.lastError != nil { setState { $0.lastError = nil } }
         } catch is Crash {
             crash()
         } catch {
@@ -709,7 +722,7 @@ public final class ContentIndexer: @unchecked Sendable {
             committedSeq = (try? writer?.appliedSeqs()) ?? committedSeq
             needsRecovery = true
             errorBackoffUntil = Date().addingTimeInterval(errorBackoff)
-            state.withLock { $0.lastError = String(describing: error) }
+            setState { $0.lastError = String(describing: error) }
         }
     }
 
@@ -720,7 +733,7 @@ public final class ContentIndexer: @unchecked Sendable {
         writer = nil
         catalog = nil
         workers.forEach { $0.stop() }
-        state.withLock { $0.running = false }
+        setState { $0.running = false }
     }
 
     private func check(_ f: Fault) throws {
@@ -963,7 +976,7 @@ public final class ContentIndexer: @unchecked Sendable {
         try confirm(batch: batch)
         for (fid, seq) in stagedSeq { committedSeq[fid] = seq }
         lastBatch = batch
-        state.withLock { $0.committedBatches = batch }
+        setState { $0.committedBatches = batch }
         try check(.afterConfirm)
     }
 
@@ -1026,7 +1039,7 @@ public final class ContentIndexer: @unchecked Sendable {
         let pending = try p.first { p in Int(p.int(0)) } ?? 0
         guard full else {
             catalog.db.resetStatements()
-            state.withLock { $0.pending = pending }
+            setState { $0.pending = pending }
             return
         }
         lastFullCount = Date()
@@ -1035,6 +1048,6 @@ public final class ContentIndexer: @unchecked Sendable {
         let i = try catalog.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state IN (1, 2, 3)")
         let indexed = try i.first { i in Int(i.int(0)) } ?? 0
         catalog.db.resetStatements()
-        state.withLock { $0.pending = pending; $0.failed = failed; $0.indexed = indexed }
+        setState { $0.pending = pending; $0.failed = failed; $0.indexed = indexed }
     }
 }

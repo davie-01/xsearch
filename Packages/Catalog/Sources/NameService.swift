@@ -447,17 +447,27 @@ public final class NameService: @unchecked Sendable {
         try catalog.setMeta("fsevents_uuids", uuids)
         try catalog.setMeta("fingerprint", fingerprint)
         restartWatcher(since: start)
+        process()
+    }
 
+    /// Runs on `queue`. Something is waiting to be written (an event cursor kept in memory, a
+    /// base newer than the snapshot on disk): one save `housekeepingInterval` after the first
+    /// such change, taking whatever follows with it. Nothing to save, no timer and no wake-up.
+    private func scheduleHousekeeping() {
+        guard persistTimer == nil, !isShutDown else { return }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         // A few seconds either way do not matter here: the system may fold it into other wake-ups.
-        timer.schedule(deadline: .now() + housekeepingInterval, repeating: housekeepingInterval, leeway: .seconds(5))
+        timer.schedule(deadline: .now() + housekeepingInterval, leeway: .seconds(5))
         timer.setEventHandler { [weak self] in
-            self?.saveCursor()
-            try? self?.persist(force: false)
+            guard let self else { return }
+            persistTimer?.cancel(); persistTimer = nil
+            saveCursor()
+            try? persist(force: false)
+            // The snapshot waits 25 s after the last one: still newer, so look again later.
+            if unsavedCursor != nil || state.withLock({ $0.view.base.seq }) > persistedSeq { scheduleHousekeeping() }
         }
         timer.resume()
         persistTimer = timer
-        process()
     }
 
     private func restartWatcher(since: UInt64) {
@@ -513,6 +523,7 @@ public final class NameService: @unchecked Sendable {
         // filtered out again.
         guard !ops.isEmpty else {
             unsavedCursor = maxId
+            scheduleHousekeeping()
             return
         }
         do {
@@ -522,7 +533,7 @@ public final class NameService: @unchecked Sendable {
         } catch { fail(error) }
     }
 
-    /// Runs on `queue`: the 30 s timer, scope changes, shutdown.
+    /// Runs on `queue`: housekeeping, scope changes, shutdown.
     private func saveCursor() {
         guard let cursor = unsavedCursor, let catalog else { return }
         if (try? catalog.setMeta("fsevents_last_id", String(cursor))) != nil { unsavedCursor = nil }
@@ -613,6 +624,7 @@ public final class NameService: @unchecked Sendable {
                 s.lastMergeDuration = s.lastMergeEnd.timeIntervalSince(began)
             }
             updateStatus { _ in }
+            queue.async { [weak self] in self?.scheduleHousekeeping() }
             scheduleMerge()
         }
     }
@@ -631,6 +643,7 @@ public final class NameService: @unchecked Sendable {
             s.lastMergeEnd = Date()
         }
         updateStatus { _ in }
+        scheduleHousekeeping()
     }
 
     /// Writes the base snapshot when it advanced, then drops tombstones it covers. Runs on `queue`.

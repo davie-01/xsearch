@@ -9,6 +9,15 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
     private var indexer: ContentIndexer?
     private var directory: String?
     private var shape: (workers: Int, background: Bool)?
+    /// The app, told about status changes (set when it connects).
+    var client: IndexServiceClientProtocol? {
+        get { lock.withLock { _client } }
+        set { lock.withLock { _client = newValue } }
+    }
+    private var _client: IndexServiceClientProtocol?
+    private let notifyQueue = DispatchQueue(label: "xsearch.service.status")
+    private var lastNotified = Date.distantPast  // on notifyQueue
+    private var notifyScheduled = false  // on notifyQueue
 
     func start(dataDirectory: String, workerPath: String, workers: Int, background: Bool, maxFileBytes: UInt64, paused: Bool, reply: @escaping (String?) -> Void) {
         lock.lock()
@@ -26,6 +35,7 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         ix.setMaxFileBytes(maxFileBytes)
         ix.setPaused(paused)
         ix.onSettled = { [weak self] in self?.recycleIfLarge() }
+        ix.onStatusChange = { [weak self] in self?.statusChanged() }
         do {
             try ix.start()
             indexer = ix
@@ -39,12 +49,36 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
     }
 
     func snapshot(reply: @escaping (Data) -> Void) {
+        reply(snapshotData())
+    }
+
+    private func snapshotData() -> Data {
         lock.lock()
         let ix = indexer
         lock.unlock()
         let status = ix?.status ?? ContentIndexer.Status()
         let snap = IndexServiceSnapshot(status: status, indexPath: ix?.indexURL(of: status).path)
-        reply((try? JSONEncoder().encode(snap)) ?? Data())
+        return (try? JSONEncoder().encode(snap)) ?? Data()
+    }
+
+    /// At most one message a second while the indexer works: the first change goes out at once,
+    /// later ones within the second fold into one at its end. Idle sends nothing.
+    private func statusChanged() {
+        notifyQueue.async { [self] in
+            guard !notifyScheduled else { return }
+            let wait = 1 - Date().timeIntervalSince(lastNotified)
+            if wait <= 0 { sendStatus(); return }
+            notifyScheduled = true
+            notifyQueue.asyncAfter(deadline: .now() + wait) { [self] in
+                notifyScheduled = false
+                sendStatus()
+            }
+        }
+    }
+
+    private func sendStatus() {
+        lastNotified = Date()
+        client?.statusChanged(snapshotData())
     }
 
     func rebuildContentIndex(reply: @escaping (String?) -> Void) {
@@ -137,6 +171,8 @@ final class Delegate: NSObject, NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         connection.exportedInterface = NSXPCInterface(with: IndexServiceProtocol.self)
         connection.exportedObject = service
+        connection.remoteObjectInterface = NSXPCInterface(with: IndexServiceClientProtocol.self)
+        service.client = connection.remoteObjectProxy as? IndexServiceClientProtocol
         // The app quit or crashed: finish cleanly and leave.
         connection.invalidationHandler = { [service] in
             service.stop {}

@@ -10,6 +10,13 @@ private struct UncheckedConnection: @unchecked Sendable {
     init(_ connection: NSXPCConnection) { self.connection = connection }
 }
 
+/// Receives the service's status messages (on an XPC queue) for one connection.
+private final class StatusReceiver: NSObject, IndexServiceClientProtocol, @unchecked Sendable {
+    let onStatus: @Sendable (Data) -> Void
+    init(_ onStatus: @escaping @Sendable (Data) -> Void) { self.onStatus = onStatus }
+    func statusChanged(_ snapshot: Data) { onStatus(snapshot) }
+}
+
 @MainActor
 final class IndexServiceClient {
     private let dataDirectory: URL
@@ -60,6 +67,7 @@ final class IndexServiceClient {
     func start() {
         guard Self.serviceBundled && ProcessInfo.processInfo.environment["XS_INPROCESS_INDEX"] != "1" else {
             let ix = ContentIndexer(directory: dataDirectory, workerExecutable: worker, workers: mode.workers, background: mode.background)
+            ix.onStatusChange = { [weak self] in Task { @MainActor in self?.refresh() } }
             ix.setMaxFileBytes(maxFileBytes)
             ix.setPaused(paused)
             do { try ix.start(); local = ix } catch { onError?(String(describing: error)) }
@@ -76,6 +84,11 @@ final class IndexServiceClient {
         let gen = generation
         let c = NSXPCConnection(serviceName: IndexServiceInfo.serviceName)
         c.remoteObjectInterface = NSXPCInterface(with: IndexServiceProtocol.self)
+        // The service tells us when the status changes; nothing is polled.
+        c.exportedInterface = NSXPCInterface(with: IndexServiceClientProtocol.self)
+        c.exportedObject = StatusReceiver { [weak self] data in
+            Task { @MainActor in self?.apply(data, generation: gen) }
+        }
         // A crash or kill: launchd starts the service again on the next message.
         c.interruptionHandler = { [weak self] in
             Task { @MainActor in
@@ -158,15 +171,17 @@ final class IndexServiceClient {
         }
         let gen = generation
         proxy?.snapshot { [weak self] data in
-            guard let snap = try? JSONDecoder().decode(IndexServiceSnapshot.self, from: data) else { return }
-            Task { @MainActor in
-                // A reply from before a stop or reconnect must not bring back an old path.
-                guard let self, !self.stopping, gen == self.generation else { return }
-                self.snapshot = snap
-                self.setPath(snap.indexPath)
-                self.onUpdate?()
-            }
+            Task { @MainActor in self?.apply(data, generation: gen) }
         }
+    }
+
+    /// A snapshot pulled or pushed. One from before a stop or reconnect must not bring back an
+    /// old path.
+    private func apply(_ data: Data, generation gen: Int) {
+        guard !stopping, gen == generation, let snap = try? JSONDecoder().decode(IndexServiceSnapshot.self, from: data) else { return }
+        snapshot = snap
+        setPath(snap.indexPath)
+        onUpdate?()
     }
 
     /// The catalog queued tasks.
