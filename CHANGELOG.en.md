@@ -4,7 +4,7 @@
 
 User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
-## Unreleased
+## 0.3.0 — 2026-11-25
 
 ### Added
 
@@ -18,6 +18,8 @@ User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
 ### Improved
 
+- The launcher looks like Spotlight on macOS 26, measured from it: the glass no longer carries a light-grey (dark mode) or white (light mode) veil, keeps the colour of what lies behind and reads more clearly; result rows are 56 pt high with 17 pt names, a 14.5 pt second line and icons as large as Spotlight's; the selection, the filter pills and the hairlines take Spotlight's colours in each appearance; the pills sit 11 pt below the rule; the list shows whole rows only, so the last one is never cut; search results no longer carry an “Apps” heading; once the list scrolls, a hairline under the pills clips the rows passing beneath it.
+- Icons follow System Settings → Appearance → Icon & widget style: with Dark, app, folder and file icons are shown dark, as in Spotlight and the Dock.
 - The content index no longer keeps its extraction processes while idle: they exit after 30 seconds with nothing to extract and start again (in a few milliseconds) when a file comes in, saving about 70–140 MB of memory when idle.
 - No blue keyboard focus rings anywhere (checkboxes, buttons, tables, Settings, the onboarding window and so on): the caret, the selection and the highlighted row show where you are.
 - Content indexing has a speed setting: Performance, Balanced (default) and Energy Saving. Energy Saving uses one process at background priority, measured at about 40% of Balanced's CPU energy but about 5.7 times the time; Performance finishes about 30% sooner than Balanced for similar energy. Low Power Mode always runs as Energy Saving, and Performance runs as Balanced on battery.

@@ -8,7 +8,7 @@ final class ResultRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard !isGroup, selectionHighlightStyle != .none else { return }
         Theme.selectionFill.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 1), xRadius: 14, yRadius: 14).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 0), xRadius: 20, yRadius: 20).fill()
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
@@ -25,7 +25,7 @@ final class GroupHeaderView: NSTableCellView {
         addSubview(label)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
         ])
     }
 
@@ -40,6 +40,12 @@ final class ResultCellView: NSTableCellView {
     let details = NSTextField(labelWithString: "")
     let path = NSTextField(labelWithString: "")
     let meta = NSTextField(labelWithString: "")
+    /// Spotlight (macOS 26) draws icons at one visible size, about 35 pt: an app icon carries
+    /// its own margin, so its frame is larger than a folder's or a document's.
+    private static let appIconSide: CGFloat = 44
+    private static let fileIconSide: CGFloat = 36
+    private var iconWidth: NSLayoutConstraint!
+    private var iconHeight: NSLayoutConstraint!
 
     init() {
         super.init(frame: .zero)
@@ -69,12 +75,13 @@ final class ResultCellView: NSTableCellView {
         path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         meta.setContentCompressionResistancePriority(.required, for: .horizontal)
         meta.setContentHuggingPriority(.required, for: .horizontal)
+        iconWidth = icon.widthAnchor.constraint(equalToConstant: Self.fileIconSide)
+        iconHeight = icon.heightAnchor.constraint(equalToConstant: Self.fileIconSide)
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: 35.5),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 34),
-            icon.heightAnchor.constraint(equalToConstant: 34),
-            name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            iconWidth, iconHeight,
+            name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 71),
             name.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             name.trailingAnchor.constraint(lessThanOrEqualTo: meta.leadingAnchor, constant: -12),
             details.leadingAnchor.constraint(equalTo: name.leadingAnchor),
@@ -101,7 +108,10 @@ final class ResultCellView: NSTableCellView {
 
     func configure(_ item: ResultItem, terms: [String]) {
         // System file icons (apps show their own icon), as in Spotlight. NSWorkspace caches them.
-        icon.image = item.kind == .app ? appIcon(atPath: item.path) : NSWorkspace.shared.icon(forFile: item.path)
+        icon.image = item.kind == .app ? appIcon(atPath: item.path) : fileIcon(atPath: item.path)
+        let side = item.kind == .app ? Self.appIconSide : Self.fileIconSide
+        iconWidth.constant = side
+        iconHeight.constant = side
         path.stringValue = PathUtil.abbreviate((item.path as NSString).deletingLastPathComponent, home: NSHomeDirectory())
         details.stringValue = Self.details(item)
         meta.stringValue = item.meta

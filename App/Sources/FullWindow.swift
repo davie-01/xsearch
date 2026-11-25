@@ -1120,7 +1120,7 @@ final class FullWindowController: NSWindowController, NSWindowDelegate, QLPrevie
         switch id {
         case "name":
             cell.textField?.stringValue = r.name
-            cell.imageView?.image = r.hit?.icon ?? (r.kind == .app ? appIcon(atPath: r.path) : NSWorkspace.shared.icon(forFile: r.path))
+            cell.imageView?.image = r.hit?.icon ?? (r.kind == .app ? appIcon(atPath: r.path) : fileIcon(atPath: r.path))
         case "dir": cell.textField?.stringValue = PathUtil.abbreviate(r.dir, home: NSHomeDirectory())
         case "kind": cell.textField?.stringValue = kindLabel(r)
         case "hits": cell.textField?.stringValue = r.hits.map(String.init) ?? ""

@@ -141,6 +141,15 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private var defaultApps: [String: URL?] = [:]
     private let table = ResultTable()
     private let scroll = NSScrollView()
+    /// Spotlight's scroll edge: a hairline under the pills, shown only while rows are scrolled
+    /// up out of sight (they pass under it into the list's top inset).
+    private let scrollEdge = RuleView()
+    private var scrollEdgeShown = false
+    /// The gap above the list. A gap, not a content inset: rows must be clipped at the list's top
+    /// edge (where the scroll edge sits), as in Spotlight, not slide on into the inset.
+    private let listGap = NSView()
+    private var listGapHeight: NSLayoutConstraint!
+    private static let listGapSize: CGFloat = 4
     private let notice = NSStackView()
     private let hints = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
@@ -261,7 +270,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         mainContent.addSubview(body)
 
         let icon = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("搜索"))!)
-        icon.symbolConfiguration = .init(pointSize: 22, weight: .medium)
+        icon.symbolConfiguration = .init(pointSize: 24, weight: .medium)
         icon.contentTintColor = .secondaryLabelColor
 
         field.isBordered = false
@@ -310,7 +319,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         headerRow.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(headerRow)
         NSLayoutConstraint.activate([
-            headerRow.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 20),
+            headerRow.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 22),
             headerRow.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -20),
             headerRow.centerYAnchor.constraint(equalTo: header.centerYAnchor),
         ])
@@ -324,14 +333,16 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         ruleRow.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
 
         filters.orientation = .horizontal
-        // Measured from Spotlight on macOS 26: 26 pt pills, 14.5 pt text, 8.5 pt padding, 8 pt apart.
+        // Measured from Spotlight on macOS 26: 26 pt pills, 15 pt text, 8 pt padding, 8 pt apart,
+        // 11 pt below the rule. Top alignment: centred, the stack split the insets evenly and the
+        // pills sat 6 pt under the rule whatever the top inset said.
         filters.spacing = 8
-        filters.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 4, right: 20)
-        filters.alignment = .centerY
+        filters.edgeInsets = NSEdgeInsets(top: 11, left: 20, bottom: 6, right: 20)
+        filters.alignment = .top
         filters.isHidden = true
         chips.orientation = .horizontal
         chips.spacing = 8
-        chips.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 4, right: 20)
+        chips.edgeInsets = NSEdgeInsets(top: 11, left: 20, bottom: 6, right: 20)
         chips.alignment = .centerY
 
         let column = NSTableColumn(identifier: .init("main"))
@@ -361,7 +372,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 4, right: 0)
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(listScrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
 
         notice.orientation = .vertical
         notice.alignment = .leading
@@ -377,7 +390,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         status.lineBreakMode = .byTruncatingHead
         let footer = NSStackView(views: [hints, NSView(), status])
         footer.orientation = .horizontal
-        footer.edgeInsets = NSEdgeInsets(top: 6, left: 22, bottom: 10, right: 22)
+        footer.edgeInsets = NSEdgeInsets(top: 7, left: 22, bottom: 11, right: 22)
         hints.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         contentPane = ContentPane(searcher: session.content)
@@ -391,14 +404,26 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         contentPane.onRead = { [weak self] hit, n in self?.openReader(hit, at: n) }
         contentPane.isHidden = true
         let stack = rootStack
-        for v in [ruleRow, filters, chips, scroll, contentPane!, notice, footer] { stack.addArrangedSubview(v) }
+        for v in [ruleRow, filters, chips, listGap, scroll, contentPane!, notice, footer] { stack.addArrangedSubview(v) }
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
         body.addSubview(stack)
-        for v in [ruleRow, filters, chips, scroll, contentPane!, notice, footer] { v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for v in [ruleRow, filters, chips, listGap, scroll, contentPane!, notice, footer] { v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        listGapHeight = listGap.heightAnchor.constraint(equalToConstant: 0)
+        listGapHeight.isActive = true
         listHeight = scroll.heightAnchor.constraint(equalToConstant: 0)
+        // Over the list, not inside it: a scroll view lays out its own subviews and ignores constraints.
+        scrollEdge.translatesAutoresizingMaskIntoConstraints = false
+        scrollEdge.alphaValue = 0
+        body.addSubview(scrollEdge, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            scrollEdge.topAnchor.constraint(equalTo: scroll.topAnchor),
+            scrollEdge.leadingAnchor.constraint(equalTo: scroll.leadingAnchor, constant: 20),
+            scrollEdge.trailingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: -20),
+            scrollEdge.heightAnchor.constraint(equalToConstant: 1),
+        ])
         contentHeight = contentPane.heightAnchor.constraint(equalToConstant: 0)
         contentHeight.isActive = true
         chipsHeight = chips.heightAnchor.constraint(equalToConstant: 0)
@@ -410,6 +435,17 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         ])
         updateHints()
         layoutShell(animated: false)
+    }
+
+    /// Shows the scroll edge once the first row starts to slide under the list's top inset.
+    @objc private func listScrolled() {
+        let scrolled = scroll.contentView.bounds.minY > 0.5
+        guard scrolled != scrollEdgeShown else { return }
+        scrollEdgeShown = scrolled
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            scrollEdge.animator().alphaValue = scrolled ? 1 : 0
+        }
     }
 
     // MARK: Spotlight shell
@@ -596,12 +632,17 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     /// Body height from its content; zero (a plain search bar) when there is nothing to show.
     private func resize(animated: Bool = true) {
-        let content = rows.reduce(CGFloat(0)) { h, r in
-            if case .group = r { return h + Theme.groupHeight }
-            return h + Theme.rowHeight
+        // Whole rows only: the list stops above the first row that would be cut by the cap.
+        let insets = scroll.contentInsets.top + scroll.contentInsets.bottom
+        var content: CGFloat = 0
+        for r in rows {
+            let h: CGFloat = if case .group = r { Theme.groupHeight } else { Theme.rowHeight }
+            if content + h + insets + Self.listGapSize > Theme.maxListHeight { break }
+            content += h
         }
         let contentMode = mode == .content
-        listHeight.constant = contentMode ? 0 : min(Theme.maxListHeight, content + (content > 0 ? 8 : 0))
+        listHeight.constant = contentMode ? 0 : content + (content > 0 ? insets : 0)
+        listGapHeight.constant = listHeight.constant > 0 ? Self.listGapSize : 0
         contentHeight.constant = contentMode && !contentPane.hits.isEmpty ? Shell.contentBody : 0
         contentPane.isHidden = contentHeight.constant == 0
         scroll.isHidden = contentMode
@@ -752,9 +793,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         rows = []
         var lastGroup: ResultItem.Group?
         for item in out.items {
-            // Plain results need no heading (Spotlight); favorites and recents keep theirs.
+            // Search results need no heading (Spotlight; apps still come first and say "应用" on
+            // the right); the favorites and recents of an empty query keep theirs.
             if item.group != lastGroup {
-                if item.group != .files { rows.append(.group(L(item.group.rawValue, context: "group"))) }
+                if item.group == .favorites || item.group == .recents { rows.append(.group(L(item.group.rawValue, context: "group"))) }
                 lastGroup = item.group
             }
             rows.append(.item(item))
@@ -813,10 +855,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             chip.isBordered = false
             chip.wantsLayer = true
             chip.layer?.cornerRadius = 13
-            chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
-            let text = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 14.5), .foregroundColor: NSColor.labelColor.withAlphaComponent(0.85)])
+            chip.layer?.backgroundColor = Theme.pillFill.cgColor
+            let text = NSAttributedString(string: title, attributes: [.font: Theme.pillFont, .foregroundColor: Theme.pillText])
             chip.attributedTitle = text
-            let chipWidth = ceil(text.size().width) + 17
+            let chipWidth = ceil(text.size().width) + 16
             chip.widthAnchor.constraint(equalToConstant: chipWidth).isActive = true
             chip.heightAnchor.constraint(equalToConstant: 26).isActive = true
             let width = chipWidth + filters.spacing
@@ -1745,7 +1787,7 @@ final class CapsuleLabel: NSView {
 /// 1 pt hairline under the search field; drawn with a dynamic color so it follows dark mode.
 final class RuleView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.labelColor.withAlphaComponent(0.14).setFill()
+        Theme.rule.setFill()
         bounds.fill()
     }
 }
@@ -1754,7 +1796,7 @@ final class RuleView: NSView {
 enum Shell {
     /// Default and name search; content mode widens to `contentWidth`.
     static let width: CGFloat = 640
-    static let bar: CGFloat = 58
+    static let bar: CGFloat = 56
     /// Glass shapes closer than this melt together.
     static let mergeDistance: CGFloat = 12
     /// One radius for the bar and the expanded panel, as in Spotlight: the corners never change
