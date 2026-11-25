@@ -195,7 +195,15 @@ XSearch/
 
 ## 6. 构建、回归与发布
 
-日常构建用 `bash scripts/build-app.sh`。脚本获取固定版本 Sparkle、构建 Rust 与 Swift、组装 `.app`，并从内到外签名辅助程序、框架、工作进程、XPC 与主程序。Rust 共享库、辅助进程和资源都应通过打包后的应用入口验证。打包时可执行文件和共享库会去掉符号，调试符号另存在 `target/dsym/`，用于解析崩溃报告。DMG 流程见 `scripts/build-dmg.sh`。开发时可指定单独的数据目录，或用 `XS_LANG=en` 以英文界面启动：
+日常构建用 `bash scripts/build-app.sh`。脚本获取固定版本 Sparkle、构建 Rust 与 Swift、组装 `.app`，并从内到外签名辅助程序、框架、工作进程、XPC 与主程序。Rust 共享库、辅助进程和资源都应通过打包后的应用入口验证。DMG 流程见 `scripts/build-dmg.sh`。
+
+**瘦身（每次打包都执行，发布版必须满足）。** 由 `build-app.sh` 自动完成，不需要手工操作：
+
+- Rust 引擎编译为一个共享库 `libxs_ffi.dylib`（`Cargo.toml` 的 release 配置开启 `lto = "fat"`、`codegen-units = 1`），放在 `Contents/Frameworks`。主程序、`xs-extract` 和 `IndexService` 共用这一份，各自通过 rpath 找到它（`IndexService` 用 `@executable_path/../../../../Frameworks`）。SwiftPM 链接时写入的开发 rpath（`target/release`，供测试使用）在打包时删除。
+- 调试符号用 `dsymutil` 另存到 `target/dsym/`（用于解析崩溃报告，发布时与版本一起保留），随后 `strip` 三个可执行文件，共享库只保留导出符号（`strip -S -x`）。
+- 最后是体积检查：任一可执行文件没有加载共享库、自带 Rust 代码或没去符号，或共享库残留内部符号，脚本都会报错退出，不会产出安装包。
+
+实测（1.0.0）：应用 53 MB → 18 MB，DMG 21 MB → 8 MB。改用共享库前，三个程序各自静态链接一份约 5 MB 的 Rust 代码。开发时可指定单独的数据目录，或用 `XS_LANG=en` 以英文界面启动：
 
 ```sh
 XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
@@ -220,6 +228,6 @@ git push origin main v0.2.0
 bash scripts/source-archive.sh 0.2.0
 ```
 
-随后在 GitHub 新建 `v0.2.0` Release 并标为 Latest，上传 `work/releases/` 中的 DMG 与 `appcast.xml`，以及 `work/source/` 中的源码包。
+随后在 GitHub 新建 `v0.2.0` Release 并标为 Latest，上传 `release.sh` 最后列出的文件（DMG、`appcast.xml`，以及从旧版本升级用的 `.delta` 增量包），以及 `work/source/` 中的源码包。
 
-该脚本从登录钥匙串的 `xsearch` 账户读取 EdDSA 私钥，生成带更新签名的 appcast。应用内的公钥（`App/Resources/sparkle-public-key.txt`）必须与发布密钥配对，私钥仅供维护者保管。更新源默认指向 Latest Release 中的 `appcast.xml`。发布前核对 XML 中每个归档和增量附件的 URL、版本和签名，再用上一版实测更新。建议每次使用一个干净的 `XS_RELEASE_DIR`，避免旧包被套用当前标签的下载前缀。公证需要 Developer ID Application 证书：用 `xcrun notarytool store-credentials <名称>` 保存凭据后，设置 `XS_NOTARY_PROFILE=<名称>` 与对应的 `XS_SIGN_IDENTITY`，脚本会以安全时间戳签名，并在打包后提交公证、装订票据。未设置时跳过公证。[Sparkle 发布文档](https://sparkle-project.org/documentation/publishing/)
+该脚本从登录钥匙串的 `xsearch` 账户读取 EdDSA 私钥，生成带更新签名的 appcast。应用内的公钥（`App/Resources/sparkle-public-key.txt`）必须与发布密钥配对，私钥仅供维护者保管。更新源默认指向 Latest Release 中的 `appcast.xml`。发布前核对 XML 中每个归档和增量附件的 URL、版本和签名，再用上一版实测更新。`work/releases/` 保留历次 DMG，`generate_appcast` 才能生成增量包；它会给旧版本的 DMG 也套上当前标签的下载前缀，`release.sh` 会自动把这些地址改回各自的 `v<旧版本>`（appcast 本身不签名，每个附件单独带 EdDSA 签名，所以改地址不影响校验）。公证需要 Developer ID Application 证书：用 `xcrun notarytool store-credentials <名称>` 保存凭据后，设置 `XS_NOTARY_PROFILE=<名称>` 与对应的 `XS_SIGN_IDENTITY`，脚本会以安全时间戳签名，并在打包后提交公证、装订票据。未设置时跳过公证。[Sparkle 发布文档](https://sparkle-project.org/documentation/publishing/)

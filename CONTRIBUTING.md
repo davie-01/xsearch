@@ -39,9 +39,9 @@ XSearch 以 GPLv3 附 UnRAR 链接例外发布。提交代码即表示你同意�
 
 ## 发布（维护者）
 
-1. `XS_SIGN_IDENTITY='…' XS_GITHUB_REPO='davie-01/xsearch' bash scripts/release.sh <版本>`：改版本号、构建 DMG（含许可与源码说明）、生成签名的 `appcast.xml`。
+1. `XS_SIGN_IDENTITY='…' XS_GITHUB_REPO='davie-01/xsearch' bash scripts/release.sh <版本>`：改版本号、构建瘦身后的 DMG（含许可与源码说明，体积检查不通过会中止）、生成签名的 `appcast.xml`，修正旧版本的下载地址，最后列出要上传的文件。
 2. 提交版本号改动，打 `v<版本>` tag，推送 `main` 与 tag。
 3. `bash scripts/source-archive.sh <版本>`：生成附带全部 Rust 依赖源码的 `work/source/XSearch-<版本>-source.tar.gz`。
-4. CI 通过后，在 GitHub 新建 `v<版本>` Release，标为 Latest，上传 DMG、`appcast.xml` 和源码包，发行说明取自 CHANGELOG。
+4. CI 通过后，在 GitHub 新建 `v<版本>` Release，标为 Latest，上传第 1 步列出的文件（DMG、`appcast.xml`、`.delta` 增量包）和源码包，发行说明取自 CHANGELOG。`target/dsym/` 的调试符号留存备用。
 
 详细说明见 [docs/DESIGN.md](docs/DESIGN.md) 第 6 节。

@@ -195,7 +195,15 @@ The repository is `github.com/davie-01/xsearch`. CI runs on GitHub's hosted `mac
 
 ## 6. Building, regression testing and releasing
 
-Day-to-day builds use `bash scripts/build-app.sh`. The script fetches the pinned Sparkle, builds Rust and Swift, assembles the `.app`, and signs from the inside out: helpers, frameworks, worker, XPC service, then the app. Verify the Rust library, helpers and resources through the packaged app. The packaged executables and the library are stripped; their debug symbols are kept in `target/dsym/` for symbolicating crash reports. The DMG flow is in `scripts/build-dmg.sh`. During development you can point the app at a separate data directory, or set `XS_LANG=en` to launch it in English:
+Day-to-day builds use `bash scripts/build-app.sh`. The script fetches the pinned Sparkle, builds Rust and Swift, assembles the `.app`, and signs from the inside out: helpers, frameworks, worker, XPC service, then the app. Verify the Rust library, helpers and resources through the packaged app. The DMG flow is in `scripts/build-dmg.sh`.
+
+**Size (every build, and required for releases).** `build-app.sh` does it all; nothing is manual:
+
+- The Rust engine is one shared library, `libxs_ffi.dylib` (the release profile in `Cargo.toml` uses `lto = "fat"` and `codegen-units = 1`), in `Contents/Frameworks`. The app, `xs-extract` and `IndexService` share it, each finding it through its rpath (`IndexService` uses `@executable_path/../../../../Frameworks`). The development rpath SwiftPM links in (`target/release`, for tests) is removed when packaging.
+- Debug symbols go to `target/dsym/` through `dsymutil` (for symbolicating crash reports; keep them with each release), then the three executables are stripped and the library keeps only its exported symbols (`strip -S -x`).
+- A size gate ends the script: if an executable doesn't load the shared library, carries Rust code or keeps its symbols, or the library keeps local symbols, the build fails and no package is produced.
+
+Measured on 1.0.0: the app went from 53 MB to 18 MB and the DMG from 21 MB to 8 MB. Before the shared library, each of the three executables linked its own copy of about 5 MB of Rust code. During development you can point the app at a separate data directory, or set `XS_LANG=en` to launch it in English:
 
 ```sh
 XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
@@ -220,6 +228,6 @@ git push origin main v0.2.0
 bash scripts/source-archive.sh 0.2.0
 ```
 
-Then create the `v0.2.0` release on GitHub, mark it as latest, and upload the DMG and `appcast.xml` from `work/releases/` and the source archive from `work/source/`.
+Then create the `v0.2.0` release on GitHub, mark it as latest, and upload the files `release.sh` lists at the end (the DMG, `appcast.xml` and the `.delta` updates from earlier versions) and the source archive from `work/source/`.
 
-The script reads the EdDSA private key from the `xsearch` account in the login Keychain and writes a signed appcast. The public key in the app (`App/Resources/sparkle-public-key.txt`) must pair with the release key; only the maintainer holds the private key. The update feed points to `appcast.xml` of the latest release by default. Before publishing, check the URL, version and signature of every archive and delta in the XML, then test the update from the previous version. Use a clean `XS_RELEASE_DIR` for each release so older packages don't pick up the current tag's download prefix. Notarization needs a Developer ID Application certificate: after saving credentials with `xcrun notarytool store-credentials <name>`, set `XS_NOTARY_PROFILE=<name>` and the matching `XS_SIGN_IDENTITY`; the scripts then sign with a secure timestamp, submit the DMG for notarization and staple the ticket. Without it, notarization is skipped. [Sparkle publishing guide](https://sparkle-project.org/documentation/publishing/)
+The script reads the EdDSA private key from the `xsearch` account in the login Keychain and writes a signed appcast. The public key in the app (`App/Resources/sparkle-public-key.txt`) must pair with the release key; only the maintainer holds the private key. The update feed points to `appcast.xml` of the latest release by default. Before publishing, check the URL, version and signature of every archive and delta in the XML, then test the update from the previous version. `work/releases/` keeps every earlier DMG so that `generate_appcast` can build deltas; it gives those older DMGs the current tag's download prefix too, and `release.sh` points them back at their own `v<old version>` (the appcast itself is not signed; each enclosure carries its own EdDSA signature, so the addresses can change). Notarization needs a Developer ID Application certificate: after saving credentials with `xcrun notarytool store-credentials <name>`, set `XS_NOTARY_PROFILE=<name>` and the matching `XS_SIGN_IDENTITY`; the scripts then sign with a secure timestamp, submit the DMG for notarization and staple the ticket. Without it, notarization is skipped. [Sparkle publishing guide](https://sparkle-project.org/documentation/publishing/)

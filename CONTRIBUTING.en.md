@@ -39,9 +39,9 @@ XSearch is released under GPLv3 with an UnRAR linking exception. By contributing
 
 ## Releasing (maintainers)
 
-1. `XS_SIGN_IDENTITY='…' XS_GITHUB_REPO='davie-01/xsearch' bash scripts/release.sh <version>`: sets the version, builds the DMG (with licenses and the source notice), and writes the signed `appcast.xml`.
+1. `XS_SIGN_IDENTITY='…' XS_GITHUB_REPO='davie-01/xsearch' bash scripts/release.sh <version>`: sets the version, builds the slim DMG (with licenses and the source notice; a failed size gate stops it), writes the signed `appcast.xml`, fixes the addresses of earlier versions and lists the files to upload.
 2. Commit the version change, tag it `v<version>`, and push `main` and the tag.
 3. `bash scripts/source-archive.sh <version>`: builds `work/source/XSearch-<version>-source.tar.gz` with every Rust dependency's source.
-4. Wait for CI to pass, then create the `v<version>` release on GitHub, mark it as latest, upload the DMG, `appcast.xml` and the source archive, and take the release notes from the changelog.
+4. Wait for CI to pass, then create the `v<version>` release on GitHub, mark it as latest, upload the files listed in step 1 (DMG, `appcast.xml`, `.delta` updates) and the source archive, and take the release notes from the changelog. Keep the debug symbols from `target/dsym/`.
 
 Details are in section 6 of the [Design and Engineering Guide](docs/DESIGN.en.md).

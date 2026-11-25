@@ -81,4 +81,12 @@ codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$app/Con
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$xpc"
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts --entitlements App/Resources/XSearch.entitlements "$app"
 codesign --verify --strict "$app"
-echo "Built $app"
+# Size gate: every build ships slim (see docs/DESIGN.md §6). Each executable loads the shared
+# Rust library instead of carrying its own copy, and nothing ships with its symbol table.
+for exe in "$app/Contents/MacOS/XSearch" "$xs_extract" "$index_service"; do
+    otool -L "$exe" | grep -q "@rpath/libxs_ffi.dylib" || { echo "size gate: $exe does not load libxs_ffi.dylib" >&2; exit 1; }
+    [ "$(nm -U "$exe" 2>/dev/null | wc -l)" -le 5 ] || { echo "size gate: $exe is not stripped" >&2; exit 1; }
+    [ "$(nm -U "$exe" 2>/dev/null | grep -c '_ZN\|_R[0-9A-Z]')" -eq 0 ] || { echo "size gate: $exe contains Rust code" >&2; exit 1; }
+done
+[ "$(nm "$rust_lib" | grep -c ' [tsd] ')" -eq 0 ] || { echo "size gate: libxs_ffi.dylib keeps local symbols" >&2; exit 1; }
+echo "Built $app ($(du -sh "$app" | cut -f1))"
