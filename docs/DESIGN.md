@@ -108,7 +108,7 @@ XSearch/
 │   │                                 #   以及 M0 阶段的提取、恢复协议验证实现
 │   ├── xs-index/                     # Tantivy 内容索引：schema、写入、召回、核验与读取
 │   ├── xs-parsers/                   # 纯文本、Office、网页、电子书与归档（含 UnRAR）解析
-│   └── xs-ffi/                       # UniFFI 导出，编译为应用链接的 libxs_ffi.a
+│   └── xs-ffi/                       # UniFFI 导出，编译为三个程序共用的 libxs_ffi.dylib
 │
 ├── cli/xs/                           # `xs` 命令行验证工具（导入语料、检索、提取、故障注入）
 ├── native/                           # 早期平台探针：m0（PDFKit、旧 DOC、XPC 权限链路）、
@@ -135,7 +135,7 @@ XSearch/
 └── .gitignore                        # 忽略 .tools/、target/、work/、docs/archive/ 等
 ```
 
-SwiftPM 目标的依赖关系：`XSearch`（App）→ `Catalog` → `NameEngine`、`Extraction` → `ContentEngine`、`XSearchCore`，两条底层分别经 `xs_ffiFFI` 与 `CXSearchCore` 链接 Rust 静态库；`IndexService` 只依赖 `Catalog`，`xs-extract` 只依赖 `Extraction`。修改查询语法时通常要同时改 `Packages/XSearchCore/Sources/*Query.swift`、`rust/xs-core/src/query.rs` 及搜索指南（[中文](SEARCH-GUIDE.md)、[英文](SEARCH-GUIDE.en.md)）。
+SwiftPM 目标的依赖关系：`XSearch`（App）→ `Catalog` → `NameEngine`、`Extraction` → `ContentEngine`、`XSearchCore`，两条底层分别经 `xs_ffiFFI` 与 `CXSearchCore` 链接 Rust 共享库 `libxs_ffi.dylib`（放在 `Contents/Frameworks`，主程序、`xs-extract`、`IndexService` 共用一份，各自通过 rpath 找到它）；`IndexService` 只依赖 `Catalog`，`xs-extract` 只依赖 `Extraction`。修改查询语法时通常要同时改 `Packages/XSearchCore/Sources/*Query.swift`、`rust/xs-core/src/query.rs` 及搜索指南（[中文](SEARCH-GUIDE.md)、[英文](SEARCH-GUIDE.en.md)）。
 
 ### 本地目录（不纳入 git）
 
@@ -195,7 +195,7 @@ XSearch/
 
 ## 6. 构建、回归与发布
 
-日常构建用 `bash scripts/build-app.sh`。脚本获取固定版本 Sparkle、构建 Rust 与 Swift、组装 `.app`，并从内到外签名辅助程序、框架、工作进程、XPC 与主程序。静态库、辅助进程和资源都应通过打包后的应用入口验证。DMG 流程见 `scripts/build-dmg.sh`。开发时可指定单独的数据目录，或用 `XS_LANG=en` 以英文界面启动：
+日常构建用 `bash scripts/build-app.sh`。脚本获取固定版本 Sparkle、构建 Rust 与 Swift、组装 `.app`，并从内到外签名辅助程序、框架、工作进程、XPC 与主程序。Rust 共享库、辅助进程和资源都应通过打包后的应用入口验证。打包时可执行文件和共享库会去掉符号，调试符号另存在 `target/dsym/`，用于解析崩溃报告。DMG 流程见 `scripts/build-dmg.sh`。开发时可指定单独的数据目录，或用 `XS_LANG=en` 以英文界面启动：
 
 ```sh
 XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
@@ -203,9 +203,9 @@ XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
 
 发布前用 `bash scripts/regression.sh` 核对 Rust、Swift、查询正确性和性能，基线在 `scripts/perf-baseline.json`（`--update-baseline` 以当前机器重新记录）。另在目标 macOS 版本的正常桌面会话验证下载、首次运行、目录授权、实时变更、退出再启动、重建和升级。建议同时核对应用签名、DMG SHA-256 和第三方声明附件。
 
-**发行许可。** XSearch 以 GPLv3 加 UnRAR 链接例外发布，当前构建把 UnRAR 编入 Rust 静态库。发行材料由脚本自动带上：
+**发行许可。** XSearch 以 GPLv3 加 UnRAR 链接例外发布，当前构建把 UnRAR 编入 Rust 共享库 `libxs_ffi.dylib`。发行材料由脚本自动带上：
 
-- `build-app.sh` 把 `LICENSE`、`LICENSES/*`、`THIRD_PARTY_NOTICES.md` 复制到 `XSearch.app/Contents/Resources/Licenses/`，并用 `scripts/collect-licenses.py` 汇总链接进 `libxs_ffi.a` 的全部 Rust crate 许可原文为 `Rust-crates.txt`。
+- `build-app.sh` 把 `LICENSE`、`LICENSES/*`、`THIRD_PARTY_NOTICES.md` 复制到 `XSearch.app/Contents/Resources/Licenses/`，并用 `scripts/collect-licenses.py` 汇总链接进 `libxs_ffi.dylib` 的全部 Rust crate 许可原文为 `Rust-crates.txt`。
 - `build-dmg.sh` 在 DMG 中放入“许可与源码”文件夹：上述许可文件，以及写明对应源码下载地址的 `对应源码.txt`（`release.sh` 通过 `XS_SOURCE_URL` 指向同版本 Release 中的源码包）。
 - `scripts/source-archive.sh <版本>` 从 `v<版本>` tag 导出源码，并用 `cargo vendor` 收录 `Cargo.lock` 锁定的全部 Rust 依赖（含 `unrar_sys` 自带的 UnRAR 源码），生成可离线构建的 `work/source/XSearch-<版本>-source.tar.gz`。它不放进 `work/releases/`，以免 `generate_appcast` 把它当成更新包。
 

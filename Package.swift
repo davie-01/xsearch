@@ -1,5 +1,5 @@
 // swift-tools-version: 6.2
-// Build through scripts/build-app.sh or scripts/swift-test.sh: they build libxs_core.a first.
+// Build through scripts/build-app.sh or scripts/swift-test.sh: they build libxs_ffi.dylib first.
 import PackageDescription
 
 let rustLib = Context.packageDirectory + "/target/release"
@@ -15,11 +15,12 @@ let package = Package(
         .target(
             name: "CXSearchCore",
             path: "Packages/XSearchCore/CXSearchCore",
-            // libxs_ffi.a is the app's only Rust library (content engine + M1 name-key C ABI);
-            // linking two Rust static libraries would duplicate the Rust runtime.
-            // Full path: target/release also holds libxs_ffi.dylib (for uniffi-bindgen), which
-            // `-lxs_ffi` would prefer over the static archive.
-            linkerSettings: [.unsafeFlags(["\(rustLib)/libxs_ffi.a"]), .linkedLibrary("c++"), .linkedLibrary("z")]
+            // libxs_ffi.dylib is the app's only Rust library (content engine + M1 name-key C ABI),
+            // shared by the three executables instead of a static copy in each. The rpath to
+            // target/release serves tests and development runs; build-app.sh swaps it for the
+            // bundle's Frameworks folder.
+            linkerSettings: [.unsafeFlags(["\(rustLib)/libxs_ffi.dylib", "-Xlinker", "-rpath", "-Xlinker", rustLib]),
+                             .linkedLibrary("c++"), .linkedLibrary("z")]
         ),
         .target(name: "xs_ffiFFI", dependencies: ["CXSearchCore"], path: "Packages/ContentEngine/xs_ffiFFI"),
         // Generated UniFFI bindings (scripts/gen-bindings.sh) plus a thin Swift layer.

@@ -108,7 +108,7 @@ XSearch/
 │   │                                 #   plus the M0 extraction and recovery-protocol validators
 │   ├── xs-index/                     # Tantivy content index: schema, writing, recall, verification, reading
 │   ├── xs-parsers/                   # Plain text, Office, web, e-book and archive (incl. UnRAR) parsers
-│   └── xs-ffi/                       # UniFFI exports, built as libxs_ffi.a for the app
+│   └── xs-ffi/                       # UniFFI exports, built as libxs_ffi.dylib shared by the three executables
 │
 ├── cli/xs/                           # `xs` command-line validation tool (import corpora, search, extract, fault injection)
 ├── native/                           # Early platform probes: m0 (PDFKit, legacy DOC, XPC permission chain),
@@ -135,7 +135,7 @@ XSearch/
 └── .gitignore                        # Ignores .tools/, target/, work/, docs/archive/ and more
 ```
 
-SwiftPM target dependencies: `XSearch` (App) → `Catalog` → `NameEngine`, `Extraction` → `ContentEngine`, `XSearchCore`; at the bottom, `xs_ffiFFI` and `CXSearchCore` link the Rust static library. `IndexService` depends only on `Catalog`, and `xs-extract` only on `Extraction`. A query syntax change usually touches `Packages/XSearchCore/Sources/*Query.swift`, `rust/xs-core/src/query.rs` and the search guide ([Chinese](SEARCH-GUIDE.md) and [English](SEARCH-GUIDE.en.md)).
+SwiftPM target dependencies: `XSearch` (App) → `Catalog` → `NameEngine`, `Extraction` → `ContentEngine`, `XSearchCore`; at the bottom, `xs_ffiFFI` and `CXSearchCore` link the Rust shared library `libxs_ffi.dylib` (in `Contents/Frameworks`, one copy shared by the app, `xs-extract` and `IndexService`, each finding it through its rpath). `IndexService` depends only on `Catalog`, and `xs-extract` only on `Extraction`. A query syntax change usually touches `Packages/XSearchCore/Sources/*Query.swift`, `rust/xs-core/src/query.rs` and the search guide ([Chinese](SEARCH-GUIDE.md) and [English](SEARCH-GUIDE.en.md)).
 
 ### Local directories (not tracked)
 
@@ -195,7 +195,7 @@ The repository is `github.com/davie-01/xsearch`. CI runs on GitHub's hosted `mac
 
 ## 6. Building, regression testing and releasing
 
-Day-to-day builds use `bash scripts/build-app.sh`. The script fetches the pinned Sparkle, builds Rust and Swift, assembles the `.app`, and signs from the inside out: helpers, frameworks, worker, XPC service, then the app. Verify the static library, helpers and resources through the packaged app. The DMG flow is in `scripts/build-dmg.sh`. During development you can point the app at a separate data directory, or set `XS_LANG=en` to launch it in English:
+Day-to-day builds use `bash scripts/build-app.sh`. The script fetches the pinned Sparkle, builds Rust and Swift, assembles the `.app`, and signs from the inside out: helpers, frameworks, worker, XPC service, then the app. Verify the Rust library, helpers and resources through the packaged app. The packaged executables and the library are stripped; their debug symbols are kept in `target/dsym/` for symbolicating crash reports. The DMG flow is in `scripts/build-dmg.sh`. During development you can point the app at a separate data directory, or set `XS_LANG=en` to launch it in English:
 
 ```sh
 XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
@@ -203,9 +203,9 @@ XS_DATA_DIR="$PWD/work/dev-data" ./target/XSearch.app/Contents/MacOS/XSearch
 
 Before a release, run `bash scripts/regression.sh` to check Rust, Swift, query correctness and performance; the baseline is `scripts/perf-baseline.json` (`--update-baseline` records the current machine). Also check, in a normal desktop session on the target macOS version: download, first launch, folder permissions, live changes, quit and relaunch, rebuilds and upgrades. Verify the app signature, the DMG's SHA-256 and the bundled notices as well.
 
-**Release licensing.** XSearch is released under GPLv3 with an UnRAR linking exception; the current build compiles UnRAR into the Rust static library. The scripts add the release materials automatically:
+**Release licensing.** XSearch is released under GPLv3 with an UnRAR linking exception; the current build compiles UnRAR into the Rust shared library `libxs_ffi.dylib`. The scripts add the release materials automatically:
 
-- `build-app.sh` copies `LICENSE`, `LICENSES/*` and `THIRD_PARTY_NOTICES.md` to `XSearch.app/Contents/Resources/Licenses/`, and `scripts/collect-licenses.py` gathers the license texts of every Rust crate linked into `libxs_ffi.a` into `Rust-crates.txt`.
+- `build-app.sh` copies `LICENSE`, `LICENSES/*` and `THIRD_PARTY_NOTICES.md` to `XSearch.app/Contents/Resources/Licenses/`, and `scripts/collect-licenses.py` gathers the license texts of every Rust crate linked into `libxs_ffi.dylib` into `Rust-crates.txt`.
 - `build-dmg.sh` adds a “许可与源码” (licenses and source) folder to the DMG: the license files above and `对应源码.txt`, which gives the download address of the corresponding source (`release.sh` points `XS_SOURCE_URL` at the source archive of the same release).
 - `scripts/source-archive.sh <version>` exports the sources at tag `v<version>` and vendors every Rust dependency locked in `Cargo.lock` with `cargo vendor` (including the UnRAR source shipped in `unrar_sys`), producing `work/source/XSearch-<version>-source.tar.gz`, which builds without crates.io. It stays out of `work/releases/` so that `generate_appcast` doesn't take it for an update.
 

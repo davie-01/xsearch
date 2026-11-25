@@ -4,6 +4,12 @@
 
 User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
+## 1.0.0 — 2026-11-25
+
+### Improved
+
+- The download shrinks from about 21 MB to about 8 MB, and the installed app from 53 MB to 18 MB: the app, the index service and the extraction worker share one copy of the Rust engine (each used to carry its own), the engine is built with link-time optimisation, and release builds ship without debug symbols. Features and search results are unchanged; extraction is slightly faster.
+
 ## 0.3.0 — 2026-11-25
 
 ### Added

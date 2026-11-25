@@ -6,8 +6,9 @@ publish.workspace = true
 description = "Swift bindings (UniFFI) for the XSearch content index; the app's single Rust static library."
 
 [lib]
-# staticlib: linked into the app; cdylib: only read by uniffi-bindgen for metadata.
-crate-type = ["staticlib", "cdylib", "lib"]
+# cdylib: the app's one shared Rust library (Contents/Frameworks/libxs_ffi.dylib), loaded by
+# XSearch, xs-extract and IndexService alike; uniffi-bindgen reads its metadata too.
+crate-type = ["cdylib", "lib"]
 
 [[bin]]
 name = "uniffi-bindgen"

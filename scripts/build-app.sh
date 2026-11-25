@@ -43,6 +43,30 @@ xpc="$app/Contents/XPCServices/IndexService.xpc"
 mkdir -p "$xpc/Contents/MacOS"
 cp App/IndexService/Info.plist "$xpc/Contents/Info.plist"
 cp "$bin/IndexService" "$xpc/Contents/MacOS/IndexService"
+# One shared Rust library for all three executables (it used to be linked into each).
+# Each finds it through an rpath into Contents/Frameworks; the development rpath to
+# target/release that SwiftPM linked in is removed.
+rust_lib="$app/Contents/Frameworks/libxs_ffi.dylib"
+cp target/release/libxs_ffi.dylib "$rust_lib"
+xs_extract="$app/Contents/MacOS/xs-extract"
+index_service="$xpc/Contents/MacOS/IndexService"
+for exe in "$app/Contents/MacOS/XSearch" "$xs_extract" "$index_service"; do
+    install_name_tool -delete_rpath "$PWD/target/release" "$exe"
+done
+install_name_tool -add_rpath @executable_path/../Frameworks "$xs_extract"
+install_name_tool -add_rpath @executable_path/../../../../Frameworks "$index_service"
+# Debug symbols go to target/dsym (crash reports can still be symbolicated); the shipped
+# binaries are stripped. The library keeps its exported symbols (-x).
+dsym="$PWD/target/dsym"
+rm -rf "$dsym"
+mkdir -p "$dsym"
+for f in "$app/Contents/MacOS/XSearch" "$xs_extract" "$index_service" "$rust_lib"; do
+    dsymutil "$f" -o "$dsym/$(basename "$f").dSYM" 2>/dev/null || true
+done
+strip -S -x "$rust_lib"
+for exe in "$app/Contents/MacOS/XSearch" "$xs_extract" "$index_service"; do
+    strip "$exe"
+done
 # Inside-out signing: Sparkle's helpers and framework, the worker and the XPC service, then the app.
 sparkle_fw="$app/Contents/Frameworks/Sparkle.framework"
 ts="--timestamp=none"
@@ -52,6 +76,7 @@ for helper in "$sparkle_fw/Versions/B/XPCServices/Installer.xpc" "$sparkle_fw/Ve
     [ -e "$helper" ] && codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$helper"
 done
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$sparkle_fw"
+codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$rust_lib"
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$app/Contents/MacOS/xs-extract"
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts "$xpc"
 codesign --force --sign "${XS_SIGN_IDENTITY:--}" --options runtime $ts --entitlements App/Resources/XSearch.entitlements "$app"

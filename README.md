@@ -111,7 +111,7 @@ bash scripts/build-app.sh
 open target/XSearch.app
 ```
 
-构建依次生成 Rust 静态库、Swift 可执行文件、索引 XPC 服务和提取子进程，然后组装 `target/XSearch.app`。默认使用 ad-hoc 签名。有开发签名身份时，可以为构建命令设置 `XS_SIGN_IDENTITY`。本地构建默认不配置自动更新源。
+构建依次生成 Rust 共享库、Swift 可执行文件、索引 XPC 服务和提取子进程，然后组装 `target/XSearch.app`。默认使用 ad-hoc 签名。有开发签名身份时，可以为构建命令设置 `XS_SIGN_IDENTITY`。本地构建默认不配置自动更新源。
 
 ```sh
 # 构建 DMG，输出 target/XSearch-<版本>.dmg

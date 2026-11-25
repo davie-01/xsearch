@@ -4,7 +4,7 @@
 
 ## UnRAR 与 GPLv3 发行
 
-当前 `xs-parsers → unrar → unrar_sys` 会编译 RARLAB 的 UnRAR 源码并静态链接到 `libxs_ffi.a`。Rust 包装层使用 `MIT OR Apache-2.0`。UnRAR 原生代码适用单独的 **UnRAR License**，限制使用其源码重建 RAR 压缩算法或开发兼容的压缩工具。[UnRAR 许可原文](LICENSES/UnRAR-license.txt) · [RARLAB 源码下载](https://www.rarlab.com/rar_add.htm)
+当前 `xs-parsers → unrar → unrar_sys` 会编译 RARLAB 的 UnRAR 源码并链接进应用内的 Rust 共享库 `libxs_ffi.dylib`。Rust 包装层使用 `MIT OR Apache-2.0`。UnRAR 原生代码适用单独的 **UnRAR License**，限制使用其源码重建 RAR 压缩算法或开发兼容的压缩工具。[UnRAR 许可原文](LICENSES/UnRAR-license.txt) · [RARLAB 源码下载](https://www.rarlab.com/rar_add.htm)
 
 XSearch 版权人依据 GPLv3 第 7 节授予额外许可，允许把 XSearch 与指定的 UnRAR 实现链接并分发组合成果。该例外适用于 XSearch 授权，UnRAR 本身仍遵守 UnRAR License。分发组合二进制时，按照例外文本提供实际上使用的 UnRAR 源码和 GPLv3 对应源码。[XSearch UnRAR 链接例外](LICENSES/XSearch-UnRAR-linking-exception.md) · [GNU GPLv3 第 7 节](https://www.gnu.org/licenses/gpl-3.0.html#section7)
 
@@ -40,7 +40,7 @@ Sparkle 许可原文还随下载的框架资源提供。文档内的架构调研
 | macOS 与 Apple 系统 SDK | AppKit、SwiftUI、Foundation、PDFKit、Quartz / Quick Look、CoreServices / FSEvents、Carbon HIToolbox、ApplicationServices、ImageIO、CryptoKit、ServiceManagement、UniformTypeIdentifiers、Darwin、系统日志和 XPC。原生探针另用 Vision。 | 随系统或 SDK 提供，适用 Apple 对应条款 | [Apple SDK 文档](https://developer.apple.com/documentation/) · [Apple 许可页面](https://www.apple.com/legal/sla/) |
 | Apple 系统 SQLite | Swift 文件目录与个人数据存储。 | SQLite 核心为公有领域，系统构建随 macOS 提供 | [SQLite 版权说明](https://www.sqlite.org/copyright.html) |
 | 系统 libz | 链接 macOS 提供的压缩库。 | Zlib（上游），系统构建随 macOS 提供 | [zlib 许可](https://zlib.net/zlib_license.html) |
-| 系统 libc++ | Rust 静态库中 C++ 依赖的运行时。 | Apache-2.0 WITH LLVM-exception（LLVM 上游），系统构建随 macOS 提供 | [LLVM 许可](https://llvm.org/LICENSE.txt) |
+| 系统 libc++ | Rust 共享库中 C++ 依赖的运行时。 | Apache-2.0 WITH LLVM-exception（LLVM 上游），系统构建随 macOS 提供 | [LLVM 许可](https://llvm.org/LICENSE.txt) |
 | Apple Xcode 与命令行工具 | 编译、`actool`、`codesign`、`hdiutil` 及 `textutil` 等构建或系统调用。 | 适用对应 Apple 工具、SDK 或系统条款 | [Xcode](https://developer.apple.com/xcode/) · [Apple 开发许可协议](https://developer.apple.com/support/terms/) |
 | Swift、SwiftPM、Swift Testing | Swift 构建、依赖与测试。应用构建使用 Xcode 工具链。 | Apache-2.0 WITH Swift-exception（上游） | [Swift](https://github.com/swiftlang/swift) · [SwiftPM](https://github.com/swiftlang/swift-package-manager) · [Swift Testing](https://github.com/swiftlang/swift-testing) |
 | Rust 与 Cargo | 编译 Rust 引擎和锁定、构建依赖。 | MIT OR Apache-2.0（上游主许可） | [Rust](https://github.com/rust-lang/rust) · [Cargo](https://github.com/rust-lang/cargo) |

@@ -111,7 +111,7 @@ bash scripts/build-app.sh
 open target/XSearch.app
 ```
 
-The build produces the Rust static library, the Swift executable, the indexing XPC service and the extraction subprocess, then assembles `target/XSearch.app`. It is signed ad hoc by default; set `XS_SIGN_IDENTITY` to use a development signing identity. Local builds have no update feed by default.
+The build produces the Rust shared library, the Swift executable, the indexing XPC service and the extraction subprocess, then assembles `target/XSearch.app`. It is signed ad hoc by default; set `XS_SIGN_IDENTITY` to use a development signing identity. Local builds have no update feed by default.
 
 ```sh
 # Build a DMG at target/XSearch-<version>.dmg

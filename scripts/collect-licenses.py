@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Writes the license texts of every Rust crate linked into libxs_ffi.a (normal and build
+# Writes the license texts of every Rust crate linked into libxs_ffi.dylib (normal and build
 # dependencies of xs-ffi for aarch64-apple-darwin) to one file, for the app bundle and the DMG.
 #   python3 -I scripts/collect-licenses.py <output.txt>
 # Run after `source scripts/env.sh` and a build, so the crate sources are unpacked.
@@ -27,6 +27,6 @@ for pkg in sorted(meta['packages'], key=lambda p: (p['name'], p['version'])):
         continue
     for f in files:
         parts.append(f"{'=' * 78}\n{header}\n{f.relative_to(root)}\n{'-' * 78}\n{f.read_text(errors='replace').strip()}\n")
-out.write_text('Rust crates linked into XSearch (libxs_ffi.a) and their license texts.\n'
+out.write_text('Rust crates linked into XSearch (libxs_ffi.dylib) and their license texts.\n'
                'The itemised list with links is THIRD_PARTY_NOTICES.md.\n\n' + '\n'.join(parts))
 print(f"{out}: {len(parts)} texts, {len(missing)} crates without a license file")
