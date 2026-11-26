@@ -93,6 +93,12 @@ final class Preferences {
     }
 
     /// Settings › 通用 › 历史记录: list recently opened files under an empty box.
+    /// 关于 › 启动时检查更新: one quiet check per launch, nothing scheduled.
+    var checkUpdatesAtLaunch: Bool {
+        get { defaults.object(forKey: "checkUpdatesAtLaunch") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "checkUpdatesAtLaunch") }
+    }
+
     var showRecents: Bool {
         get { defaults.object(forKey: "showRecents") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "showRecents") }

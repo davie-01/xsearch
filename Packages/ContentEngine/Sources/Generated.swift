@@ -3037,6 +3037,30 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
+    typealias SwiftType = String?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCommitRecord: FfiConverterRustBuffer {
     typealias SwiftType = CommitRecord?
 
@@ -3453,6 +3477,18 @@ public func extractEpub(path: String, maxUnpackedBytes: UInt64)throws  -> Extrac
     )
 })
 }
+/**
+ * Excel 2003 XML spreadsheets (found by `sniff_format`; saved as .xls). Versioned by the caller.
+ */
+public func extractExcelXml(path: String, maxFileBytes: UInt64, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_excel_xml(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxFileBytes),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
 public func extractHtml(path: String, maxFileBytes: UInt64)throws  -> ExtractionOutput  {
     return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
     uniffi_xs_ffi_fn_func_extract_html(
@@ -3497,6 +3533,18 @@ public func extractSpreadsheet(path: String, maxUnpackedBytes: UInt64)throws  ->
 })
 }
 /**
+ * MHTML "single file web pages" (found by `sniff_format`; Excel saves them as .xls).
+ */
+public func extractWebArchive(path: String, maxFileBytes: UInt64, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
+    return try  FfiConverterTypeExtractionOutput_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
+    uniffi_xs_ffi_fn_func_extract_web_archive(
+        FfiConverterString.lower(path),
+        FfiConverterUInt64.lower(maxFileBytes),
+        FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+/**
  * Word 97–2003 binary documents (.doc, WPS Writer's binary form). Versioned on the Swift side.
  */
 public func extractWord97(path: String, maxUnpackedBytes: UInt64)throws  -> ExtractionOutput  {
@@ -3515,6 +3563,17 @@ public func extractXmind(path: String, maxUnpackedBytes: UInt64)throws  -> Extra
     uniffi_xs_ffi_fn_func_extract_xmind(
         FfiConverterString.lower(path),
         FfiConverterUInt64.lower(maxUnpackedBytes),$0
+    )
+})
+}
+/**
+ * The real format from the file's first bytes ("word97", "xlsx", "excel_xml", …), or None
+ * when the content does not say: the extension then decides.
+ */
+public func sniffFormat(path: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_xs_ffi_fn_func_sniff_format(
+        FfiConverterString.lower(path),$0
     )
 })
 }
@@ -3564,6 +3623,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_xs_ffi_checksum_func_extract_epub() != 4575) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xs_ffi_checksum_func_extract_excel_xml() != 59349) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xs_ffi_checksum_func_extract_html() != 58647) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3579,10 +3641,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_xs_ffi_checksum_func_extract_spreadsheet() != 16974) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_xs_ffi_checksum_func_extract_web_archive() != 22036) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_xs_ffi_checksum_func_extract_word97() != 23624) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_extract_xmind() != 63195) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_xs_ffi_checksum_func_sniff_format() != 61669) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_xs_ffi_checksum_func_unpack_archive() != 28679) {

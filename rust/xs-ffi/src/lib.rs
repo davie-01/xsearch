@@ -616,6 +616,27 @@ pub fn extract_xmind(path: String, max_unpacked_bytes: u64) -> Result<Extraction
     Ok(output(e, xs_parsers::xmind::XMIND_EXTRACTOR_VERSION))
 }
 
+/// The real format from the file's first bytes ("word97", "xlsx", "excel_xml", …), or None
+/// when the content does not say: the extension then decides.
+#[uniffi::export]
+pub fn sniff_format(path: String) -> Option<String> {
+    xs_parsers::sniff::sniff(Path::new(&path)).map(|s| s.code().to_owned())
+}
+
+/// Excel 2003 XML spreadsheets (found by `sniff_format`; saved as .xls). Versioned by the caller.
+#[uniffi::export]
+pub fn extract_excel_xml(path: String, max_file_bytes: u64, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::legacy::excel_xml(Path::new(&path), limits(max_file_bytes, max_unpacked_bytes))?;
+    Ok(output(e, 0))
+}
+
+/// MHTML "single file web pages" (found by `sniff_format`; Excel saves them as .xls).
+#[uniffi::export]
+pub fn extract_web_archive(path: String, max_file_bytes: u64, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
+    let e = xs_parsers::legacy::web_archive(Path::new(&path), limits(max_file_bytes, max_unpacked_bytes))?;
+    Ok(output(e, 0))
+}
+
 #[uniffi::export]
 pub fn extract_ofd(path: String, max_unpacked_bytes: u64) -> Result<ExtractionOutput, EngineError> {
     let e = xs_parsers::office::ofd(Path::new(&path), limits(u64::MAX, max_unpacked_bytes))?;
@@ -795,5 +816,6 @@ pub fn engine_versions() -> HashMap<String, String> {
         ("extractor.fb2".to_owned(), xs_parsers::fb2::FB2_EXTRACTOR_VERSION.to_string()),
         ("extractor.email".to_owned(), xs_parsers::email::EMAIL_EXTRACTOR_VERSION.to_string()),
         ("extractor.mindmap".to_owned(), xs_parsers::xmind::XMIND_EXTRACTOR_VERSION.to_string()),
+        ("extractor.sniff".to_owned(), xs_parsers::sniff::SNIFF_VERSION.to_string()),
     ])
 }

@@ -626,6 +626,7 @@ public final class ContentIndexer: @unchecked Sendable {
     static func extractorFingerprint() -> [String: UInt64] {
         var versions = Dictionary(uniqueKeysWithValues: ContentType.allCases.map { ($0.rawValue, Extractor.version(of: $0)) })
         for key in Extractor.separatelyVersioned.keys { versions[key] = Extractor.separateVersion(key) }
+        versions[sniffKey] = Extractor.sniffVersion
         return versions
     }
 
@@ -685,13 +686,17 @@ public final class ContentIndexer: @unchecked Sendable {
         }
     }
 
+    static let sniffKey = "sniff"
+
     /// §9.1 extractor_ver: when an extractor changes, only files of its type are re-extracted.
+    /// Better format detection re-extracts only the files that failed.
     private func reindexUpgradedExtractors() throws {
         guard let catalog else { return }
         let current = Self.extractorFingerprint()
         let stored = try catalog.meta("content_extractors").flatMap { try? JSONDecoder().decode([String: UInt64].self, from: Data($0.utf8)) }
         if let stored {
-            let changed = Set(current.filter { stored[$0.key] != $0.value }.keys)
+            var changed = Set(current.filter { stored[$0.key] != $0.value }.keys)
+            if changed.remove(Self.sniffKey) != nil { try requeueAfterBetterDetection() }
             if !changed.isEmpty {
                 _ = try requeue { name, _ in
                     let ext = (name as NSString).pathExtension.lowercased()
@@ -701,6 +706,32 @@ public final class ContentIndexer: @unchecked Sendable {
             }
         }
         try catalog.setMeta("content_extractors", String(decoding: try JSONEncoder().encode(current), as: UTF8.self))
+    }
+
+    /// Failed files get a fresh task; Office lock files ("~$…", no longer content) leave the
+    /// content index. One transaction.
+    private func requeueAfterBetterDetection() throws {
+        guard let catalog else { return }
+        try catalog.db.transactionIfNeeded {
+            let s = try catalog.db.prepare("""
+                SELECT id, name, mtime_ns FROM files
+                WHERE deleted = 0 AND in_content = 1 AND (content_state = 4 OR substr(name, 1, 2) = '~$')
+                """)
+            var rows: [(id: Int64, name: String, mtime: Int64)] = []
+            while try s.step() { rows.append((s.int(0), s.text(1), s.int(2))) }
+            var counter = try catalog.opSeqCounter()
+            for r in rows {
+                counter += 1
+                if ContentRules.isOfficeOwnerFile(r.name) {
+                    try catalog.setContent(r.id, inContent: false, opSeq: counter)
+                    try catalog.enqueue(r.id, opSeq: counter, kind: .delete, priority: Int64.max / 2)
+                } else {
+                    try catalog.setContent(r.id, inContent: true, opSeq: counter)
+                    try catalog.enqueue(r.id, opSeq: counter, kind: .index, priority: r.mtime / 1_000_000_000)
+                }
+            }
+            try catalog.setOpSeqCounter(counter)
+        }
     }
 
     /// Rebuilds the content index into a new instance (§9.3 step 7, simplified): the writer moves

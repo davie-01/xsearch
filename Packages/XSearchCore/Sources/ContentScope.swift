@@ -114,9 +114,13 @@ public struct ContentRules: Sendable {
             && !exclusions.excludes(path: path, nameKey: NameKey.bytes(name), isDirectory: true, isHidden: false)
     }
 
+    /// "~$报告.docx": the lock file Office keeps next to an open document (the user's name, a
+    /// few hundred bytes), left behind when Office quits abnormally. Never content.
+    public static func isOfficeOwnerFile(_ name: String) -> Bool { name.hasPrefix("~$") }
+
     /// `path` is the file's absolute path; directories and packages are never content.
     public func eligible(path: String, name: String, isDirectory: Bool) -> Bool {
-        guard !isDirectory, let type = ContentType.of(name: name), types.contains(type) else { return false }
+        guard !isDirectory, let type = ContentType.of(name: name), types.contains(type), !Self.isOfficeOwnerFile(name) else { return false }
         guard roots.contains(where: { PathUtil.isWithin(path, $0) }) else { return false }
         // Exclusion rules are checked on every component below the root, like the name scope.
         let root = roots.filter { PathUtil.isWithin(path, $0) }.max { $0.count < $1.count }!

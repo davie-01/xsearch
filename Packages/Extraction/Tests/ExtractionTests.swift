@@ -330,3 +330,36 @@ struct PageJSON: Decodable { var page: Int; var state: String }
     #expect(r.method == "fb2" && r.state == "complete" && r.extractorVersion == Extractor.separateVersion("fb2"))
     #expect(r.text == "第一章\n出发\n")
 }
+
+@Test func contentDecidesOverAMisleadingExtension() throws {
+    func check(_ name: String, _ data: Data, method: String, contains text: String, kind: ExtractionKind) throws {
+        let path = tmp(name)
+        try data.write(to: URL(fileURLWithPath: path))
+        let r = try Extractor.extract(path: path, limits: ExtractionLimits())
+        #expect(r.method == method, "\(name): \(r.method)")
+        #expect(r.text.contains(text), "\(name): \(r.text)")
+        #expect(r.extractorVersion == Extractor.version(of: kind), "\(name)")
+    }
+    // Word 97 saved as .docx (AppKit's own reader takes it: see docFallsBackToAttributedString).
+    let source = NSAttributedString(string: "伪装的 Word 97 文档 合同\n")
+    let word = try source.data(from: NSRange(location: 0, length: source.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.docFormat])
+    try check("old.docx", word, method: "word97:nsattributedstring", contains: "伪装的 Word 97", kind: .docx)
+    // RTF saved as .doc.
+    let rtf = try source.data(from: NSRange(location: 0, length: source.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+    try check("rich.doc", rtf, method: "rtf:rtf", contains: "伪装的", kind: .doc)
+    // An OOXML package under an old extension.
+    let docx = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../Tests/Fixtures/m0/structure.docx").standardized
+    try check("package.doc", try Data(contentsOf: docx), method: "docx:docx", contains: "表格单元格", kind: .doc)
+    // Excel 2003 XML, an HTML table and an MHTML web page, all named .xls.
+    let xml = #"""
+        <?xml version="1.0"?>
+        <?mso-application progid="Excel.Sheet"?>
+        <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+         <Worksheet ss:Name="名单"><Table><Row><Cell><Data ss:Type="String">人员保险</Data></Cell><Cell><Data ss:Type="Number">12</Data></Cell></Row></Table></Worksheet>
+        </Workbook>
+        """#
+    try check("sheet2003.xls", Data(xml.utf8), method: "excel_xml:excel2003xml", contains: "人员保险\t12", kind: .sheet)
+    try check("page.xls", Data("<html><body><table><tr><td>工资表</td></tr></table></body></html>".utf8), method: "html:html/utf-8", contains: "工资表", kind: .sheet)
+    let mht = "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"B\"\r\n\r\n--B\r\nContent-Location: file:///C:/x/sheet001.htm\r\nContent-Type: text/html; charset=\"utf-8\"\r\n\r\n<html><body><table><tr><td>验收清单</td></tr></table></body></html>\r\n--B--\r\n"
+    try check("web.xls", Data(mht.utf8), method: "web_archive:mhtml", contains: "验收清单", kind: .sheet)
+}

@@ -6,7 +6,7 @@
 
 **Find files and search inside documents on your Mac, then jump straight to the hit.**
 
-XSearch is a native menu bar app for Apple silicon Macs. Press `⌥Space` to open apps or find files and folders. When all you remember is a sentence from a document, switch to Content search to look through indexed documents and see highlighted snippets. Files, indexes and queries stay on your Mac. Builds configured with an update feed check for updates over the network; you can turn automatic checks off in Settings.
+XSearch is a native menu bar app for Apple silicon Macs. Press `⌥Space` to open apps or find files and folders. When all you remember is a sentence from a document, switch to Content search to look through indexed documents and see highlighted snippets. Files, indexes and queries stay on your Mac. Builds configured with an update feed check for updates over the network once at launch; you can turn this off in Settings › About.
 
 ## What it does
 

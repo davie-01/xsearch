@@ -403,6 +403,32 @@ private func contentFileId(_ p: Pipeline, _ name: String) -> Int64? {
     #expect(try p.search("mu") == ["t.txt"] && p.search("nu") == ["d.pdf"])
 }
 
+@Test func betterDetectionRetriesOnlyFailedFiles() throws {
+    let p = try Pipeline("sniff")
+    defer { p.stop() }
+    try p.box.write("docs/t.txt", "文本 mu")
+    try p.box.write("docs/broken.docx", "not a package")
+    try p.box.write("docs/~$t.docx", "\u{5}admin")
+    try p.start()
+    #expect(p.settle())
+    p.indexer.stop()
+    let catalog = try FileCatalog(url: p.box.data.appendingPathComponent("catalog.sqlite"))
+    let state = { (name: String) in try catalog.db.prepare("SELECT in_content, content_state FROM files WHERE name = ?").bind(name).first { ($0.int(0), $0.int(1)) } }
+    #expect(try state("~$t.docx")?.0 == 0, "an Office lock file is no content")
+    #expect(try state("broken.docx")?.1 == 4)
+    // A catalog from before detection existed: the lock file was content and failed too.
+    try catalog.db.exec("UPDATE files SET in_content = 1, content_state = 4 WHERE name = '~$t.docx'")
+    var versions = ContentIndexer.extractorFingerprint()
+    versions.removeValue(forKey: ContentIndexer.sniffKey)
+    try catalog.setMeta("content_extractors", String(decoding: try JSONEncoder().encode(versions), as: UTF8.self))
+    try p.restartIndexer()
+    let tasks = p.names.contentTasks().map { (($0.path ?? "") as NSString).lastPathComponent + ":\($0.task.kind)" }.sorted()
+    #expect(tasks == ["broken.docx:1", "~$t.docx:2"], "\(tasks)")
+    #expect(p.settle())
+    #expect(try state("~$t.docx")?.0 == 0)
+    #expect(try p.search("mu") == ["t.txt"])
+}
+
 // MARK: Consistency (review batch 1)
 
 @Test func deletionWhileStoppedSurvivesTombstonePurge() throws {

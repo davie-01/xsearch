@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         buildStatusItem()
         installKeyMenu()
-        _ = Updater.shared  // starts scheduled checks when a feed is configured
+        Updater.shared.checkAtLaunchIfWanted()
         // Dev: XS_CHECK_UPDATES=1 checks right away (update flow tests).
         if env["XS_CHECK_UPDATES"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Updater.shared.checkForUpdates() }
@@ -331,8 +331,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = NSMenuItem(title: L("退出 XSearch"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
-        statusItem.menu = menu
+        statusMenu = menu
+        // Left click summons the launcher (like the hot key); right click (or Control-click)
+        // opens the menu. On mouse down: the launcher's own click-elsewhere dismissal must not
+        // run first and turn a "hide" into a "show".
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
         statusChanged()
+    }
+
+    private var statusMenu: NSMenu!
+
+    @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseDown || event?.modifierFlags.contains(.control) == true {
+            // Attached only while it shows, so a left click never opens it.
+            statusItem.menu = statusMenu
+            statusItem.button?.performClick(nil)
+        } else {
+            launcher.toggle()
+        }
     }
 
     /// The open menu shows the content figures live; closed, it costs nothing.
@@ -344,6 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         endViewing(.menu)
+        if menu === statusMenu { statusItem.menu = nil }
     }
 
     /// Status is pushed, not polled: the name index's from this process (`onStatus`), the

@@ -6,7 +6,7 @@ import SwiftUI
 import XSearchCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general = "通用", scope = "索引范围", syntax = "搜索语法", openWith = "打开方式", diagnostics = "诊断", privacy = "隐私与数据"  // l10n: shown through L(rawValue)
+    case general = "通用", scope = "索引范围", syntax = "搜索语法", openWith = "打开方式", diagnostics = "诊断", privacy = "隐私与数据", about = "关于"  // l10n: shown through L(rawValue)
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -16,6 +16,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .openWith: "arrow.up.forward.app"
         case .diagnostics: "stethoscope"
         case .privacy: "lock"
+        case .about: "info.circle"
         }
     }
 }
@@ -401,6 +402,7 @@ struct SettingsView: View {
                             case .openWith: OpenWithPane(model: model)
                             case .diagnostics: DiagnosticsPane(model: model)
                             case .privacy: PrivacyPane(model: model)
+                            case .about: AboutPane(model: model)
                             }
                             Color.clear.frame(height: 1).id("pane-end")
                         }
@@ -441,6 +443,50 @@ struct Card<Content: View>: View {
     }
 }
 
+/// 关于: the app, its version and updates, centred on the page.
+struct AboutPane: View {
+    @ObservedObject var model: SettingsModel
+    static let repository = URL(string: "https://github.com/davie-01/xsearch")!
+
+    var body: some View {
+        Text(L("关于")).font(.system(size: 20, weight: .semibold))
+        VStack(spacing: 0) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 128, height: 128)
+                .accessibilityHidden(true)
+            Text(verbatim: "XSearch").font(.system(size: 26, weight: .bold)).padding(.top, 14)
+            Text(L("版本 %@", Updater.shared.version)).font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 4)
+            HStack(spacing: 12) {
+                Button { Updater.shared.checkForUpdates() } label: {
+                    Text(L("检查更新…")).frame(minWidth: 150)
+                }
+                Button { NSWorkspace.shared.open(Self.repository) } label: {
+                    Label(L("在 GitHub 上查看"), systemImage: "arrow.up.forward.square").frame(minWidth: 150)
+                }
+            }
+            .controlSize(.large)
+            .buttonBorderShape(.capsule)
+            .padding(.top, 22)
+            Toggle(L("启动时检查更新"), isOn: Binding(get: { Updater.shared.checksAtLaunch }, set: { Updater.shared.checksAtLaunch = $0; model.objectWillChange.send() }))
+                .toggleStyle(.checkbox)
+                .disabled(!Updater.shared.isConfigured)
+                .padding(.top, 16)
+            Text(Updater.shared.isConfigured
+                 ? L("只在启动时检查一次，有新版本才提示；关掉后只在点“检查更新…”时联网。")
+                 : L("这个版本没有配置更新地址，新版需要手动下载安装。"))
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 10)
+            Text(L("GPL-3.0 许可证 · 免费开源"))
+                .font(.system(size: 12)).foregroundStyle(.tertiary)
+                .padding(.top, 72)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 36)
+    }
+}
+
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     var body: some View {
@@ -473,18 +519,6 @@ struct GeneralPane: View {
         Card(title: L("开机自动启动")) {
             Toggle(L("登录时打开 XSearch"), isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                 .toggleStyle(.switch)
-        }
-        Card(title: L("软件更新"), subtitle: L("当前版本 %@", "\(Updater.shared.version)")) {
-            HStack {
-                Toggle(L("自动检查更新"), isOn: Binding(get: { Updater.shared.automaticallyChecks }, set: { Updater.shared.automaticallyChecks = $0; model.objectWillChange.send() }))
-                    .toggleStyle(.switch)
-                    .disabled(!Updater.shared.isConfigured)
-                Spacer()
-                Button(L("检查更新…")) { Updater.shared.checkForUpdates() }
-            }
-            if !Updater.shared.isConfigured {
-                Text(L("这个版本没有配置更新地址，新版需要手动下载安装。")).font(.system(size: 11.5)).foregroundStyle(.secondary)
-            }
         }
         Card(title: L("历史记录"), subtitle: L("只保存在本机")) {
             Toggle(L("呼出时保留上次的搜索内容"), isOn: $model.keepLastQuery).toggleStyle(.switch)

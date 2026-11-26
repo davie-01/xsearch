@@ -452,6 +452,11 @@ RustBuffer uniffi_xs_ffi_fn_func_extract_email(RustBuffer path, uint64_t max_fil
 RustBuffer uniffi_xs_ffi_fn_func_extract_epub(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EXCEL_XML
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_EXCEL_XML
+RustBuffer uniffi_xs_ffi_fn_func_extract_excel_xml(RustBuffer path, uint64_t max_file_bytes, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_HTML
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_HTML
 RustBuffer uniffi_xs_ffi_fn_func_extract_html(RustBuffer path, uint64_t max_file_bytes, RustCallStatus *_Nonnull out_status
@@ -477,6 +482,11 @@ RustBuffer uniffi_xs_ffi_fn_func_extract_pptx(RustBuffer path, uint64_t max_unpa
 RustBuffer uniffi_xs_ffi_fn_func_extract_spreadsheet(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_WEB_ARCHIVE
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_WEB_ARCHIVE
+RustBuffer uniffi_xs_ffi_fn_func_extract_web_archive(RustBuffer path, uint64_t max_file_bytes, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_WORD97
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_WORD97
 RustBuffer uniffi_xs_ffi_fn_func_extract_word97(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
@@ -485,6 +495,11 @@ RustBuffer uniffi_xs_ffi_fn_func_extract_word97(RustBuffer path, uint64_t max_un
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_XMIND
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_EXTRACT_XMIND
 RustBuffer uniffi_xs_ffi_fn_func_extract_xmind(RustBuffer path, uint64_t max_unpacked_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_SNIFF_FORMAT
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_SNIFF_FORMAT
+RustBuffer uniffi_xs_ffi_fn_func_sniff_format(RustBuffer path, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_FN_FUNC_UNPACK_ARCHIVE
@@ -802,6 +817,12 @@ uint16_t uniffi_xs_ffi_checksum_func_extract_epub(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_EXCEL_XML
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_EXCEL_XML
+uint16_t uniffi_xs_ffi_checksum_func_extract_excel_xml(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_HTML
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_HTML
 uint16_t uniffi_xs_ffi_checksum_func_extract_html(void
@@ -832,6 +853,12 @@ uint16_t uniffi_xs_ffi_checksum_func_extract_spreadsheet(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_WEB_ARCHIVE
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_WEB_ARCHIVE
+uint16_t uniffi_xs_ffi_checksum_func_extract_web_archive(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_WORD97
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_WORD97
 uint16_t uniffi_xs_ffi_checksum_func_extract_word97(void
@@ -841,6 +868,12 @@ uint16_t uniffi_xs_ffi_checksum_func_extract_word97(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_XMIND
 #define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_EXTRACT_XMIND
 uint16_t uniffi_xs_ffi_checksum_func_extract_xmind(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_SNIFF_FORMAT
+#define UNIFFI_FFIDEF_UNIFFI_XS_FFI_CHECKSUM_FUNC_SNIFF_FORMAT
+uint16_t uniffi_xs_ffi_checksum_func_sniff_format(void
     
 );
 #endif

@@ -1,7 +1,9 @@
 //! M3 formats: spreadsheets (XLSX / XLSM / XLS / ODS via calamine), PPTX and OFD.
+//! Spreadsheets pick their reader by content (see `sniff`).
 use crate::{Extraction, Limits};
 use anyhow::{Context, Result, bail};
-use calamine::{Data, Reader, open_workbook_auto};
+use crate::sniff::Sniffed;
+use calamine::{Data, Reader, Sheets, Xls, XlsError, Xlsb, Xlsx, open_workbook, open_workbook_auto};
 use roxmltree::Node;
 use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 use xs_index::{Anchor, AnchorKind, ExtractState};
@@ -61,7 +63,7 @@ impl Out {
     }
 }
 
-fn column(mut i: usize) -> String {
+pub(crate) fn column(mut i: usize) -> String {
     let mut s = String::new();
     loop {
         s.insert(0, (b'A' + (i % 26) as u8) as char);
@@ -75,10 +77,6 @@ fn column(mut i: usize) -> String {
 /// One line per non-empty row (cells separated by tabs), anchored "Sheet1!A12" at the row's
 /// first non-empty cell. Formulas contribute their cached values.
 pub fn spreadsheet(path: &Path, limits: Limits) -> Result<Extraction> {
-    // Known extensions pick their reader; others (WPS .et = BIFF8) are recognised by content.
-    let known = path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
-        ["xlsx", "xlsm", "xlsb", "xls", "xla", "ods"].contains(&e.to_ascii_lowercase().as_str())
-    });
     // The reader unpacks a whole sheet before the text budget can apply: go by the package's
     // declared sizes first (a binary .xls is no package and is bound by the file limit).
     if let Ok(z) = zip::ZipArchive::new(File::open(path)?) {
@@ -87,14 +85,57 @@ pub fn spreadsheet(path: &Path, limits: Limits) -> Result<Extraction> {
             bail!("uncompressed size limit");
         }
     }
-    let mut wb = if known {
-        open_workbook_auto(path).context("spreadsheet unreadable")?
-    } else {
-        let data = std::fs::read(path)?;
-        let auto = calamine::open_workbook_auto_from_rs(std::io::Cursor::new(data)).context("spreadsheet unreadable")?;
-        return sheets_into(auto, limits);
+    // The content picks the reader (a .xls can hold an OOXML package, a .xlsx a BIFF8 workbook);
+    // what it does not tell apart (ODS) goes by extension, the rest (WPS .et) by trying each.
+    let unreadable = "spreadsheet unreadable";
+    let mut wb = match crate::sniff::sniff(path) {
+        Some(Sniffed::OleWorkbook) => match open_workbook::<Xls<_>, _>(path) {
+            Ok(x) => Sheets::Xls(x),
+            // A VBA project in an unknown code page stops the whole workbook; sheets need none.
+            Err(XlsError::Vba(_)) => return sheets_into(Sheets::Xls(xls_without_vba(path, limits).context(unreadable)?), limits),
+            Err(e) => return Err(e).context(unreadable),
+        },
+        Some(Sniffed::Xlsx) => Sheets::Xlsx(open_workbook::<Xlsx<_>, _>(path).context(unreadable)?),
+        Some(Sniffed::Xlsb) => Sheets::Xlsb(open_workbook::<Xlsb<_>, _>(path).context(unreadable)?),
+        _ if path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["xlsx", "xlsm", "xlsb", "xls", "xla", "ods"].contains(&e.to_ascii_lowercase().as_str())) => {
+            open_workbook_auto(path).context(unreadable)?
+        }
+        _ => {
+            let data = std::fs::read(path)?;
+            let auto = calamine::open_workbook_auto_from_rs(std::io::Cursor::new(data)).context(unreadable)?;
+            return sheets_into(auto, limits);
+        }
     };
     sheets_into_impl(&mut wb, limits)
+}
+
+/// The workbook again, in memory, without its `_VBA_PROJECT_CUR` storage.
+fn xls_without_vba(path: &Path, limits: Limits) -> Result<Xls<std::io::Cursor<Vec<u8>>>> {
+    use std::io::Write;
+    let mut src = cfb::open(path)?;
+    let mut dst = cfb::CompoundFile::create(std::io::Cursor::new(Vec::new()))?;
+    let entries: Vec<(std::path::PathBuf, bool)> = src.walk().map(|e| (e.path().to_owned(), e.is_stream())).collect();
+    let mut used = 0u64;
+    for (p, stream) in entries {
+        if p == Path::new("/") || p.starts_with("/_VBA_PROJECT_CUR") {
+            continue;
+        }
+        if !stream {
+            dst.create_storage(&p)?;
+            continue;
+        }
+        let mut data = vec![];
+        Read::by_ref(&mut src.open_stream(&p)?).take(limits.max_unpacked_bytes.saturating_sub(used) + 1).read_to_end(&mut data)?;
+        used += data.len() as u64;
+        if used > limits.max_unpacked_bytes {
+            bail!("uncompressed size limit");
+        }
+        dst.create_stream(&p)?.write_all(&data)?;
+    }
+    dst.flush()?;
+    let mut inner = dst.into_inner();
+    inner.set_position(0);
+    Ok(Xls::new(inner)?)
 }
 
 fn sheets_into<RS: std::io::Read + std::io::Seek>(mut wb: calamine::Sheets<RS>, limits: Limits) -> Result<Extraction> {

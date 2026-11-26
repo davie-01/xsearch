@@ -5,6 +5,9 @@ import XSearchCore
 /// Auto-update through Sparkle (M5). Updates are EdDSA-signed (public key in Info.plist, the
 /// private key in the developer's Keychain); the feed URL is set at build time. A build
 /// without a feed has updates switched off rather than failing.
+/// No scheduled checks (SUEnableAutomaticChecks is false in Info.plist, so Sparkle neither
+/// schedules nor asks): one quiet check per launch when 关于 › 启动时检查更新 is on — Sparkle
+/// shows something only when a new version exists — and otherwise only on 检查更新….
 @MainActor
 final class Updater {
     static let shared = Updater()
@@ -23,9 +26,17 @@ final class Updater {
         return L("%@（%@）", info["CFBundleShortVersionString"] as? String ?? "?", info["CFBundleVersion"] as? String ?? "?")
     }
 
-    var automaticallyChecks: Bool {
-        get { controller?.updater.automaticallyChecksForUpdates ?? false }
-        set { controller?.updater.automaticallyChecksForUpdates = newValue }
+    var checksAtLaunch: Bool {
+        get { Preferences.shared.checkUpdatesAtLaunch }
+        set { Preferences.shared.checkUpdatesAtLaunch = newValue }
+    }
+
+    /// Called once at launch.
+    func checkAtLaunchIfWanted() {
+        guard let controller else { return }
+        // Installs that once had scheduled checks on keep none.
+        controller.updater.automaticallyChecksForUpdates = false
+        if checksAtLaunch { controller.updater.checkForUpdatesInBackground() }
     }
 
     func checkForUpdates() {

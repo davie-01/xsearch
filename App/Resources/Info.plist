@@ -38,6 +38,8 @@
 	</dict>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>

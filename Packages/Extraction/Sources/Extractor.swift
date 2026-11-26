@@ -31,6 +31,7 @@ public struct ExtractionLimits: Codable, Sendable, Equatable {
 public enum ExtractionError: Error, Equatable, CustomStringConvertible {
     case unsupported(String)
     case encrypted
+    case encryptedDocument
     case tooLarge(UInt64)
     case unreadable(String)
 
@@ -38,6 +39,7 @@ public enum ExtractionError: Error, Equatable, CustomStringConvertible {
         switch self {
         case .unsupported(let ext): "不支持的类型：\(ext)"
         case .encrypted: "PDF 已加密，无法提取"
+        case .encryptedDocument: "文档已加密，无法提取"
         case .tooLarge(let n): "超过单文件上限（\(n >> 20) MB）"
         case .unreadable(let m): m
         }
@@ -62,6 +64,19 @@ public enum Extractor {
     /// re-extracts only them. Engine version key "extractor.<key>".
     public static let separatelyVersioned: [String: Set<String>] = ["odf": ["odt", "odp"], "fb2": ["fb2"]]
     public static func separateVersion(_ key: String) -> UInt64 { engineVersions()["extractor.\(key)"].flatMap(UInt64.init) ?? 1 }
+
+    /// Format detection (`sniffFormat`): when it recognises more, the files that failed are
+    /// tried again (and only those). Engine version key "extractor.sniff".
+    public static var sniffVersion: UInt64 { engineVersions()["extractor.sniff"].flatMap(UInt64.init) ?? 1 }
+
+    /// Types whose files are checked for their real format before the extension decides, with
+    /// the formats (`sniffFormat` codes) their own extractor already reads. Anything else the
+    /// content is recognised as goes to that format's extractor: a Word 97 file named .docx,
+    /// an Excel 2003 XML or MHTML file named .xls.
+    static let sniffedTypes: [ContentType: Set<String>] = [
+        .docx: ["docx"], .doc: ["word97"], .wps: ["docx", "word97"], .sheet: ["ole_workbook", "xlsx", "xlsb"],
+        .slide: ["ole_powerpoint", "pptx"], .rtf: ["rtf"], .pdf: ["pdf"],
+    ]
 
     /// Current extractor version per type (Rust ones come from the engine).
     public static func version(of type: ContentType) -> UInt64 {
@@ -104,6 +119,14 @@ public enum Extractor {
 
     private static func extractAny(path: String, limits: ExtractionLimits) throws -> ExtractionResult {
         guard let kind = ExtractionKind.of(path: path) else { throw ExtractionError.unsupported((path as NSString).pathExtension) }
+        if let own = sniffedTypes[kind], let real = sniffFormat(path: path), !own.contains(real) {
+            try checkSize(path, limits)
+            if var r = try extract(path, as: real, limits: limits) {
+                r.method = "\(real):\(r.method)"
+                r.extractorVersion = version(of: kind)
+                return r
+            }
+        }
         switch kind {
         case .text:
             return try rust { try extractPlainText(path: path, maxFileBytes: limits.maxFileBytes) }
@@ -156,6 +179,26 @@ public enum Extractor {
         case .mindmap:
             try checkSize(path, limits)
             return try rust { try extractXmind(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        }
+    }
+
+    /// A file whose content is `real` (a `sniffFormat` code); nil for a format without an
+    /// extractor of its own here (the extension then decides).
+    static func extract(_ path: String, as real: String, limits: ExtractionLimits) throws -> ExtractionResult? {
+        switch real {
+        case "word97": try doc(path, limits: limits)
+        case "ole_workbook", "xlsx", "xlsb": try rust { try extractSpreadsheet(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case "ole_powerpoint", "pptx": try rust { try extractPptx(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case "docx": try rust { try extractDocx(path: path, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case "ole_encrypted": throw ExtractionError.encryptedDocument
+        case "pdf": try pdf(path, maxBytes: limits.maxUnpackedBytes)
+        case "rtf": try attributed(path, type: .rtf, method: "rtf", version: rtfVersion)
+        case "html": try rust { try extractHtml(path: path, maxFileBytes: limits.maxFileBytes) }
+        case "excel_xml":
+            try rust { try extractExcelXml(path: path, maxFileBytes: limits.maxFileBytes, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        case "web_archive":
+            try rust { try extractWebArchive(path: path, maxFileBytes: limits.maxFileBytes, maxUnpackedBytes: limits.maxUnpackedBytes) }
+        default: nil
         }
     }
 
