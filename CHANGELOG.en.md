@@ -4,6 +4,16 @@
 
 User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
+## Unreleased
+
+### Improved
+
+- The content index shows its state and progress: the menu bar menu and a new status bar at the bottom of the Settings window read “Indexing 12,340 / 25,600 (48%) · about 6 min left”, “Removing…”, “Checking files…”, “Ready · 28,625 files · 78 failed” or “Paused · N waiting”, and for a minute after a run “Just finished N files · took …”; in Settings › Index Scope each content folder shows its own indexed, waiting and failed counts. The figures used to update only once a whole run of files had finished, showing old values until then.
+- Progress is counted and refreshed only while someone looks: every second while the menu is open or the Settings window is on screen; otherwise the index service counts nothing and sends the app no progress.
+- Removing a content folder is much faster: deletions alone are handled thousands at a time, so 25,000 files go in seconds (one index commit per 64 files before). Removal asks first and says how many files’ content index it deletes.
+- “Rescan”, “Remove” and “Add Folder” next to folders and exclusion rules in Settings are now buttons with icons.
+- Adding or removing a content folder inside the file name scope, or changing the content file types, decides from the existing file list which files to extract or remove, so extraction starts within seconds instead of after re-checking the whole disk. A folder reaching outside the name scope (or holding an excluded place) is still scanned. A long scan now starts extraction as it goes.
+
 ## 1.0.0 — 2026-11-25
 
 ### Improved

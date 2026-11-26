@@ -335,42 +335,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusChanged()
     }
 
+    /// The open menu shows the content figures live; closed, it costs nothing.
     func menuWillOpen(_ menu: NSMenu) {
+        beginViewing(.menu)
+        indexer?.refresh()
         statusChanged()
     }
 
+    func menuDidClose(_ menu: NSMenu) {
+        endViewing(.menu)
+    }
+
     /// Status is pushed, not polled: the name index's from this process (`onStatus`), the
-    /// content index's (figures and the instance readers open) by IndexService when it changes.
-    /// What comes into view pulls once anyway, so it never shows a message that went missing.
+    /// content index's by IndexService — progress only while a viewer observes (below), the
+    /// instance readers open and pause / error always. What comes into view pulls once.
     private func refreshStatusIfShown() {
         guard launcher?.isVisible == true || NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
+        indexer?.refresh()
         statusChanged()
+    }
+
+    // MARK: Content index viewers
+
+    /// What shows the content index's figures live: the open menu, Settings › 索引范围 in view
+    /// (with its folders). While any is there, IndexService counts and reports about once a
+    /// second; with none, it counts nothing and sends no progress.
+    enum ContentViewer: Hashable { case menu, settings }
+    private var contentViewers: [ContentViewer: [String]] = [:]
+    private var viewerRenewal: Timer?
+    /// Well inside `IndexServiceClient.observationLease`.
+    static let observationRenewal: TimeInterval = 5
+
+    func beginViewing(_ viewer: ContentViewer, folders: [String] = []) {
+        let changed = contentViewers[viewer] != folders
+        contentViewers[viewer] = folders
+        if viewerRenewal == nil {
+            // Common modes: it keeps renewing while the menu tracks the mouse.
+            let t = Timer(timeInterval: Self.observationRenewal, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.renewViewing() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            viewerRenewal = t
+            renewViewing()
+        } else if changed {
+            renewViewing()
+        }
+    }
+
+    func endViewing(_ viewer: ContentViewer) {
+        guard contentViewers.removeValue(forKey: viewer) != nil else { return }
+        if contentViewers.isEmpty {
+            viewerRenewal?.invalidate()
+            viewerRenewal = nil
+            indexer?.stopObserving()
+        } else {
+            renewViewing()
+        }
+    }
+
+    private func renewViewing() {
+        let folders = contentViewers.values.flatMap { $0 }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        indexer?.observe(folders: folders)
     }
 
     private func statusChanged() {
         let st = names.status
-        switch st.phase {
-        case .starting: indexStatusItem.title = L("文件名索引：正在打开")
-        case .scanning: indexStatusItem.title = L("文件名索引：正在建立 · %@ 项", "\(Theme.count(st.count))")
-        case .ready: indexStatusItem.title = L("文件名索引：%@ · %@ 项", st.watching ? L("已就绪") : L("未实时更新"), Theme.count(st.count))
-        case .failed(let message): indexStatusItem.title = L("文件名索引出错：%@", "\(message.prefix(60))")
-        }
-        // The snapshot arrives asynchronously from the service (`showContentStatus`).
-        indexer?.refresh()
+        indexStatusItem.title = ContentStatusText.nameLine(st)
+        // The content line follows the name index's phase (正在核对文件); its figures come
+        // from the service (`showContentStatus`).
+        updateContentStatusItem()
         launcher?.updateStatus()
         settings?.refresh()
     }
 
     private func showContentStatus() {
         updatePauseItem()
-        guard let st = indexer?.status else { return }
-        var parts = [L("内容索引：%@ 个文件", "\(Theme.count(st.indexed))")]
-        if st.paused { parts[0] = L("内容索引已暂停：%@ 个文件", "\(Theme.count(st.indexed))") }
-        if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
-        if st.failed > 0 { parts.append(L("%@ 个失败", "\(st.failed)")) }
-        contentStatusItem.title = parts.joined(separator: " · ")
+        updateContentStatusItem()
         launcher?.updateStatus()
         settings?.refresh()
+    }
+
+    /// The catalog is listing folders, so content tasks may still be on their way.
+    var contentChecking: Bool {
+        if case .scanning = names.status.phase { return true }
+        return false
+    }
+
+    private func updateContentStatusItem() {
+        guard let st = indexer?.status else { return }
+        var text = ContentStatusText.summary(st, paused: contentIndexingPaused, checking: contentChecking, hasFolders: !contentScope.folders.isEmpty)
+        if ContentStatusText.recent(st) != nil, !st.working {
+            text += " · " + (st.roundRemovalsOnly ? L("刚刚移除 %@ 个", Theme.count(st.roundDone)) : L("刚刚完成 %@ 个", Theme.count(st.roundDone)))
+        }
+        contentStatusItem.title = L("内容索引：%@", text)
     }
 
     // MARK: Actions

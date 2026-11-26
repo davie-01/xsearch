@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Catalog
 import ServiceManagement
 import SwiftUI
@@ -86,8 +87,7 @@ final class SettingsModel: ObservableObject {
 
     /// 重新扫描 a folder of the settings (`~` paths), or everything (立即更新).
     func rescan(_ folder: String?) {
-        let home = NSHomeDirectory()
-        delegate?.rescan(folder.map { $0 == "~" ? home : $0.hasPrefix("~/") ? home + $0.dropFirst() : $0 })
+        delegate?.rescan(folder.map(Self.absolute))
         refresh()
     }
 
@@ -174,7 +174,27 @@ final class SettingsModel: ObservableObject {
         }
     }
 
-    func commitContent() { delegate?.applyContentScope(content) }
+    func commitContent() {
+        delegate?.applyContentScope(content)
+        onContentFoldersChanged?()
+    }
+
+    /// The window controller re-registers what it shows (Settings › 索引范围 folders).
+    var onContentFoldersChanged: (() -> Void)?
+
+    /// Settings paths (`~/…`) as the catalog stores them.
+    static func absolute(_ folder: String) -> String {
+        let home = NSHomeDirectory()
+        return folder == "~" ? home : folder.hasPrefix("~/") ? home + folder.dropFirst() : folder
+    }
+
+    var contentFolderPaths: [String] { content.folders.map(Self.absolute) }
+
+    /// The catalog is listing folders: content tasks may still be on their way.
+    var contentChecking: Bool {
+        if case .scanning = status.phase { return true }
+        return false
+    }
 
     func addContentFolders() {
         let panel = NSOpenPanel()
@@ -301,10 +321,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.setContentSize(NSSize(width: 940, height: 660))
         window.center()
         window.delegate = self
+        tabWatch = model.$tab.sink { [weak self] tab in
+            // Published before the change: pass the new value on.
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateViewing(tab: tab) } }
+        }
+        model.onContentFoldersChanged = { [weak self] in self?.updateViewing() }
     }
 
-    func windowWillClose(_ notification: Notification) { model.stopRecording() }
+    private var tabWatch: AnyCancellable?
+
+    func windowWillClose(_ notification: Notification) {
+        model.stopRecording()
+        model.delegate?.endViewing(.settings)
+    }
     func windowDidResignKey(_ notification: Notification) { model.stopRecording() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { updateViewing() }
+    func windowDidMiniaturize(_ notification: Notification) { updateViewing() }
+    func windowDidDeminiaturize(_ notification: Notification) { updateViewing() }
+
+    /// The window's status bar shows the content figures live while it can be seen: on screen,
+    /// not minimized or covered. Folder figures only while 索引范围 is the page.
+    private func updateViewing(tab: SettingsTab? = nil) {
+        guard let window, let delegate = model.delegate else { return }
+        let seen = window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+        if seen {
+            // The status bar is on every page; folder figures only where the folders are listed.
+            delegate.beginViewing(.settings, folders: (tab ?? model.tab) == .scope ? model.contentFolderPaths : [])
+        } else {
+            delegate.endViewing(.settings)
+        }
+    }
 
     required init?(coder: NSCoder) { fatalError() }
 
@@ -313,6 +359,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         model.refresh()
         showWindow(nil)
         bringToFront(window)
+        updateViewing(tab: tab)
     }
 
     func refresh() { model.refresh() }
@@ -342,28 +389,35 @@ struct SettingsView: View {
             .frame(width: 200)
             .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
             Divider()
-            ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    switch model.tab {
-                    case .general: GeneralPane(model: model)
-                    case .scope: ScopePane(model: model)
-                    case .syntax: SyntaxPane(model: model)
-                    case .openWith: OpenWithPane(model: model)
-                    case .diagnostics: DiagnosticsPane(model: model)
-                    case .privacy: PrivacyPane(model: model)
+            // The status bar belongs to the page side, as in Finder (the sidebar runs to the bottom).
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            switch model.tab {
+                            case .general: GeneralPane(model: model)
+                            case .scope: ScopePane(model: model)
+                            case .syntax: SyntaxPane(model: model)
+                            case .openWith: OpenWithPane(model: model)
+                            case .diagnostics: DiagnosticsPane(model: model)
+                            case .privacy: PrivacyPane(model: model)
+                            }
+                            Color.clear.frame(height: 1).id("pane-end")
+                        }
+                        .padding(24)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Color.clear.frame(height: 1).id("pane-end")
+                    // Dev: XS_SETTINGS_BOTTOM=1 scrolls to the end of the pane (screenshots).
+                    .onAppear {
+                        if ProcessInfo.processInfo.environment["XS_SETTINGS_BOTTOM"] == "1" {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { withAnimation { proxy.scrollTo("pane-end", anchor: .bottom) } }
+                        }
+                    }
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            // Dev: XS_SETTINGS_BOTTOM=1 scrolls to the end of the pane (screenshots).
-            .onAppear {
-                if ProcessInfo.processInfo.environment["XS_SETTINGS_BOTTOM"] == "1" {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { withAnimation { proxy.scrollTo("pane-end", anchor: .bottom) } }
-                }
-            }
+                // Progress lives in a status bar: one line of fixed height, so the pages do not
+                // grow and shrink as rounds of work start and end.
+                Divider()
+                SettingsStatusBar(model: model)
             }
         }
         .frame(width: 940, height: 660)
@@ -537,17 +591,15 @@ struct ScopePane: View {
                             Image(systemName: "folder")
                             Text(folder).font(.system(size: 13))
                             Spacer()
-                            Button(L("重新扫描")) { model.rescan(folder) }.buttonStyle(.borderless)
-                            Button(L("移除")) {
+                            RowButton.rescan { model.rescan(folder) }
+                            RowButton.remove {
                                 model.scope.folders.removeAll { $0 == folder }
                                 model.commitScope()
                             }
-                            .foregroundStyle(.red)
-                            .buttonStyle(.borderless)
                         }
                     }
                     if model.scope.folders.isEmpty { Text(L("还没有文件夹。")).font(.system(size: 12)).foregroundStyle(.secondary) }
-                    Button(L("＋ 添加")) { model.addFolders() }.buttonStyle(.borderless)
+                    RowButton.add(L("添加文件夹")) { model.addFolders() }
                 }
             }
             // Specified folders already take any folder; the list stays visible while it has entries.
@@ -562,17 +614,15 @@ struct ScopePane: View {
                             Image(systemName: "folder")
                             Text(folder).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                             Spacer()
-                            Button(L("重新扫描")) { model.rescan(folder) }.buttonStyle(.borderless)
-                            Button(L("移除")) {
+                            RowButton.rescan { model.rescan(folder) }
+                            RowButton.remove {
                                 model.scope.extraFolders.removeAll { $0 == folder }
                                 model.commitScope()
                             }
-                            .foregroundStyle(.red)
-                            .buttonStyle(.borderless)
                         }
                     }
                     if model.scope.extraFolders.isEmpty { Text(L("没有。")).font(.system(size: 12)).foregroundStyle(.secondary) }
-                    Button(L("＋ 添加")) { model.addExtraFolders() }.buttonStyle(.borderless)
+                    RowButton.add(L("添加文件夹")) { model.addExtraFolders() }
                 }
             }
             Divider()
@@ -583,12 +633,10 @@ struct ScopePane: View {
                     HStack {
                         Text(rule).font(.system(size: 12.5, design: .monospaced))
                         Spacer()
-                        Button(L("移除")) {
+                        RowButton.remove {
                             model.scope.excludes.removeAll { $0 == rule }
                             model.commitScope()
                         }
-                        .foregroundStyle(.red)
-                        .buttonStyle(.borderless)
                     }
                 }
                 HStack {
@@ -702,6 +750,74 @@ struct PrivacyPane: View {
     }
 }
 
+/// Like Finder's status bar: both indexes in one line at the bottom of the window. Live while
+/// the window is on screen (the controller observes the content index then).
+struct SettingsStatusBar: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        // Redrawn every second: a finished round's note leaves on its own (no status change
+        // arrives to redraw it).
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 18) {
+                Text(ContentStatusText.nameLine(model.status))
+                Text(contentLine(now: context.date))
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 14)
+            .frame(height: 26)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+        }
+    }
+
+    private func contentLine(now: Date) -> String {
+        guard model.contentStatus != nil else { return L("内容索引未启动") }
+        var s = L("内容索引：%@", ContentStatusText.summary(model.contentStatus, paused: model.contentPaused, checking: model.contentChecking,
+                                                          hasFolders: !model.content.folders.isEmpty))
+        if let recent = ContentStatusText.recent(model.contentStatus, now: now) { s += " · " + recent }
+        return s
+    }
+}
+
+/// Actions on a row of a Settings list. Bordered, so they read as buttons at first sight
+/// (plain red and grey words did not).
+struct RowButton: View {
+    let title: String
+    let symbol: String
+    var destructive = false
+    var help: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol).font(.system(size: 12))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(destructive ? .red : nil)
+        .foregroundStyle(destructive ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+        .help(help ?? "")
+    }
+
+    static func rescan(_ action: @escaping () -> Void) -> RowButton {
+        RowButton(title: L("重新扫描"), symbol: "arrow.clockwise", help: L("重新列出这个文件夹，补上实时更新可能漏掉的变化"), action: action)
+    }
+
+    static func remove(_ action: @escaping () -> Void) -> RowButton {
+        RowButton(title: L("移除"), symbol: "minus.circle", destructive: true, action: action)
+    }
+
+    static func add(_ title: String, _ action: @escaping () -> Void) -> RowButton {
+        RowButton(title: title, symbol: "plus", action: action)
+    }
+}
+
 struct ContentCard: View {
     @ObservedObject var model: SettingsModel
     @State private var showFailed = false
@@ -714,35 +830,54 @@ struct ContentCard: View {
         }
     }
 
-    var statusLine: String {
-        guard let st = model.contentStatus else { return L("内容索引未启动") }
-        var parts = [L("%@ 个文件", "\(Theme.count(st.indexed))")]
-        if model.contentPaused { parts.insert(L("已暂停"), at: 0) }
-        if st.lastError != nil { parts.append(L("写入暂时出错，正在自动重试")) }
-        if st.pending > 0 { parts.append(L("待处理 %@", "\(Theme.count(st.pending))")) }
-        if st.failed > 0 { parts.append(L("%@ 个提取失败", "\(st.failed)")) }
-        return parts.joined(separator: " · ")
+    private func folderStatus(_ folder: String) -> ContentIndexer.FolderStatus? {
+        let path = SettingsModel.absolute(folder)
+        return model.contentStatus?.folders.first { $0.path == path }
+    }
+
+    private func folderLine(_ folder: String) -> String {
+        let path = SettingsModel.absolute(folder)
+        return ContentStatusText.folder(folderStatus(folder), counted: !(model.contentStatus?.folders.isEmpty ?? true), paused: model.contentPaused,
+                                        checking: model.contentChecking, exists: FileManager.default.fileExists(atPath: path))
+    }
+
+    /// The folder whose removal waits for confirmation: it deletes that folder's content index.
+    @State private var removing: String?
+
+    private var removalMessage: String {
+        guard let folder = removing, let f = folderStatus(folder), f.known, f.indexed + f.failed > 0 else {
+            return L("这个文件夹的内容索引会被删除，正文将搜不到；文件本身不受影响。")
+        }
+        return L("这个文件夹中 %@ 个文件的内容索引会被删除，正文将搜不到；文件本身不受影响。重新添加后需要重新提取。", Theme.count(f.indexed + f.failed))
     }
 
     var body: some View {
-        Card(title: L("内容索引"), subtitle: L("只提取下面的文件夹；网络盘默认不建内容索引。") + "  " + statusLine) {
-            VStack(alignment: .leading, spacing: 4) {
+        Card(title: L("内容索引"), subtitle: L("只提取下面的文件夹；网络盘默认不建内容索引。")) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(model.content.folders, id: \.self) { folder in
                     HStack {
                         Image(systemName: "folder")
-                        Text(folder).font(.system(size: 13))
-                        Spacer()
-                        Button(L("重新扫描")) { model.rescan(folder) }.buttonStyle(.borderless)
-                        Button(L("移除")) {
-                            model.content.folders.removeAll { $0 == folder }
-                            model.commitContent()
-                        }
-                        .foregroundStyle(.red)
-                        .buttonStyle(.borderless)
+                        Text(folder).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 12)
+                        Text(folderLine(folder)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                        RowButton.rescan { model.rescan(folder) }
+                        RowButton.remove { removing = folder }
                     }
                 }
                 if model.content.folders.isEmpty { Text(L("还没有文件夹，内容搜索暂不可用。")).font(.system(size: 12)).foregroundStyle(.secondary) }
-                Button(L("＋ 添加文件夹")) { model.addContentFolders() }.buttonStyle(.borderless)
+                RowButton.add(L("添加文件夹")) { model.addContentFolders() }
+            }
+            .confirmationDialog(L("从内容索引中移除“%@”？", removing ?? ""), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+                Button(L("移除"), role: .destructive) {
+                    if let folder = removing {
+                        model.content.folders.removeAll { $0 == folder }
+                        model.commitContent()
+                    }
+                    removing = nil
+                }
+                Button(L("取消"), role: .cancel) { removing = nil }
+            } message: {
+                Text(removalMessage)
             }
             Divider()
             HStack(alignment: .firstTextBaseline) {

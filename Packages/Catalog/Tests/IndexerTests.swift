@@ -1023,3 +1023,157 @@ private func splitScopes(_ box: Sandbox, excludes: [String] = []) -> NameScope {
     try p.box.write("docs/new.txt", "新增 rho7")
     #expect(p.until { try p.search("rho7") == ["new.txt"] })
 }
+
+@Test func roundCountsEveryFinishedTask() throws {
+    let p = try Pipeline("round") { $0.batchSize = 4 }
+    defer { p.stop() }
+    try p.start()
+    #expect(p.settle())
+    // Queued while paused: change events can arrive in pieces, and each piece that finds the
+    // queue empty would start a round of its own.
+    p.indexer.setPaused(true)
+    for i in 0..<10 { try p.box.write("docs/r\(i).txt", "轮次 kappa\(i)") }
+    #expect(p.until { p.indexer.status.pending == 10 })
+    p.indexer.setPaused(false)
+    #expect(p.until { try p.search("kappa3") == ["r3.txt"] && p.indexer.status.pending == 0 && !p.indexer.status.working })
+    let st = p.indexer.status
+    #expect(st.roundDone == 10 && st.roundTotal == 10, "\(st.roundDone) / \(st.roundTotal)")
+    // The next round starts from zero.
+    try p.box.write("docs/next.txt", "下一轮 lambda1")
+    #expect(p.until { try p.search("lambda1") == ["next.txt"] && !p.indexer.status.working })
+    #expect(p.indexer.status.roundDone == 1 && p.indexer.status.roundTotal == 1)
+}
+
+@Test func unobservedIndexerReportsOnlyEssentials() throws {
+    let p = try Pipeline("quiet")
+    defer { p.stop() }
+    try p.start()
+    #expect(p.settle())
+    let reports = OSAllocatedUnfairLock(initialState: 0)
+    p.indexer.onStatusChange = { reports.withLock { $0 += 1 } }
+    for i in 0..<5 { try p.box.write("docs/q\(i).txt", "安静 mu\(i)") }
+    #expect(p.until { try p.search("mu4") == ["q4.txt"] && p.indexer.status.pending == 0 })
+    #expect(reports.withLock { $0 } == 0, "progress is not reported to nobody")
+    p.indexer.setPaused(true)
+    #expect(reports.withLock { $0 } == 1, "pausing is")
+    p.indexer.setPaused(false)
+    reports.withLock { $0 = 0 }
+    p.indexer.observe(for: 10)
+    let deadline = Date().addingTimeInterval(5)
+    while reports.withLock({ $0 }) == 0 && Date() < deadline { usleep(20_000) }
+    #expect(reports.withLock { $0 } >= 1, "a new viewer gets the figures at once")
+    #expect(p.indexer.status.indexed == 5)
+}
+
+@Test func observationEndsWhenTheLeaseRunsOut() throws {
+    let p = try Pipeline("lease") { $0.observeTick = 0.1 }
+    defer { p.stop() }
+    try p.start()
+    p.indexer.observe(for: 0.3)
+    #expect(p.indexer.observationActive && p.indexer.isObserved)
+    let deadline = Date().addingTimeInterval(5)
+    while p.indexer.observationActive && Date() < deadline { usleep(50_000) }
+    #expect(!p.indexer.observationActive && !p.indexer.isObserved)
+    p.indexer.observe(for: 10)
+    p.indexer.stopObserving()
+    #expect(!p.indexer.observationActive)
+}
+
+@Test func folderFiguresCountOnlyThatFolder() throws {
+    let p = try Pipeline("folders")
+    defer { p.stop() }
+    try p.box.write("docs/a/one.txt", "甲 nu1")
+    try p.box.write("docs/a/deep/two.txt", "乙 nu2")
+    try p.box.write("docs/b/three.txt", "丙 nu3")
+    try p.start()
+    #expect(p.until { try p.search("nu1") == ["one.txt"] && p.search("nu2") == ["two.txt"] && p.search("nu3") == ["three.txt"] })
+    p.indexer.observe(for: 10, folders: [p.box.p("docs/a"), p.box.p("docs/b"), p.box.p("docs/missing")])
+    let deadline = Date().addingTimeInterval(5)
+    while p.indexer.status.folders.count < 3 && Date() < deadline { usleep(20_000) }
+    let f = p.indexer.status.folders
+    #expect(f.map(\.path) == [p.box.p("docs/a"), p.box.p("docs/b"), p.box.p("docs/missing")])
+    #expect(f.first?.known == true && f.first?.indexed == 2 && f.first?.pending == 0)
+    #expect(f.dropFirst().first?.indexed == 1)
+    #expect(f.last?.known == false)
+    p.indexer.stopObserving()
+    #expect(!p.indexer.observationActive)
+    #expect(p.indexer.status.folders.isEmpty)
+}
+
+@Test func contentFolderInsideNameScopeIsDecidedWithoutListing() throws {
+    let p = try Pipeline("content-fast")
+    defer { p.stop() }
+    p.names.onContentTasks = { [indexer = p.indexer] in indexer.wake() }
+    try p.box.write("docs/d.txt", "已有 omicron1")
+    try p.box.write("more/m.txt", "新增 omicron2")
+    try p.box.write("more/sub/n.md", "新增 omicron3")
+    try p.start()
+    #expect(p.settle())
+    #expect(try p.search("omicron2").isEmpty)
+    let passes = p.names.fullScopePasses
+    p.names.setContentScope(ContentScope(folders: [p.box.p("docs"), p.box.p("more")]))
+    #expect(p.until { try p.search("omicron2") == ["m.txt"] && p.search("omicron3") == ["n.md"] })
+    // Removed: its files leave the index again, the other folder's stay.
+    p.names.setContentScope(ContentScope(folders: [p.box.p("docs")]))
+    #expect(p.until { try p.search("omicron2").isEmpty && p.search("omicron3").isEmpty })
+    #expect(try p.search("omicron1") == ["d.txt"])
+    // A type switched off: its files leave too.
+    var noText = ContentScope(folders: [p.box.p("docs")])
+    noText.types.remove(.text)
+    p.names.setContentScope(noText)
+    #expect(p.until { try p.search("omicron1").isEmpty })
+    #expect(p.names.fullScopePasses == passes, "decided from the catalog, nothing listed again")
+}
+
+@Test func contentFolderOutsideTheNameScopeStillReconciles() throws {
+    let p = try Pipeline("content-full")
+    defer { p.stop() }
+    try p.box.write("names/a.txt", "名称 pi1")
+    try p.box.write("other/b.txt", "外部 pi2")
+    p.names.start(scope: splitScopes(p.box), content: ContentScope(folders: [p.box.p("names")]))
+    #expect(p.names.waitUntilIdle())
+    try p.indexer.start()
+    #expect(p.settle())
+    let passes = p.names.fullScopePasses
+    p.names.setContentScope(ContentScope(folders: [p.box.p("names"), p.box.p("other")]))
+    #expect(p.until { try p.search("pi2") == ["b.txt"] })
+    #expect(p.names.fullScopePasses == passes + 1, "its files are not in the catalog: listed")
+    p.names.setContentScope(ContentScope(folders: [p.box.p("names")]))
+    #expect(p.until { try p.search("pi2").isEmpty })
+    #expect(try p.search("pi1") == ["a.txt"])
+}
+
+@Test func contentFolderUnderAPathRuleStillReconciles() throws {
+    let p = try Pipeline("content-rule")
+    defer { p.stop() }
+    try p.box.write("names/open/c.txt", "公开 rho1")
+    try p.box.write("names/open/hidden-here/d.txt", "排除处 rho2")
+    p.names.start(scope: splitScopes(p.box, excludes: [p.box.p("names/open/hidden-here")]), content: ContentScope(folders: [p.box.p("names/x")]))
+    #expect(p.names.waitUntilIdle())
+    try p.indexer.start()
+    #expect(p.settle())
+    let passes = p.names.fullScopePasses
+    // The folder holds a place the name rules exclude: only a listing brings its files in.
+    p.names.setContentScope(ContentScope(folders: [p.box.p("names/open")]))
+    #expect(p.until { try p.search("rho1") == ["c.txt"] && p.search("rho2") == ["d.txt"] })
+    #expect(p.names.fullScopePasses == passes + 1)
+}
+
+@Test func removingAFolderTakesFewCommits() throws {
+    let p = try Pipeline("remove-fast")
+    defer { p.stop() }
+    p.names.onContentTasks = { [indexer = p.indexer] in indexer.wake() }
+    for i in 0..<300 { try p.box.write("docs/gone/g\(i).txt", "移除 sigma\(i)") }
+    try p.box.write("docs/keep/k.txt", "保留 sigma-keep")
+    p.names.start(scope: p.box.scope, content: ContentScope(folders: [p.box.p("docs/gone"), p.box.p("docs/keep")]))
+    #expect(p.names.waitUntilIdle())
+    try p.indexer.start()
+    #expect(p.until { p.indexer.status.indexed == 301 && p.indexer.status.pending == 0 })
+    let commits = p.indexer.status.committedBatches
+    p.names.setContentScope(ContentScope(folders: [p.box.p("docs/keep")]))
+    #expect(p.until { try p.search("sigma7").isEmpty && p.indexer.status.pending == 0 && !p.indexer.status.working })
+    let st = p.indexer.status
+    #expect(st.committedBatches - commits <= 2, "300 deletions: \(st.committedBatches - commits) commits")
+    #expect(st.roundRemovalsOnly && st.roundDone == 300 && st.roundEnded >= st.roundStarted && st.roundStarted > 0)
+    #expect(try p.search("sigma-keep") == ["k.txt"])
+}

@@ -72,6 +72,9 @@ public final class NameService: @unchecked Sendable {
 
     /// Called on an internal queue when content tasks wait for the indexer.
     public var onContentTasks: (@Sendable () -> Void)?
+    private var lastTaskWake = Date.distantPast  // queue
+    /// Scope changes that reconciled every root (tests: a content folder change avoids them).
+    private(set) var fullScopePasses = 0
     /// Identity of the open catalog: file ids mean something only within it.
     public var catalogId: String? { state.withLock { $0.catalogId } }
 
@@ -104,10 +107,53 @@ public final class NameService: @unchecked Sendable {
         queue.async { [self] in setScopes(scope, content: contentScope) }
     }
 
-    /// Changes the content scope: one reconcile re-decides which files are content-indexed and
-    /// writes index / delete tasks for the difference (§6.2).
+    /// Changes the content scope: the files concerned are decided again and get index / delete
+    /// tasks for the difference (§6.2). Where the catalog already holds every one of them —
+    /// folders inside the name scope — that is a pass over their catalog rows, without listing
+    /// anything; otherwise every root is reconciled.
     public func setContentScope(_ content: ContentScope?) {
-        queue.async { [self] in setScopes(scope, content: content) }
+        queue.async { [self] in
+            guard let folders = foldersToDecideAgain(from: contentScope, to: content) else {
+                setScopes(scope, content: content)
+                return
+            }
+            setContentOnly(content, folders: folders)
+        }
+    }
+
+    /// Folders whose files must be decided again after a content scope change, when the catalog
+    /// already holds all of them; nil when a full reconcile is needed (a folder reaching outside
+    /// the name scope, whose content-only entries only a listing adds or drops).
+    func foldersToDecideAgain(from old: ContentScope?, to new: ContentScope?) -> [String]? {
+        guard let context, old != nil, new != nil else { return nil }
+        let before = Set(old?.roots(home: home) ?? []), after = Set(new?.roots(home: home) ?? [])
+        let rulesChanged = old?.excludes != new?.excludes || old?.types != new?.types
+        let affected = rulesChanged ? before.union(after) : before.symmetricDifference(after)
+        for folder in affected {
+            guard let root = context.nameRoots.filter({ PathUtil.isWithin(folder, $0) }).max(by: { $0.count < $1.count }),
+                  context.rules.reaches(folder, from: root), !context.rules.hasPathRule(within: folder),
+                  !context.hardExcludes.contains(where: { PathUtil.isWithin($0, folder) || PathUtil.isWithin(folder, $0) }) else { return nil }
+        }
+        return affected.sorted()
+    }
+
+    /// On `queue`. The roots stay the same (every folder concerned is inside a name root), so
+    /// the watcher keeps running.
+    private func setContentOnly(_ content: ContentScope?, folders: [String]) {
+        do {
+            guard let catalog else { return }
+            contentScope = content
+            let next = makeContext(scope)
+            guard next.roots == context?.roots else { return setScopes(scope, content: content) }
+            context = next
+            if !folders.isEmpty {
+                let json = String(decoding: try JSONEncoder().encode(folders), as: UTF8.self)
+                try catalog.append([(.content, json, 0)], lastEventId: nil)
+            }
+            // Also when only the size limit changed: the indexer applies that one itself.
+            try catalog.setMeta("fingerprint", fingerprint())
+            process()
+        } catch { fail(error) }
     }
 
     /// 立即更新 (nil: every root) or 重新扫描 one folder: the folder is listed again and compared
@@ -128,6 +174,7 @@ public final class NameService: @unchecked Sendable {
     private func setScopes(_ scope: NameScope, content: ContentScope?) {
         do {
             guard let catalog else { return }
+            fullScopePasses += 1
             self.scope = scope
             contentScope = content
             context = makeContext(scope)
@@ -563,6 +610,13 @@ public final class NameService: @unchecked Sendable {
                 let stop = stopRequested
                 let reconciler = Reconciler(catalog: catalog, context: context, seq: last.jseq, cancelled: { stop.withLock { $0 } }) { [weak self] changes in
                     self?.publish(changes)
+                }
+                // A long scan commits in chunks: extraction starts with the first, at most a
+                // wake-up a second (the indexer drains whatever is queued when it wakes).
+                reconciler.onTasksCommitted = { [weak self] in
+                    guard let self, Date().timeIntervalSince(lastTaskWake) >= 1 else { return }
+                    lastTaskWake = Date()
+                    onContentTasks?()
                 }
                 do {
                     try reconciler.run(batch)

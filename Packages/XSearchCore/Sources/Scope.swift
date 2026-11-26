@@ -118,6 +118,15 @@ public struct ExclusionRules: Sendable {
         return false
     }
 
+    /// A path rule excludes `path` itself or a place inside it. Content folders outrank path
+    /// rules, so there the catalog holds content-only entries a name scan alone would not list.
+    public func hasPathRule(within path: String) -> Bool {
+        rules.contains { rule in
+            if case .prefix(let p) = rule { return PathUtil.isWithin(p, path) || PathUtil.isWithin(path, p) }
+            return false
+        }
+    }
+
     /// Whether a scan of `root` reaches `path`: inside it, and no directory on the way (the path
     /// itself included) is excluded. Hidden means a leading dot here, as for event paths.
     public func reaches(_ path: String, from root: String) -> Bool {

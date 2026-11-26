@@ -11,6 +11,10 @@ struct JournalOp: Equatable {
         case rescan = 2
         /// Scope changed: sync root rows, then rescan every root.
         case scope = 3
+        /// Content folders added or removed, or content rules changed, where the catalog already
+        /// holds every file concerned (inside the name scope): their files are decided again,
+        /// nothing is listed. `path`: JSON array of absolute folder paths.
+        case content = 4
     }
     var jseq: Int64
     var kind: Kind

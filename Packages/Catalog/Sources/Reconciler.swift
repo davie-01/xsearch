@@ -60,7 +60,12 @@ final class Reconciler {
     private var contentRemoved = Set<Int64>()
     private var movedDirs = Set<Int64>()
     private var refreshAllContent = false
+    /// Directories whose files are decided again (a `.content` op).
+    private var contentDirs: [Int64] = []
     private var opCounter: Int64?
+    /// Called (on the caller's queue) after a commit that wrote content tasks, so extraction can
+    /// start while a long scan goes on.
+    var onTasksCommitted: (() -> Void)?
     /// Content tasks written in this batch (tests, status).
     private(set) var tasksWritten = 0
     /// Entries written to the catalog in this batch (status display).
@@ -129,10 +134,12 @@ final class Reconciler {
     static let maxTransaction: TimeInterval = 0.5
 
     private func commit() throws {
+        let before = tasksWritten
         try settleContent()
         try catalog.db.exec("COMMIT")
         catalog.db.resetStatements()
         inTransaction = false
+        if tasksWritten > before { onTasksCommitted?() }
         if !changes.isEmpty { publish(changes); changes.removeAll(keepingCapacity: true) }
         writesSinceCommit = 0
     }
@@ -172,6 +179,13 @@ final class Reconciler {
             }
         case .rescan:
             try plan(PathUtil.standardize(op.path), recursive: true, &tasks)
+        case .content:
+            let paths = (try? JSONDecoder().decode([String].self, from: Data(op.path.utf8))) ?? []
+            for p in paths.map(PathUtil.standardize) {
+                guard let root = try root(containing: p) else { continue }
+                let (row, rowPath) = try catalog.nearest(p, root: root)
+                if rowPath == p { contentDirs.append(row.id) }  // not catalogued: nothing of it to decide
+            }
         case .fsevent:
             let path = PathUtil.standardize(op.path)
             if op.flags & (EventFlag.userDropped | EventFlag.kernelDropped | EventFlag.eventIdsWrapped) != 0 {
@@ -602,6 +616,7 @@ final class Reconciler {
             contentRemoved.removeAll()
             movedDirs.removeAll()
             refreshAllContent = false
+            contentDirs.removeAll()
         }
         guard inTransaction else { return }
         // Re-read every time: IndexService also bumps op_seq (extractor upgrades, rebuilds).
@@ -617,6 +632,7 @@ final class Reconciler {
         var touched = contentTouched
         for d in movedDirs { touched.formUnion(try catalog.descendantFiles(of: d)) }
         if refreshAllContent { touched.formUnion(try catalog.contentCandidates()) }
+        for d in contentDirs { touched.formUnion(try catalog.descendantFiles(of: d)) }
         touched.subtract(contentRemoved)
         for id in touched {
             guard let info = try catalog.contentInfo(id), !info.deleted, !info.flags.contains(.directory) else { continue }

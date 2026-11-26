@@ -161,10 +161,11 @@ final class IndexServiceClient {
         }
     }
 
-    /// Pulls a fresh snapshot (asynchronous; `onUpdate` fires when it arrives).
+    /// Pulls a fresh snapshot, recounted by the service (asynchronous; `onUpdate` fires when it
+    /// arrives).
     func refresh() {
         if let local {
-            snapshot = IndexServiceSnapshot(status: local.status, indexPath: local.indexURL.path)
+            snapshot = IndexServiceSnapshot(status: local.currentStatus(), indexPath: local.indexURL.path)
             setPath(snapshot.indexPath)
             onUpdate?()
             return
@@ -182,6 +183,21 @@ final class IndexServiceClient {
         snapshot = snap
         setPath(snap.indexPath)
         onUpdate?()
+    }
+
+    /// How long one observation lasts without renewal; viewers renew well before
+    /// (`AppDelegate.observationRenewal`), so a lost message or a restarted service only delays
+    /// the figures, and a viewer that vanished stops costing anything soon after.
+    static let observationLease: TimeInterval = 15
+
+    /// A viewer shows the content figures (and these folders' own); renewed while it does.
+    func observe(folders: [String]) {
+        if let local { local.observe(for: Self.observationLease, folders: folders); return }
+        proxy?.observe(seconds: Self.observationLease, folders: (try? JSONEncoder().encode(folders)) ?? Data())
+    }
+
+    func stopObserving() {
+        if let local { local.stopObserving() } else { proxy?.stopObserving() }
     }
 
     /// The catalog queued tasks.

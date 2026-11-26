@@ -17,6 +17,11 @@ import Foundation
     func snapshot(reply: @escaping (Data) -> Void)
     /// The catalog queued new tasks.
     func wake()
+    /// A viewer shows the figures for the next `seconds` (renewed while in view): recount them
+    /// and report every change. `folders`: JSON `[String]` of absolute paths to count as well.
+    func observe(seconds: Double, folders: Data)
+    /// The viewer went away.
+    func stopObserving()
     func rebuildContentIndex(reply: @escaping (String?) -> Void)
     /// Extracts these files again (JSON `[Int64]` of catalog file ids: plain data crosses XPC
     /// without class allow-lists). Replies how many were queued.
@@ -30,7 +35,8 @@ import Foundation
 }
 
 /// The app's side of the connection: the service tells it when the indexer's status changes
-/// (at most about once a second while it works, never while idle), instead of being polled.
+/// instead of being polled — progress at most about once a second while a viewer observes,
+/// otherwise only what readers and controls depend on (instance, running, paused, errors).
 @objc public protocol IndexServiceClientProtocol {
     /// JSON `IndexServiceSnapshot`.
     func statusChanged(_ snapshot: Data)

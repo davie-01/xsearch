@@ -48,21 +48,36 @@ final class Service: NSObject, IndexServiceProtocol, @unchecked Sendable {
         }
     }
 
+    /// A pull is recounted: whoever asks shows the figures now.
     func snapshot(reply: @escaping (Data) -> Void) {
-        reply(snapshotData())
+        reply(snapshotData(fresh: true))
     }
 
-    private func snapshotData() -> Data {
+    func observe(seconds: Double, folders: Data) {
         lock.lock()
         let ix = indexer
         lock.unlock()
-        let status = ix?.status ?? ContentIndexer.Status()
+        ix?.observe(for: seconds, folders: (try? JSONDecoder().decode([String].self, from: folders)) ?? [])
+    }
+
+    func stopObserving() {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        ix?.stopObserving()
+    }
+
+    private func snapshotData(fresh: Bool = false) -> Data {
+        lock.lock()
+        let ix = indexer
+        lock.unlock()
+        let status = (fresh ? ix?.currentStatus() : ix?.status) ?? ContentIndexer.Status()
         let snap = IndexServiceSnapshot(status: status, indexPath: ix?.indexURL(of: status).path)
         return (try? JSONEncoder().encode(snap)) ?? Data()
     }
 
-    /// At most one message a second while the indexer works: the first change goes out at once,
-    /// later ones within the second fold into one at its end. Idle sends nothing.
+    /// At most one message a second: the first change goes out at once, later ones within the
+    /// second fold into one at its end. The indexer reports progress only while observed.
     private func statusChanged() {
         notifyQueue.async { [self] in
             guard !notifyScheduled else { return }

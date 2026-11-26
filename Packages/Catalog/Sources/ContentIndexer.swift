@@ -33,6 +33,26 @@ public final class ContentIndexer: @unchecked Sendable {
         public var lastError: String?
         /// Active instance, published together with the figures.
         public var instanceId = ""
+        /// This round of work, from the moment tasks became ready after the queue had run dry:
+        /// tasks finished so far, and those plus the ones still queued. A finished round keeps
+        /// its figures until the next one starts.
+        public var roundDone = 0
+        public var roundTotal = 0
+        /// Ready tasks remain (or a batch is running): the round is not over.
+        public var working = false
+        /// When this round started and ended (seconds since 1970; 0: not yet).
+        public var roundStarted: Double = 0
+        public var roundEnded: Double = 0
+        /// Every task of this round so far removed text (content folders taken out).
+        public var roundRemovalsOnly = false
+        /// Of `pending`, deletions.
+        public var removing = 0
+        /// Of `pending`, tasks waiting for a retry time (back-off, a file that is still changing).
+        public var delayed = 0
+        /// Tasks finished per second over the last two minutes of this round; 0 while unknown.
+        public var rate: Double = 0
+        /// The folders a viewer asked about (`observe(for:folders:)`), in that order.
+        public var folders: [FolderStatus] = []
 
         public init(pending: Int = 0, failed: Int = 0, indexed: Int = 0, committedBatches: UInt64 = 0, running: Bool = false, lastError: String? = nil) {
             self.pending = pending
@@ -41,6 +61,25 @@ public final class ContentIndexer: @unchecked Sendable {
             self.committedBatches = committedBatches
             self.running = running
             self.lastError = lastError
+        }
+    }
+
+    /// Figures for one content folder (and everything below it).
+    public struct FolderStatus: Codable, Sendable, Equatable {
+        public var path: String
+        /// The catalog knows the folder: false until it has been listed (or when it is missing).
+        public var known = false
+        public var indexed = 0
+        public var failed = 0
+        /// Files below it waiting for extraction.
+        public var pending = 0
+
+        public init(path: String, known: Bool = false, indexed: Int = 0, failed: Int = 0, pending: Int = 0) {
+            self.path = path
+            self.known = known
+            self.indexed = indexed
+            self.failed = failed
+            self.pending = pending
         }
     }
 
@@ -96,6 +135,7 @@ public final class ContentIndexer: @unchecked Sendable {
     var backoffBase: TimeInterval = 30
     var maxAttempts = 3
     var batchSize = 64
+    var deleteBatchSize = 4096
     /// A batch ends when this much text has been extracted: it all stays in memory until staged.
     /// What was not reached goes back to the queue. One text can exceed it, so a batch always
     /// makes progress. Measured: 64 texts of 20 MiB took 3.4 GB without this.
@@ -168,14 +208,152 @@ public final class ContentIndexer: @unchecked Sendable {
     /// The status changed (any thread): IndexService tells the app instead of being polled.
     public var onStatusChange: (@Sendable () -> Void)?
 
-    /// Every status change goes through here, so `onStatusChange` sees each one (and only those).
+    /// Every status change goes through here. `onStatusChange` hears about each one while a
+    /// viewer observes; otherwise only about what readers and controls depend on (the active
+    /// instance, running, paused, an error), so an unwatched indexer sends nothing for progress.
     private func setState(_ change: (inout Status) -> Void) {
-        let changed = state.withLockUnchecked { s in
+        let (changed, essential) = state.withLockUnchecked { s in
             let before = s
             change(&s)
-            return s != before
+            return (s != before, Self.essentialDiffers(before, s))
         }
-        if changed { onStatusChange?() }
+        if changed && (essential || isObserved) { onStatusChange?() }
+    }
+
+    static func essentialDiffers(_ a: Status, _ b: Status) -> Bool {
+        a.running != b.running || a.paused != b.paused || a.instanceId != b.instanceId || (a.lastError == nil) != (b.lastError == nil)
+    }
+
+    // MARK: Observation
+
+    /// Figures are recounted and reported only while someone looks at them: the menu bar menu
+    /// is open, or Settings › 索引范围 is in view. A viewer leases the observation for a few
+    /// seconds and renews it while it stays in view, so a viewer that goes away without saying
+    /// so (a crash, a lost message) ends it all the same. Counting uses a connection of its own
+    /// on its own queue: a long extraction batch does not hold the figures back.
+    private let statusQueue = DispatchQueue(label: "xsearch.indexer.status", qos: .utility)
+    private let observedFlag = OSAllocatedUnfairLock(initialState: false)
+    public var isObserved: Bool { observedFlag.withLock { $0 } }
+    private var statusCatalog: FileCatalog?  // statusQueue
+    private var observedUntil = Date.distantPast  // statusQueue
+    private var observedFolders: [String] = []  // statusQueue
+    private var statusTimer: DispatchSourceTimer?  // statusQueue
+    private var lastFolderCount = Date.distantPast  // statusQueue
+    /// Totals are recounted every tick; folders (a walk of their directories) less often.
+    var observeTick: TimeInterval = 1
+    var folderCountInterval: TimeInterval = 3
+
+    /// A viewer shows the figures for the next `seconds` (renewed while in view). `folders`:
+    /// absolute paths whose own figures it shows too. The first call reports at once.
+    public func observe(for seconds: TimeInterval, folders: [String] = []) {
+        statusQueue.async { [self] in
+            guard !stopped else { return }
+            observedUntil = Date().addingTimeInterval(seconds)
+            let foldersChanged = folders != observedFolders
+            observedFolders = folders
+            if statusTimer == nil {
+                observedFlag.withLock { $0 = true }
+                let t = DispatchSource.makeTimerSource(queue: statusQueue)
+                t.schedule(deadline: .now() + observeTick, repeating: observeTick, leeway: .milliseconds(100))
+                t.setEventHandler { [weak self] in self?.observationTick() }
+                t.resume()
+                statusTimer = t
+                recount(folders: true)
+                onStatusChange?()  // even when nothing changed: the viewer needs the figures now
+            } else if foldersChanged {
+                recount(folders: true)
+            }
+        }
+    }
+
+    /// The viewer went away: no more counting or reports.
+    public func stopObserving() {
+        statusQueue.async { [self] in endObservation() }
+    }
+
+    /// Recounted now (a viewer that shows the figures once, e.g. when the launcher opens).
+    public func currentStatus() -> Status {
+        statusQueue.sync {
+            if !stopped { recount(folders: false) }
+            if statusTimer == nil { statusCatalog = nil }
+        }
+        return status
+    }
+
+    /// Observation state (tests).
+    var observationActive: Bool { statusQueue.sync { statusTimer != nil } }
+
+    private func observationTick() {
+        guard !stopped, Date() < observedUntil else { endObservation(); return }
+        recount(folders: !observedFolders.isEmpty && Date().timeIntervalSince(lastFolderCount) >= folderCountInterval)
+    }
+
+    private func endObservation() {
+        statusTimer?.cancel()
+        statusTimer = nil
+        observedUntil = .distantPast
+        observedFolders = []
+        statusCatalog = nil
+        observedFlag.withLock { $0 = false }
+        let hadFolders = !status.folders.isEmpty
+        if hadFolders { state.withLock { $0.folders = [] } }  // nobody to tell
+    }
+
+    private func statusConnection() -> FileCatalog? {
+        if let statusCatalog { return statusCatalog }
+        statusCatalog = try? FileCatalog(url: directory.appendingPathComponent("catalog.sqlite"))
+        return statusCatalog
+    }
+
+    /// On statusQueue. A busy database just skips this count; the next tick tries again.
+    private func recount(folders includeFolders: Bool) {
+        guard let c = statusConnection() else { return }
+        defer { c.db.resetStatements() }
+        do {
+            let now = Date().timeIntervalSince1970
+            let (pending, removing) = try c.db.prepare("SELECT COUNT(*), COALESCE(SUM(kind = 2), 0) FROM content_tasks WHERE state IN (0, 1)")
+                .first { (Int($0.int(0)), Int($0.int(1))) } ?? (0, 0)
+            let delayed = try c.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE state = 0 AND not_before > ?").bind(now).first { Int($0.int(0)) } ?? 0
+            let failed = try c.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state = 4").first { Int($0.int(0)) } ?? 0
+            let indexed = try c.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state IN (1, 2, 3)").first { Int($0.int(0)) } ?? 0
+            var folders: [FolderStatus]?
+            if includeFolders {
+                folders = try observedFolders.map { try Self.folderStatus($0, in: c) }
+                lastFolderCount = Date()
+            }
+            setState {
+                $0.pending = pending
+                $0.removing = removing
+                $0.delayed = delayed
+                $0.failed = failed
+                $0.indexed = indexed
+                if let folders { $0.folders = folders }
+            }
+        } catch {
+            return
+        }
+    }
+
+    /// Walks the folder's directories (not its files), then counts the content files in them
+    /// through the parent index: 25,000 files took 30 ms; `parent_id IN (subquery)` took 6 s.
+    static func folderStatus(_ path: String, in c: FileCatalog) throws -> FolderStatus {
+        var out = FolderStatus(path: path)
+        guard let root = try c.rootRows().filter({ PathUtil.isWithin(path, $0.name) }).max(by: { $0.name.count < $1.name.count }) else { return out }
+        let (dir, dirPath) = try c.nearest(path, root: root)
+        guard dirPath == path else { return out }  // not listed yet, or gone
+        let s = try c.db.prepare("""
+            WITH RECURSIVE d(id) AS (SELECT ? UNION ALL SELECT f.id FROM files f JOIN d ON f.parent_id = d.id WHERE f.deleted = 0 AND (f.flags & 1) = 1)
+            SELECT COALESCE(SUM(f.content_state IN (1, 2, 3)), 0), COALESCE(SUM(f.content_state = 4), 0),
+                   COALESCE(SUM(EXISTS(SELECT 1 FROM content_tasks t WHERE t.file_id = f.id AND t.state IN (0, 1) AND t.kind = 1)), 0)
+            FROM d CROSS JOIN files f ON f.parent_id = d.id AND f.deleted = 0 WHERE f.in_content = 1
+            """).bind(dir.id)
+        if let (i, f, p) = try s.first({ (Int($0.int(0)), Int($0.int(1)), Int($0.int(2))) }) {
+            out.indexed = i
+            out.failed = f
+            out.pending = p
+        }
+        out.known = true
+        return out
     }
 
     /// Instance being rebuilt (written to) while readers stay on `instanceId` until it catches up.
@@ -231,6 +409,7 @@ public final class ContentIndexer: @unchecked Sendable {
     public func stop() {
         stopped = true
         workers.forEach { $0.cancel() }
+        statusQueue.sync { endObservation() }
         queue.sync {
             timer?.cancel(); timer = nil
             writer = nil
@@ -258,6 +437,9 @@ public final class ContentIndexer: @unchecked Sendable {
             queue.async { [weak self] in
                 guard let self, !self.stopped else { return }
                 self.workers.forEach { $0.resume() }
+                // The pause is not part of the speed.
+                self.rateSamples = [(Date(), self.roundCommitted)]
+                self.setState { $0.rate = 0 }
                 self.cycleAndReschedule()
             }
         }
@@ -288,7 +470,7 @@ public final class ContentIndexer: @unchecked Sendable {
     /// Once per burst of work, after `settleDelay` with nothing to do.
     private func reportSettled() {
         guard let last = lastWork, Date().timeIntervalSince(last) >= settleDelay,
-              status.pending == 0, rebuildId == nil, !needsRecovery, !stopped else { return }
+              workPending == 0, rebuildId == nil, !needsRecovery, !stopped else { return }
         lastWork = nil
         if let onSettled { settledQueue.async(execute: onSettled) }
     }
@@ -300,7 +482,7 @@ public final class ContentIndexer: @unchecked Sendable {
         var delay = Self.fallbackInterval
         // The settle report waits only for an idle indexer (see reportSettled): with tasks still
         // waiting for a retry, an elapsed settle delay pinned the timer to 50 ms until the retry.
-        if let last = lastWork, status.pending == 0, rebuildId == nil, !needsRecovery {
+        if let last = lastWork, workPending == 0, rebuildId == nil, !needsRecovery {
             delay = min(delay, max(0.05, settleDelay - Date().timeIntervalSince(last)))
         }
         if let last = lastExtraction {
@@ -620,7 +802,7 @@ public final class ContentIndexer: @unchecked Sendable {
 
     /// When no task is left, a running rebuild becomes the active instance.
     private func finishRebuildIfCaughtUp() throws {
-        guard let catalog, let id = rebuildId, try readyCount() == 0, status.pending == 0 else { return }
+        guard let catalog, let id = rebuildId, try readyCount() == 0, workPending == 0 else { return }
         let old = indexURL
         try catalog.db.transaction {
             try catalog.setMeta("content_instance", id)
@@ -703,12 +885,20 @@ public final class ContentIndexer: @unchecked Sendable {
             // Idle must stay idle: a read decides, so no write lock is taken without work.
             var worked = false
             while !interrupting, try readyCount() > 0 {
+                if !roundOpen { try startRound() }
                 let tasks = try claim(limit: batchSize)
                 if tasks.isEmpty { break }
-                try process(tasks)
+                if tasks.contains(where: { $0.kind == .index }), status.roundRemovalsOnly { setState { $0.roundRemovalsOnly = false } }
+                let finished = try process(tasks)
+                try finishBatch(finished)
                 worked = true
             }
             try refreshCounts(full: worked || Date().timeIntervalSince(lastFullCount) > 30)
+            if roundOpen, !interrupting, try readyCount() == 0 {
+                roundOpen = false
+                let now = Date().timeIntervalSince1970
+                setState { $0.working = false; $0.roundDone = roundCommitted; $0.roundTotal = roundCommitted + workPending; $0.roundEnded = now }
+            }
             if worked { lastWork = Date() }
             try finishRebuildIfCaughtUp()
             removeRetiredInstances()
@@ -740,6 +930,16 @@ public final class ContentIndexer: @unchecked Sendable {
         if fault?(f) == true { throw Crash() }
     }
 
+    private func claimable(now: Double, sql: String, _ limit: Int) throws -> [Task] {
+        guard let catalog else { return [] }
+        let s = try catalog.db.prepare("SELECT file_id, op_seq, kind, attempts FROM content_tasks WHERE (\(Self.claimable)) \(sql)").bind(now, now, limit)
+        var out: [Task] = []
+        while try s.step() {
+            out.append(Task(fileId: s.int(0), opSeq: s.int(1), kind: FileCatalog.TaskKind(rawValue: s.int(2)) ?? .index, attempts: Int(s.int(3))))
+        }
+        return out
+    }
+
     private func claim(limit: Int) throws -> [Task] {
         guard let catalog else { return [] }
         let now = Date().timeIntervalSince1970
@@ -747,13 +947,13 @@ public final class ContentIndexer: @unchecked Sendable {
             // A kind this version cannot name could never be marked claimed and would spin the cycle.
             try catalog.db.exec("DELETE FROM content_tasks WHERE kind NOT IN (1, 2)")
             // Deletions first (stale text must disappear), then newest files first (§9.2).
-            let s = try catalog.db.prepare("""
-                SELECT file_id, op_seq, kind, attempts FROM content_tasks WHERE \(Self.claimable)
-                ORDER BY kind DESC, priority DESC LIMIT ?
-                """).bind(now, now, limit)
-            var out: [Task] = []
-            while try s.step() {
-                out.append(Task(fileId: s.int(0), opSeq: s.int(1), kind: FileCatalog.TaskKind(rawValue: s.int(2)) ?? .index, attempts: Int(s.int(3))))
+            // A deletion and the extractions next to it share a batch: a moved or copied file
+            // reuses the text of the one deleted, which goes only when the batch commits.
+            var out = try claimable(now: now, sql: "ORDER BY kind DESC, priority DESC LIMIT ?", limit)
+            // Only deletions (a content folder removed): they extract nothing, so thousands make
+            // one batch — a few index commits instead of one per 64 files.
+            if out.count == limit, out.allSatisfy({ $0.kind == .delete }) {
+                out = try claimable(now: now, sql: "AND kind = 2 ORDER BY priority DESC LIMIT ?", deleteBatchSize)
             }
             let u = try catalog.db.prepare("UPDATE content_tasks SET state = 1, lease_until = ? WHERE file_id = ? AND op_seq = ? AND kind = ?")
             for t in out { try u.bind(now + leaseSeconds, t.fileId, t.opSeq, t.kind.rawValue).run(); u.reset() }
@@ -770,8 +970,9 @@ public final class ContentIndexer: @unchecked Sendable {
         var version: FileVersion
     }
 
-    private func process(_ tasks: [Task]) throws {
-        guard let catalog else { return }
+    /// Returns how many tasks left the queue (indexed, removed, failed or superseded).
+    private func process(_ tasks: [Task]) throws -> Int {
+        guard let catalog else { return 0 }
         var outcomes: [(Task, Staged)] = []
         var toExtract: [Prepared] = []
         for t in tasks {
@@ -783,6 +984,8 @@ public final class ContentIndexer: @unchecked Sendable {
             guard let path = try catalog.path(of: t.fileId), let row = try catalog.row(id: t.fileId) else { outcomes.append((t, .remove)); continue }
             toExtract.append(Prepared(task: t, path: path, info: info, version: FileVersion(size: row.size, mtimeNs: row.mtimeNs, ino: row.ino)))
         }
+        // Progress moves file by file; the batch's commit settles the exact figure.
+        if !outcomes.isEmpty { setState { $0.roundDone += outcomes.count } }
         // Extract in parallel, one file per worker at a time.
         var results = [Staged?](repeating: nil, count: toExtract.count)
         let lock = NSLock()
@@ -801,13 +1004,14 @@ public final class ContentIndexer: @unchecked Sendable {
                 if isLarge { largeFile.unlock() }
                 let bytes = if case .put(let doc) = r { doc.text.utf8.count } else { 0 }
                 extracted.withLock { $0 += bytes }
+                if case .retry = r {} else { setState { $0.roundDone += 1 } }
                 lock.lock(); results[i] = r; lock.unlock()
             }
         }
         if !toExtract.isEmpty { lastExtraction = Date() }
         for (p, r) in zip(toExtract, results) { outcomes.append((p.task, r ?? .retry(after: 0, error: nil, countAttempt: false))) }
         results = []  // `outcomes` is now the only owner of the texts; staging releases them
-        try stageAndCommit(&outcomes)
+        return try stageAndCommit(&outcomes)
     }
 
     private func diskVersion(_ path: String) -> FileVersion? {
@@ -891,8 +1095,11 @@ public final class ContentIndexer: @unchecked Sendable {
 
     // MARK: Commit protocol
 
-    private func stageAndCommit(_ outcomes: inout [(Task, Staged)]) throws {
-        guard let catalog, let writer else { return }
+    /// Returns how many tasks it finished: those that needed no index change, plus the batch
+    /// when it committed.
+    @discardableResult
+    private func stageAndCommit(_ outcomes: inout [(Task, Staged)]) throws -> Int {
+        guard let catalog, let writer else { return 0 }
         var staged: [(Task, Staged)] = []
         var stagedSeq: [UInt64: UInt64] = [:]
         var finished: [(Task, Staged)] = []
@@ -920,7 +1127,8 @@ public final class ContentIndexer: @unchecked Sendable {
             }
         }
         try finishWithoutIndex(finished)
-        guard !staged.isEmpty else { return }
+        let dropped = finished.count(where: { if case .drop = $0.1 { true } else { false } })
+        guard !staged.isEmpty else { return dropped }
         try check(.afterStage)
 
         // Re-validate before publishing: still the latest op.
@@ -938,7 +1146,7 @@ public final class ContentIndexer: @unchecked Sendable {
             committedSeq = try writer.appliedSeqs()
             // Superseded ones are dropped by the next claim's op_seq check.
             try catalog.db.exec("UPDATE content_tasks SET state = 0 WHERE state = 1")
-            return
+            return dropped
         }
 
         let batch = lastBatch + 1
@@ -969,7 +1177,7 @@ public final class ContentIndexer: @unchecked Sendable {
                     try catalog.setMeta("content_batch_pending", nil)
                     try catalog.db.exec("UPDATE content_tasks SET state = 0 WHERE state = 1")
                 }
-                return
+                return dropped
             }
         }
         try check(.afterIndexCommit)
@@ -978,6 +1186,7 @@ public final class ContentIndexer: @unchecked Sendable {
         lastBatch = batch
         setState { $0.committedBatches = batch }
         try check(.afterConfirm)
+        return dropped + staged.count
     }
 
     /// SQLite side of a committed batch: tasks done, per-file content state recorded.
@@ -1035,11 +1244,13 @@ public final class ContentIndexer: @unchecked Sendable {
     /// through tasks this indexer processes, so they are recounted then (and every 30 s).
     private func refreshCounts(full: Bool = true) throws {
         guard let catalog else { return }
-        let p = try catalog.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE state IN (0, 1)")
-        let pending = try p.first { p in Int(p.int(0)) } ?? 0
+        let pending = try pendingCount()
+        workPending = pending
+        let d = try catalog.db.prepare("SELECT COUNT(*) FROM content_tasks WHERE state = 0 AND not_before > ?").bind(Date().timeIntervalSince1970)
+        let delayed = try d.first { d in Int(d.int(0)) } ?? 0
         guard full else {
             catalog.db.resetStatements()
-            setState { $0.pending = pending }
+            setState { $0.pending = pending; $0.delayed = delayed }
             return
         }
         lastFullCount = Date()
@@ -1048,6 +1259,59 @@ public final class ContentIndexer: @unchecked Sendable {
         let i = try catalog.db.prepare("SELECT COUNT(*) FROM files WHERE deleted = 0 AND in_content = 1 AND content_state IN (1, 2, 3)")
         let indexed = try i.first { i in Int(i.int(0)) } ?? 0
         catalog.db.resetStatements()
-        setState { $0.pending = pending; $0.failed = failed; $0.indexed = indexed }
+        setState { $0.pending = pending; $0.delayed = delayed; $0.failed = failed; $0.indexed = indexed }
+    }
+
+    private func pendingCount() throws -> Int {
+        guard let catalog else { return 0 }
+        let p = try catalog.db.prepare("SELECT COUNT(*), COALESCE(SUM(kind = 2), 0) FROM content_tasks WHERE state IN (0, 1)")
+        let (all, removing) = try p.first { p in (Int(p.int(0)), Int(p.int(1))) } ?? (0, 0)
+        setState { $0.removing = removing }
+        return all
+    }
+
+    // MARK: Rounds
+
+    /// Queued and running tasks as the work queue last counted them; its own decisions (settle
+    /// report, rebuild switch, timer) use this, not the displayed figure another queue updates.
+    private var workPending = 0
+    private var roundOpen = false
+    private var roundCommitted = 0
+    /// (time, tasks finished) at each batch of this round, for the speed.
+    private var rateSamples: [(Date, Int)] = []
+    static let rateWindow: TimeInterval = 120
+    /// Shorter spans give a speed that jumps with each file's size.
+    static let rateMinimumSpan: TimeInterval = 15
+
+    private func startRound() throws {
+        roundOpen = true
+        roundCommitted = 0
+        rateSamples = [(Date(), 0)]
+        let pending = try pendingCount()
+        workPending = pending
+        let now = Date().timeIntervalSince1970
+        setState {
+            $0.working = true; $0.roundDone = 0; $0.roundTotal = pending; $0.rate = 0; $0.pending = pending
+            $0.roundStarted = now; $0.roundEnded = 0; $0.roundRemovalsOnly = true
+        }
+    }
+
+    /// After each batch: the exact figures, from the same connection that just committed. One
+    /// small count per batch, watched or not; reports go out only to a viewer (setState).
+    private func finishBatch(_ finished: Int) throws {
+        roundCommitted += finished
+        let pending = try pendingCount()
+        workPending = pending
+        let now = Date()
+        rateSamples.append((now, roundCommitted))
+        if let cut = rateSamples.lastIndex(where: { now.timeIntervalSince($0.0) > Self.rateWindow }), cut > 0 {
+            rateSamples.removeFirst(cut)
+        }
+        var rate = 0.0
+        if let first = rateSamples.first, now.timeIntervalSince(first.0) >= Self.rateMinimumSpan {
+            rate = Double(roundCommitted - first.1) / now.timeIntervalSince(first.0)
+        }
+        let done = roundCommitted
+        setState { $0.roundDone = done; $0.roundTotal = done + pending; $0.pending = pending; $0.rate = rate }
     }
 }
