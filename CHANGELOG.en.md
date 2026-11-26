@@ -4,7 +4,7 @@
 
 User-facing changes, newest version first. Versions follow `major.minor.patch`.
 
-## Unreleased
+## 1.1.0 — 2026-11-26
 
 ### Improved
 
